@@ -16,6 +16,19 @@ export function normalizeVietnameseAnswer(value: string | null | undefined): str
     .trim();
 }
 
+export function normalizeEnglishAnswer(value: string | null | undefined): string {
+  if (!value) return '';
+
+  return value
+    .normalize('NFC')
+    .replace(ZERO_WIDTH_RE, '')
+    .replace(/\u00A0/g, ' ')
+    .toLowerCase()
+    .replace(EDGE_PUNCT_RE, '')
+    .replace(SPACE_RE, ' ')
+    .trim();
+}
+
 export function splitVietnameseAnswers(value: string | null | undefined): string[] {
   if (!value) return [];
 

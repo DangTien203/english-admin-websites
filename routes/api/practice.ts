@@ -4,10 +4,14 @@ import pool from '../../config/db';
 import { ApiRequest } from '../../middlewares/apiAuth';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { apiSuccess, apiError } from '../../utils/apiResponse';
-import { addBatchToBox1 } from '../../utils/leitnerManager';
+import { applyPracticeCorrectAnswers } from '../../utils/leitnerManager';
 import { updateStreak } from '../../utils/streakCalculator';
 import { parsePagination } from '../../utils/pagination';
-import { gradePracticeAnswer, PracticeAnswerGradeResult } from '../../services/answerGradingService';
+import {
+  gradePracticeCard,
+  requiresEnglishMeaning,
+  PracticeAnswerGradeResult,
+} from '../../services/answerGradingService';
 
 const router = Router();
 
@@ -58,7 +62,10 @@ type PracticeMode = (typeof VALID_MODES)[number];
 //  POST /api/v1/practice/session/start
 //
 //  Two selection modes:
-//    1. Random:  body has `limit` only          → ORDER BY RANDOM(), excludes mastered
+//    1. Random:  body has `limit` only          → words NOT yet in Leitner first (random),
+//                                                  then, only if the deck has fewer unlearned
+//                                                  words than `limit`, random words already in
+//                                                  Leitner boxes 1–5 fill the remainder
 //    2. Manual:  body has `card_ids`            → exact ids (must all belong to deck)
 //  If both provided, `card_ids` wins and `limit` is ignored.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -148,9 +155,11 @@ router.post(
         [deck_id, userId, uniqueIds]
       ));
     } else {
-      // Random selection: exclude mastered (box=5), ORDER BY RANDOM().
-      // If deck has fewer than `limit` non-mastered cards, return all of them
-      // (no error — mobile shows snackbar with the actual count).
+      // Random selection: unlearned words (no Leitner card) first, then learned words
+      // (any box 1–5, mastered included) to top up to `limit`. Both groups are random
+      // (RANDOM() tie-break inside each group); the final list is shuffled so new and
+      // review words are mixed. If the deck has fewer than `limit` cards, return all
+      // of them (no error — mobile shows snackbar with the actual count).
       const safeLimit = Math.min(100, Math.max(1, limit ?? 20));
       ({ rows: cards } = await pool.query(
         `SELECT
@@ -169,11 +178,11 @@ router.post(
          LEFT JOIN user_card_progress ucp ON ucp.card_id = c.id AND ucp.user_id = $2
          LEFT JOIN leitner_cards lc ON lc.entry_id = c.entry_id AND lc.user_id = $2
          WHERE c.deck_id = $1
-           AND (lc.id IS NULL OR lc.box_number < 5)
-         ORDER BY RANDOM()
+         ORDER BY (lc.id IS NOT NULL), RANDOM()
          LIMIT $3`,
         [deck_id, userId, safeLimit]
       ));
+      cards = shuffleArray(cards);
     }
 
     // Create DB session
@@ -199,6 +208,9 @@ router.post(
         times_seen: c.times_seen ?? 0,
         times_correct: c.times_correct ?? 0,
         leitner_box_number: c.leitner_box_number ?? null,
+        is_new_word: c.leitner_box_number == null,
+        // Box 4/5 cards must be answered in BOTH Vietnamese and English (`user_answer_en`).
+        requires_english_meaning: requiresEnglishMeaning(c.leitner_box_number),
       })),
       total_count: cards.length,
     });
@@ -209,18 +221,23 @@ router.post(
 //  POST /api/v1/practice/session/answer
 //  body:
 //    Legacy client-graded: { session_id, card_id, correct, time_ms?, user_answer? }
-//    Typed answer:         { session_id, card_id, user_answer, time_ms? }
+//    Typed answer:         { session_id, card_id, user_answer, user_answer_en?, time_ms? }
+//
+//  Cards already in Leitner box 4/5 (`requires_english_meaning` in session/start)
+//  are only `correct` when BOTH `user_answer` (Vietnamese) and `user_answer_en`
+//  (English meaning) are right.
 // ─────────────────────────────────────────────────────────────────────────────
 router.post(
   '/session/answer',
   asyncHandler(async (req: ApiRequest, res: Response) => {
     const userId = req.user!.id;
-    const { session_id, card_id, correct, time_ms, user_answer } = req.body as {
+    const { session_id, card_id, correct, time_ms, user_answer, user_answer_en } = req.body as {
       session_id: string;
       card_id: string;
       correct: boolean;
       time_ms?: number;
       user_answer?: string;
+      user_answer_en?: string;
     };
 
     const hasLegacyCorrect = typeof correct === 'boolean';
@@ -268,9 +285,20 @@ router.post(
       details: {},
     };
 
+    let englishGrading: PracticeAnswerGradeResult | null = null;
+    let needsEnglish = false;
+
     if (!hasLegacyCorrect) {
-      grading = await gradePracticeAnswer(card_id, user_answer ?? '');
-      finalCorrect = grading.correct;
+      const cardGrade = await gradePracticeCard(
+        card_id,
+        userId,
+        user_answer ?? '',
+        typeof user_answer_en === 'string' ? user_answer_en : undefined
+      );
+      grading = cardGrade.vi;
+      englishGrading = cardGrade.en;
+      needsEnglish = cardGrade.requires_english_meaning;
+      finalCorrect = cardGrade.correct;
     }
 
     // Record answer
@@ -293,6 +321,18 @@ router.post(
         JSON.stringify({
           reason_vi: grading.reason_vi,
           ...grading.details,
+          requires_english_meaning: needsEnglish,
+          english: englishGrading
+            ? {
+                user_answer: user_answer_en ?? null,
+                correct: englishGrading.correct,
+                verdict: englishGrading.verdict,
+                confidence: englishGrading.confidence,
+                grading_source: englishGrading.grading_source,
+                matched_answer: englishGrading.matched_answer,
+                reason_vi: englishGrading.reason_vi,
+              }
+            : null,
         }),
       ]
     );
@@ -334,6 +374,18 @@ router.post(
         accepted_answers: grading.accepted_answers,
         reason_vi: grading.reason_vi,
       },
+      requires_english_meaning: needsEnglish,
+      english_grading: englishGrading
+        ? {
+            correct: englishGrading.correct,
+            verdict: englishGrading.verdict,
+            confidence: englishGrading.confidence,
+            grading_source: englishGrading.grading_source,
+            matched_answer: englishGrading.matched_answer,
+            accepted_answers: englishGrading.accepted_answers,
+            reason_vi: englishGrading.reason_vi,
+          }
+        : null,
     });
   })
 );
@@ -382,8 +434,9 @@ router.post(
     const correctCardIds = [...new Set(correctRows.map((r: any) => r.card_id as string))];
     const correctEntryIds = [...new Set(correctRows.map((r: any) => r.entry_id as string))];
 
-    // Batch-add correct entries to Leitner Box 1 (idempotent)
-    const leitnerAdded = await addBatchToBox1(userId, correctEntryIds, session.mode);
+    // Correct entries: new words → Leitner box 1, words already in a box → next box.
+    // (`correct` already means "Vietnamese AND English right" for box 4/5 cards.)
+    const leitnerResult = await applyPracticeCorrectAnswers(userId, correctEntryIds, session.mode);
 
     // Mark session complete
     await pool.query(
@@ -427,7 +480,9 @@ router.post(
         time_total_ms: timeTotalMs,
       },
       xp_earned: xpEarned,
-      leitner_added: leitnerAdded,
+      leitner_added: { added: leitnerResult.added, skipped: leitnerResult.skipped },
+      leitner_advanced: leitnerResult.advanced,
+      leitner_mastered_now: leitnerResult.mastered_now,
       streak_updated: streakUpdated,
       correct_card_ids: correctCardIds,
     });

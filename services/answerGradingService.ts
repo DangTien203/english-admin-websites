@@ -1,10 +1,11 @@
 import pool from '../config/db';
-import { normalizeVietnameseAnswer } from '../utils/answerNormalizer';
+import { normalizeEnglishAnswer, normalizeVietnameseAnswer } from '../utils/answerNormalizer';
 import {
   buildAnswerCandidates,
   matchVietnameseAnswer,
 } from '../utils/answerMatcher';
 import {
+  gradeEnglishMeaning,
   gradeVietnameseAnswer,
   isOpenAIConfigured,
 } from './openaiService';
@@ -30,12 +31,33 @@ export interface PracticeAnswerGradeResult {
   details: Record<string, any>;
 }
 
+type AnswerLang = 'vi' | 'en';
+
 interface EntryForCard {
   card_id: string;
   entry_id: string;
   headword: string;
   pos: string[] | null;
   meaning_vi: string | null;
+  meaning_en: string | null;
+  leitner_box: number | null;
+}
+
+/** Leitner boxes at which BOTH the Vietnamese and the English meaning must be answered. */
+export const ENGLISH_CHECK_MIN_BOX = 4;
+
+export function requiresEnglishMeaning(leitnerBox: number | null | undefined): boolean {
+  return typeof leitnerBox === 'number' && leitnerBox >= ENGLISH_CHECK_MIN_BOX;
+}
+
+export interface PracticeCardGradeResult {
+  /** Overall result: Vietnamese correct AND (when required) English correct. */
+  correct: boolean;
+  leitner_box: number | null;
+  requires_english_meaning: boolean;
+  vi: PracticeAnswerGradeResult;
+  /** null when the card's box does not require the English check. */
+  en: PracticeAnswerGradeResult | null;
 }
 
 interface SemanticCacheRow {
@@ -53,12 +75,32 @@ interface SemanticCacheRow {
 
 const CORRECT_CONFIDENCE_MIN = 0.75;
 
-export async function gradePracticeAnswer(
+/**
+ * Grades a practice-session card. Cards already in Leitner box 4/5 must be
+ * answered correctly in BOTH Vietnamese and English before they can advance;
+ * every other card is graded on the Vietnamese meaning only.
+ */
+export async function gradePracticeCard(
   cardId: string,
-  userAnswer: string
-): Promise<PracticeAnswerGradeResult> {
-  const entry = await fetchEntryForCard(cardId);
-  return gradeEntryAnswer(entry, userAnswer);
+  userId: string,
+  userAnswerVi: string,
+  userAnswerEn?: string
+): Promise<PracticeCardGradeResult> {
+  const entry = await fetchEntryForCard(cardId, userId);
+  const needsEnglish = requiresEnglishMeaning(entry.leitner_box);
+
+  const [vi, en] = await Promise.all([
+    gradeEntryAnswer(entry, userAnswerVi),
+    needsEnglish ? gradeEntryEnglishMeaning(entry, userAnswerEn ?? '') : Promise.resolve(null),
+  ]);
+
+  return {
+    correct: vi.correct && (en === null || en.correct),
+    leitner_box: entry.leitner_box,
+    requires_english_meaning: needsEnglish,
+    vi,
+    en,
+  };
 }
 
 export async function gradeLeitnerAnswer(
@@ -114,9 +156,80 @@ async function gradeEntryAnswer(
     };
   }
 
-  const cached = await fetchSemanticCache(entry.entry_id, normalizedUserAnswer);
+  return gradeSemantic({
+    entry,
+    lang: 'vi',
+    userAnswer,
+    normalizedUserAnswer,
+    referenceAnswers: deterministic.accepted_answers,
+  });
+}
+
+/**
+ * Grades the English-meaning answer required for Leitner box 4/5 cards.
+ * The learner explains the headword in English (definition / paraphrase / synonym).
+ */
+async function gradeEntryEnglishMeaning(
+  entry: EntryForCard,
+  userAnswer: string
+): Promise<PracticeAnswerGradeResult> {
+  const normalizedUserAnswer = normalizeEnglishAnswer(userAnswer);
+  const referenceAnswers = await fetchEnglishDefinitions(entry);
+
+  const miss = (reason_vi: string): PracticeAnswerGradeResult => ({
+    correct: false,
+    verdict: 'wrong',
+    confidence: 0,
+    grading_source: 'deterministic_miss',
+    matched_answer: null,
+    accepted_answers: referenceAnswers,
+    reason_vi,
+    details: { normalized_user_answer: normalizedUserAnswer },
+  });
+
+  if (!normalizedUserAnswer) return miss('Bạn chưa nhập nghĩa tiếng Anh.');
+
+  // Repeating the headword is not an explanation of it — skip the paid LLM call.
+  if (normalizedUserAnswer === normalizeEnglishAnswer(entry.headword)) {
+    return miss('Hãy giải thích nghĩa bằng tiếng Anh, không chỉ lặp lại từ.');
+  }
+
+  const exact = referenceAnswers.find((ref) => normalizeEnglishAnswer(ref) === normalizedUserAnswer);
+  if (exact) {
+    return {
+      correct: true,
+      verdict: 'correct',
+      confidence: 1,
+      grading_source: 'exact',
+      matched_answer: exact,
+      accepted_answers: referenceAnswers,
+      reason_vi: 'Khớp với định nghĩa tiếng Anh.',
+      details: { normalized_user_answer: normalizedUserAnswer },
+    };
+  }
+
+  return gradeSemantic({
+    entry,
+    lang: 'en',
+    userAnswer,
+    normalizedUserAnswer,
+    referenceAnswers,
+  });
+}
+
+/** Cache → OpenAI fallback shared by the Vietnamese and English meaning checks. */
+async function gradeSemantic(input: {
+  entry: EntryForCard;
+  lang: AnswerLang;
+  userAnswer: string;
+  normalizedUserAnswer: string;
+  referenceAnswers: string[];
+}): Promise<PracticeAnswerGradeResult> {
+  const { entry, lang, userAnswer, normalizedUserAnswer, referenceAnswers } = input;
+
+  const cached = await fetchSemanticCache(entry.entry_id, lang, normalizedUserAnswer);
   if (cached) {
-    return fromSemanticCache(cached, deterministic.accepted_answers);
+    return fromSemanticCache(cached, referenceAnswers);
   }
 
   if (!isOpenAIConfigured()) {
@@ -126,18 +239,20 @@ async function gradeEntryAnswer(
       confidence: 0,
       grading_source: 'openai_unavailable',
       matched_answer: null,
-      accepted_answers: deterministic.accepted_answers,
+      accepted_answers: referenceAnswers,
       reason_vi: 'Dịch vụ chấm ngữ nghĩa chưa được cấu hình.',
       details: { normalized_user_answer: normalizedUserAnswer },
     };
   }
 
   try {
-    const systemPrompt = await fetchPromptTemplate();
-    const grade = await gradeVietnameseAnswer({
+    const systemPrompt = await fetchPromptTemplate(
+      lang === 'vi' ? 'vietnamese_answer_grader' : 'english_meaning_grader'
+    );
+    const grade = await (lang === 'vi' ? gradeVietnameseAnswer : gradeEnglishMeaning)({
       headword: entry.headword,
       pos: entry.pos ?? [],
-      expectedAnswers: deterministic.accepted_answers,
+      expectedAnswers: referenceAnswers,
       userAnswer,
       systemPrompt,
     });
@@ -148,13 +263,14 @@ async function gradeEntryAnswer(
 
     await saveSemanticCache({
       entryId: entry.entry_id,
+      lang,
       normalizedUserAnswer,
       userAnswer,
       verdict,
       confidence,
       reasonVi: grade.output.reason_vi,
       matchedAnswer: grade.output.matched_answer,
-      acceptedAnswers: deterministic.accepted_answers,
+      acceptedAnswers: referenceAnswers,
       modelUsed: grade.model_used,
       latencyMs: grade.latency_ms,
       tokensIn: grade.tokens_in,
@@ -162,7 +278,7 @@ async function gradeEntryAnswer(
       costUsd: grade.cost_usd,
     });
 
-    if (correct && confidence >= 0.9) {
+    if (lang === 'vi' && correct && confidence >= 0.9) {
       await rememberHighConfidenceAlias(entry.entry_id, userAnswer, normalizedUserAnswer);
     }
 
@@ -172,7 +288,7 @@ async function gradeEntryAnswer(
       confidence,
       grading_source: 'openai',
       matched_answer: grade.output.matched_answer,
-      accepted_answers: deterministic.accepted_answers,
+      accepted_answers: referenceAnswers,
       reason_vi: grade.output.reason_vi,
       details: {
         normalized_user_answer: normalizedUserAnswer,
@@ -190,7 +306,7 @@ async function gradeEntryAnswer(
       confidence: 0,
       grading_source: 'openai_unavailable',
       matched_answer: null,
-      accepted_answers: deterministic.accepted_answers,
+      accepted_answers: referenceAnswers,
       reason_vi: 'Không thể chấm ngữ nghĩa lúc này. Vui lòng thử lại.',
       details: {
         normalized_user_answer: normalizedUserAnswer,
@@ -200,13 +316,15 @@ async function gradeEntryAnswer(
   }
 }
 
-async function fetchEntryForCard(cardId: string): Promise<EntryForCard> {
+async function fetchEntryForCard(cardId: string, userId: string): Promise<EntryForCard> {
   const { rows } = await pool.query<EntryForCard>(
-    `SELECT c.id AS card_id, c.entry_id, de.headword, de.pos, de.meaning_vi
+    `SELECT c.id AS card_id, c.entry_id, de.headword, de.pos, de.meaning_vi, de.meaning_en,
+            lc.box_number AS leitner_box
        FROM cards c
        JOIN dictionary_entries de ON de.id = c.entry_id
+       LEFT JOIN leitner_cards lc ON lc.entry_id = c.entry_id AND lc.user_id = $2
       WHERE c.id = $1`,
-    [cardId]
+    [cardId, userId]
   );
 
   if (rows.length === 0) {
@@ -221,7 +339,8 @@ async function fetchEntryForLeitnerCard(
   userId: string
 ): Promise<EntryForCard> {
   const { rows } = await pool.query<EntryForCard>(
-    `SELECT lc.id AS card_id, lc.entry_id, de.headword, de.pos, de.meaning_vi
+    `SELECT lc.id AS card_id, lc.entry_id, de.headword, de.pos, de.meaning_vi, de.meaning_en,
+            lc.box_number AS leitner_box
        FROM leitner_cards lc
        JOIN dictionary_entries de ON de.id = lc.entry_id
       WHERE lc.id = $1 AND lc.user_id = $2`,
@@ -247,6 +366,27 @@ async function fetchSenseDefinitions(entryId: string): Promise<string[]> {
   return rows.map((row) => row.definition_vi);
 }
 
+/** Reference English definitions: per-sense definitions first, then the entry-level meaning. */
+async function fetchEnglishDefinitions(entry: EntryForCard): Promise<string[]> {
+  const { rows } = await pool.query<{ definition_en: string }>(
+    `SELECT definition_en
+       FROM entry_senses
+      WHERE entry_id = $1 AND definition_en IS NOT NULL AND TRIM(definition_en) <> ''
+      ORDER BY sense_order ASC`,
+    [entry.entry_id]
+  );
+  const definitions = rows.map((row) => row.definition_en);
+  if (entry.meaning_en && entry.meaning_en.trim()) definitions.push(entry.meaning_en);
+
+  const seen = new Set<string>();
+  return definitions.filter((def) => {
+    const key = normalizeEnglishAnswer(def);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 async function fetchActiveAliases(entryId: string): Promise<string[]> {
   const { rows } = await pool.query<{ answer_text: string }>(
     `SELECT answer_text
@@ -260,14 +400,15 @@ async function fetchActiveAliases(entryId: string): Promise<string[]> {
 
 async function fetchSemanticCache(
   entryId: string,
+  lang: AnswerLang,
   normalizedAnswer: string
 ): Promise<SemanticCacheRow | null> {
   const { rows } = await pool.query<SemanticCacheRow>(
     `SELECT verdict, confidence, reason_vi, matched_answer, accepted_answers,
             model_used, latency_ms, tokens_in, tokens_out, cost_usd
        FROM answer_semantic_cache
-      WHERE entry_id = $1 AND normalized_answer = $2`,
-    [entryId, normalizedAnswer]
+      WHERE entry_id = $1 AND lang = $2 AND normalized_answer = $3`,
+    [entryId, lang, normalizedAnswer]
   );
   return rows[0] ?? null;
 }
@@ -299,19 +440,21 @@ function fromSemanticCache(
   };
 }
 
-async function fetchPromptTemplate(): Promise<string | undefined> {
+async function fetchPromptTemplate(name: string): Promise<string | undefined> {
   const { rows } = await pool.query<{ system_prompt: string }>(
     `SELECT system_prompt
        FROM prompt_templates
-      WHERE name = 'vietnamese_answer_grader' AND status = 'active'
+      WHERE name = $1 AND status = 'active'
       ORDER BY version DESC
-      LIMIT 1`
+      LIMIT 1`,
+    [name]
   );
   return rows[0]?.system_prompt;
 }
 
 async function saveSemanticCache(input: {
   entryId: string;
+  lang: AnswerLang;
   normalizedUserAnswer: string;
   userAnswer: string;
   verdict: AnswerVerdict;
@@ -327,10 +470,10 @@ async function saveSemanticCache(input: {
 }): Promise<void> {
   await pool.query(
     `INSERT INTO answer_semantic_cache
-       (entry_id, normalized_answer, user_answer, verdict, confidence, reason_vi,
+       (entry_id, lang, normalized_answer, user_answer, verdict, confidence, reason_vi,
         matched_answer, accepted_answers, model_used, latency_ms, tokens_in, tokens_out, cost_usd)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-     ON CONFLICT (entry_id, normalized_answer)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+     ON CONFLICT (entry_id, lang, normalized_answer)
      DO UPDATE SET
        user_answer      = EXCLUDED.user_answer,
        verdict          = EXCLUDED.verdict,
@@ -346,6 +489,7 @@ async function saveSemanticCache(input: {
        updated_at       = NOW()`,
     [
       input.entryId,
+      input.lang,
       input.normalizedUserAnswer,
       input.userAnswer,
       input.verdict,

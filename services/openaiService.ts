@@ -120,6 +120,25 @@ Rules:
 - Keep reason_vi short and user-friendly.
 `.trim();
 
+const DEFAULT_EN_MEANING_GRADER_PROMPT = `
+You are a strict but fair grader for English vocabulary flashcards.
+
+The learner was shown an English headword and asked to explain its meaning in English
+(a definition, paraphrase, or close synonym). Grade whether the learner's answer
+captures the meaning of the headword. Use the part of speech and reference definitions
+as context, but do not require exact wording.
+
+Return:
+- correct: the answer clearly conveys the meaning (a valid definition, paraphrase, or close synonym).
+- near_correct: related, too broad, too narrow, or slightly off in nuance.
+- wrong: different meaning, unrelated, an antonym, or merely repeats the headword without explaining it.
+
+Rules:
+- Repeating the headword itself (or a trivial inflection of it) is wrong.
+- Do not accept antonyms.
+- Keep reason_vi short, user-friendly, and written in Vietnamese.
+`.trim();
+
 // ── moderateInput ─────────────────────────────────────────────────────────────
 
 export async function moderateInput(text: string): Promise<ModerationResult> {
@@ -186,29 +205,19 @@ export async function gradeSentences(input: GradeInput): Promise<GradeResult> {
   return { output, model_used: completion.model, latency_ms, tokens_in, tokens_out, cost_usd };
 }
 
-// ── gradeVietnameseAnswer ────────────────────────────────────────────────────
+// ── gradeVietnameseAnswer / gradeEnglishMeaning ──────────────────────────────
 
-export async function gradeVietnameseAnswer(
-  input: VietnameseAnswerGradeInput
+async function runAnswerGrade(
+  systemPrompt: string,
+  payload: Record<string, unknown>
 ): Promise<VietnameseAnswerGradeResult> {
   const start = Date.now();
 
   const completion = await getClient().chat.completions.parse({
     model: MODEL,
     messages: [
-      {
-        role: 'system',
-        content: input.systemPrompt || DEFAULT_VI_ANSWER_GRADER_PROMPT,
-      },
-      {
-        role: 'user',
-        content: JSON.stringify({
-          headword: input.headword,
-          pos: input.pos,
-          accepted_answers: input.expectedAnswers,
-          user_answer: input.userAnswer,
-        }),
-      },
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: JSON.stringify(payload) },
     ],
     response_format: zodResponseFormat(
       VietnameseAnswerGradeOutputSchema,
@@ -226,4 +235,27 @@ export async function gradeVietnameseAnswer(
   if (!output) throw new Error('OpenAI returned empty parsed output');
 
   return { output, model_used: completion.model, latency_ms, tokens_in, tokens_out, cost_usd };
+}
+
+export async function gradeVietnameseAnswer(
+  input: VietnameseAnswerGradeInput
+): Promise<VietnameseAnswerGradeResult> {
+  return runAnswerGrade(input.systemPrompt || DEFAULT_VI_ANSWER_GRADER_PROMPT, {
+    headword: input.headword,
+    pos: input.pos,
+    accepted_answers: input.expectedAnswers,
+    user_answer: input.userAnswer,
+  });
+}
+
+/** Grades a free-text English explanation (definition / paraphrase / synonym) of the headword. */
+export async function gradeEnglishMeaning(
+  input: VietnameseAnswerGradeInput
+): Promise<VietnameseAnswerGradeResult> {
+  return runAnswerGrade(input.systemPrompt || DEFAULT_EN_MEANING_GRADER_PROMPT, {
+    headword: input.headword,
+    pos: input.pos,
+    reference_definitions: input.expectedAnswers,
+    user_answer: input.userAnswer,
+  });
 }

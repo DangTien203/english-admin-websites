@@ -68,6 +68,113 @@ export async function addBatchToBox1(
   return { added, skipped: entryIds.length - added };
 }
 
+export interface PracticeLeitnerResult {
+  /** Entries that were not in Leitner yet and were inserted into box 1. */
+  added: number;
+  /** Entries already in Leitner that moved up one box (box 5 stays at 5). */
+  advanced: number;
+  /** Entries that reached box 5 for the first time in this batch. */
+  mastered_now: number;
+  /** Legacy shape for `leitner_added.skipped`: entries that already existed. */
+  skipped: number;
+}
+
+/**
+ * Applies the correct answers of a practice session to Leitner in one transaction:
+ *  - entry not in Leitner  → inserted into box 1
+ *  - entry already in a box → moved up one box (box 5 stays in box 5, interval refreshed)
+ * Callers must only pass entries that passed every check required for their current box
+ * (box 4/5 need both the Vietnamese and the English meaning).
+ */
+export async function applyPracticeCorrectAnswers(
+  userId: string,
+  entryIds: string[],
+  mode: string
+): Promise<PracticeLeitnerResult> {
+  const result: PracticeLeitnerResult = { added: 0, advanced: 0, mastered_now: 0, skipped: 0 };
+  if (entryIds.length === 0) return result;
+
+  const intervals = await getIntervals();
+  const dueFor = (box: number) => new Date(Date.now() + intervals[box - 1] * 24 * 60 * 60 * 1000);
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Lock existing cards first so the box we advance from can't change underneath us.
+    const { rows: existing } = await client.query(
+      `SELECT id, entry_id, box_number
+         FROM leitner_cards
+        WHERE user_id = $1 AND entry_id = ANY($2::uuid[])
+        FOR UPDATE`,
+      [userId, entryIds]
+    );
+
+    if (existing.length > 0) {
+      const ids: string[] = [];
+      const oldBoxes: number[] = [];
+      const newBoxes: number[] = [];
+      const dueDates: Date[] = [];
+
+      for (const row of existing) {
+        const oldBox: number = row.box_number;
+        const newBox = Math.min(oldBox + 1, 5);
+        ids.push(row.id);
+        oldBoxes.push(oldBox);
+        newBoxes.push(newBox);
+        dueDates.push(dueFor(newBox));
+        if (newBox === 5 && oldBox < 5) result.mastered_now++;
+      }
+
+      await client.query(
+        `UPDATE leitner_cards lc
+            SET box_number       = v.new_box,
+                due_at           = v.due_at,
+                last_reviewed_at = now(),
+                correct_streak   = COALESCE(lc.correct_streak, 0) + 1,
+                total_reviews    = COALESCE(lc.total_reviews, 0) + 1,
+                updated_at       = now()
+           FROM unnest($1::uuid[], $2::int[], $3::timestamptz[]) AS v(id, new_box, due_at)
+          WHERE lc.id = v.id`,
+        [ids, newBoxes, dueDates]
+      );
+
+      await client.query(
+        `INSERT INTO leitner_reviews (leitner_card_id, user_id, correct, old_box, new_box)
+         SELECT v.id, $1::uuid, true, v.old_box, v.new_box
+           FROM unnest($2::uuid[], $3::int[], $4::int[]) AS v(id, old_box, new_box)`,
+        [userId, ids, oldBoxes, newBoxes]
+      );
+
+      result.advanced = existing.length;
+    }
+
+    const existingEntryIds = new Set(existing.map((row: any) => row.entry_id as string));
+    const newEntryIds = entryIds.filter((id) => !existingEntryIds.has(id));
+
+    if (newEntryIds.length > 0) {
+      const { rows: inserted } = await client.query(
+        `INSERT INTO leitner_cards
+           (user_id, entry_id, box_number, due_at, source, added_from_mode)
+         SELECT $1, unnest($2::uuid[]), 1, $3, 'practice', $4
+         ON CONFLICT (user_id, entry_id) DO NOTHING
+         RETURNING id`,
+        [userId, newEntryIds, dueFor(1), mode]
+      );
+      result.added = inserted.length;
+    }
+
+    await client.query('COMMIT');
+    result.skipped = entryIds.length - result.added;
+    return result;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 export async function moveCard(
   leitnerCardId: string,
   userId: string,

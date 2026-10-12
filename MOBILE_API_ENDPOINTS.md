@@ -550,8 +550,8 @@ All practice endpoints are mounted behind `requireApiAuth`.
   - `card_ids?`: uuid array, min 1, max 200
 - Behavior:
   - If `card_ids` is present, manual selection wins and `limit` is ignored.
-  - Random selection excludes mastered Leitner box 5 cards.
-- Returns: `{ session_id, mode, cards, total_count }`
+  - Random selection picks words NOT yet in the user's Leitner boxes first (random). Only if the deck has fewer unlearned words than `limit` is the remainder filled with random words already in Leitner (boxes 1-5, mastered included). The returned list is shuffled.
+- Returns: `{ session_id, mode, cards, total_count }`; each card also has `leitner_box_number` (null = new word), `is_new_word`, and `requires_english_meaning` (true for box 4/5).
 - Errors:
   - `404 DECK_NOT_FOUND`
   - `400 INVALID_CARDS`
@@ -564,8 +564,11 @@ All practice endpoints are mounted behind `requireApiAuth`.
   - `card_id`: string
   - `correct`: boolean
   - `time_ms?`: number
-  - `user_answer?`: string
-- Returns: progress counters.
+  - `user_answer?`: string (Vietnamese meaning; server-graded when `correct` is omitted)
+  - `user_answer_en?`: string (English meaning/definition; required when the card has `requires_english_meaning: true`)
+- Behavior:
+  - Cards in Leitner box 4/5 are `correct` only when BOTH the Vietnamese and the English meaning are right. A missing `user_answer_en` counts as wrong.
+- Returns: progress counters, `grading` (`grading.correct` is the overall result), `requires_english_meaning`, and `english_grading` (null unless the English check applied).
 - Errors:
   - `404 SESSION_NOT_FOUND`
   - `400 SESSION_ALREADY_COMPLETED`
@@ -575,7 +578,8 @@ All practice endpoints are mounted behind `requireApiAuth`.
 
 - Auth: Auth
 - Body: `{ session_id: string }`
-- Returns: summary, `xp_earned`, Leitner additions, streak update flag, correct card ids.
+- Behavior: correctly answered words that are not in Leitner go to box 1; words already in a box move up one box (box 5 stays in box 5).
+- Returns: summary, `xp_earned`, `leitner_added` (`{ added, skipped }`), `leitner_advanced`, `leitner_mastered_now`, streak update flag, correct card ids.
 - Errors:
   - `404 SESSION_NOT_FOUND`
   - `400 SESSION_ALREADY_COMPLETED`
