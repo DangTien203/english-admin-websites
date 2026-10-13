@@ -8,11 +8,8 @@ import { s, n, b, a } from '../../utils/safeResponse';
 import { parsePagination } from '../../utils/pagination';
 import { getActiveSubscription } from '../../utils/subscriptionHelper';
 import { translateText } from '../../services/translationService';
-import {
-  normalizeWord,
-  translateWord,
-  TranslationFailedError,
-} from '../../services/wordTranslationService';
+import { normalizeWord } from '../../services/wordTranslationService';
+import { getWordLookupService } from '../../services/lookup';
 
 const router = Router();
 
@@ -742,82 +739,50 @@ router.post(
       [userId, ebookId]
     ).catch((err) => console.error('[ebooks] words_looked_up update failed:', err));
 
-    // Step 1 — try dictionary.
-    const { rows } = await pool.query(
-      `${FULL_ENTRY_SQL}
-       WHERE e.published = TRUE
-         AND (LOWER(e.headword) = $1 OR LOWER(e.lemma) = $1)
-       ORDER BY
-         CASE WHEN LOWER(e.headword) = $1 THEN 0 ELSE 1 END
-       LIMIT 1`,
-      [normalized.normalized]
-    );
+    // F4–F12 live in services/lookup (docs/lookup-spec.md §5): local dictionary (headword, lemma,
+    // word_forms, local inflections) → fallback flag → per-user limit → Google + Free Dictionary → merge.
+    const result = await getWordLookupService().lookup({
+      userId,
+      ebookId: String(ebookId),
+      paragraphId: verifiedParagraphId,
+      word: { normalized: normalized.normalized, display: normalized.display },
+    });
 
-    if (rows.length > 0) {
-      const entry = rows[0];
+    switch (result.kind) {
+      case 'dictionary':
+        // Flat shape with `source` discriminator at top level (no entry wrapper).
+        // Note: spread entry first then assign `source` so the discriminator wins
+        // over the dictionary entry's own `source` column ('manual', 'oxford', ...).
+        return apiSuccess(res, {
+          ...result.entry,
+          source: 'dictionary',
+          ...(result.matchedForm ? { matched_form: result.matchedForm } : {}),
+          lookup_context: lookupContext,
+        });
 
-      void pool.query(
-        `INSERT INTO word_lookups
-           (user_id, entry_id, word_text, source, lookup_result, ebook_id, paragraph_id)
-         VALUES ($1, $2, $3, 'ebook', 'dictionary', $4, $5)`,
-        [userId, entry.id, normalized.display, ebookId, verifiedParagraphId]
-      ).catch((err) => console.error('[ebooks] word_lookups insert failed:', err));
+      case 'temporary':
+        // A temporary result must never be cached by a proxy or the client (spec §4.4).
+        res.set('Cache-Control', 'no-store');
+        return apiSuccess(res, { ...result.body, lookup_context: lookupContext });
 
-      // Flat shape with `source` discriminator at top level (no entry wrapper).
-      // Note: spread entry first then assign `source` so the discriminator wins
-      // over the dictionary entry's own `source` column ('manual', 'oxford', ...).
-      return apiSuccess(res, {
-        ...entry,
-        source: 'dictionary',
-        lookup_context: lookupContext,
-      });
-    }
+      case 'rate_limited':
+        res.set('Cache-Control', 'no-store');
+        res.set('Retry-After', String(result.retryAfterSeconds));
+        return apiError(res, 429, 'LOOKUP_RATE_LIMITED', 'Bạn tra từ quá nhanh. Vui lòng thử lại sau ít giây.');
 
-    // Step 2 — fallback to translation if enabled.
-    if (process.env.TRANSLATION_FALLBACK_ENABLED !== 'true') {
-      return apiError(res, 404, 'ENTRY_NOT_FOUND', `Không tìm thấy từ "${normalized.display}" trong từ điển`);
-    }
-
-    try {
-      const translation = await translateWord(normalized.normalized, normalized.display);
-
-      void pool.query(
-        `INSERT INTO word_lookups
-           (user_id, entry_id, word_text, source, lookup_result, ebook_id, paragraph_id)
-         VALUES ($1, NULL, $2, 'ebook', 'translation', $3, $4)`,
-        [userId, normalized.display, ebookId, verifiedParagraphId]
-      ).catch((err) => console.error('[ebooks] word_lookups insert failed:', err));
-
-      return apiSuccess(res, {
-        source: 'translation',
-        word: translation.word,
-        translation_vi: translation.translation_vi,
-        phonetic: translation.phonetic,
-        audio_url: translation.audio_url,
-        pos: translation.pos,
-        definitions_en: translation.definitions_en,
-        examples: translation.examples,
-        providers: translation.providers,
-        cached: translation.cached,
-        lookup_context: lookupContext,
-      });
-    } catch (err) {
-      if (err instanceof TranslationFailedError) {
-        void pool.query(
-          `INSERT INTO word_lookups
-             (user_id, entry_id, word_text, source, lookup_result, ebook_id, paragraph_id)
-           VALUES ($1, NULL, $2, 'ebook', 'not_found', $3, $4)`,
-          [userId, normalized.display, ebookId, verifiedParagraphId]
-        ).catch((logErr) => console.error('[ebooks] word_lookups insert failed:', logErr));
-
+      case 'unavailable':
+        res.set('Cache-Control', 'no-store');
         return apiError(
           res,
           503,
           'TRANSLATION_UNAVAILABLE',
           'Cannot translate this word right now. Please try again later.'
         );
-      }
-      throw err;
+
+      case 'not_found':
+      default:
+        res.set('Cache-Control', 'no-store');
+        return apiError(res, 404, 'ENTRY_NOT_FOUND', `Không tìm thấy từ "${normalized.display}" trong từ điển`);
     }
   })
 );
