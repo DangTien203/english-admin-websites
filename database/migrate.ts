@@ -60,6 +60,8 @@ const migrations: MigrationDef[] = [
   { key: '28_user_notifications',     name: 'Phase 11: user_notifications + user_fcm_tokens',          file: './migrations/28_user_notifications' },
   { key: '29_answer_grading',         name: 'Typed Vietnamese answer aliases + semantic grading cache', file: './migrations/29_answer_grading' },
   { key: '30_answer_cache_lang',      name: 'Language dimension for answer_semantic_cache (vi/en)',    file: './migrations/30_answer_cache_lang' },
+  { key: '31_leitner_review_sessions', name: 'Leitner review sessions (box 4/5 checked on both meanings)', file: './migrations/31_leitner_review_sessions' },
+  { key: '32_leitner_session_box',    name: 'Leitner review sessions can target one box',              file: './migrations/32_leitner_session_box' },
 ];
 
 /**

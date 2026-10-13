@@ -3,6 +3,7 @@ import { z } from 'zod';
 import NodeCache from 'node-cache';
 import pool from '../../config/db';
 import { ApiRequest } from '../../middlewares/apiAuth';
+import { validateBody } from '../../middlewares/validateBody';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { apiSuccess, apiError } from '../../utils/apiResponse';
 import { getIntervals, moveCard } from '../../utils/leitnerManager';
@@ -15,7 +16,18 @@ import {
   NoExamplesError,
 } from '../../utils/questionHelpers';
 import { buildAcceptedAnswerTexts } from '../../utils/answerMatcher';
-import { gradeLeitnerAnswer, PracticeAnswerGradeResult } from '../../services/answerGradingService';
+import {
+  gradeLeitnerAnswer,
+  requiresEnglishMeaning,
+  PracticeAnswerGradeResult,
+} from '../../services/answerGradingService';
+import {
+  LeitnerSessionError,
+  answerReviewStep,
+  completeReviewSession,
+  getReviewSession,
+  startReviewSession,
+} from '../../services/leitnerSessionService';
 
 const statsCache = new NodeCache({ stdTTL: 300, checkperiod: 60 });
 
@@ -281,6 +293,10 @@ router.get(
 //  body:
 //    Legacy client-graded: { leitner_card_id, correct, time_ms? }
 //    Typed answer:         { leitner_card_id, user_answer, time_ms? }
+//
+//  Single-check cards only (box 1–3). Box 4/5 cards must be checked on BOTH the
+//  English and the Vietnamese meaning, spaced apart, which only works inside a
+//  review session (POST /leitner/session/start).
 // ─────────────────────────────────────────────────────────────────────────────
 router.post(
   '/review',
@@ -295,6 +311,22 @@ router.post(
 
     if (!leitner_card_id || typeof leitner_card_id !== 'string') {
       return apiError(res, 400, 'VALIDATION_ERROR', 'leitner_card_id là bắt buộc');
+    }
+
+    const { rows: cardRows } = await pool.query(
+      `SELECT box_number FROM leitner_cards WHERE id = $1 AND user_id = $2`,
+      [leitner_card_id, userId]
+    );
+    if (cardRows.length === 0) {
+      return apiError(res, 404, 'CARD_NOT_FOUND', 'Leitner card không tồn tại');
+    }
+    if (requiresEnglishMeaning(cardRows[0].box_number)) {
+      return apiError(
+        res,
+        409,
+        'REVIEW_SESSION_REQUIRED',
+        'Thẻ ở box 4/5 phải kiểm tra cả nghĩa tiếng Anh và tiếng Việt trong một phiên ôn tập (POST /api/v1/leitner/session/start)'
+      );
     }
 
     const hasTypedAnswer = typeof user_answer === 'string';
@@ -357,6 +389,123 @@ router.post(
             reason_vi: null,
           },
     });
+  })
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Review sessions — box 4/5 words are checked on BOTH meanings
+//
+//  Flow:
+//    1. POST /session/start    → server picks the due words and returns the ordered steps.
+//                                A box 4/5 word appears twice (English meaning, then Vietnamese
+//                                meaning, ≥ 2 other steps in between); other words once.
+//    2. POST /session/answer   → answer the steps in order. A word's box moves once, after its
+//                                last step: up one box if every check was right, else to box 1.
+//    3. POST /session/complete → summary counted per original word (10 words → 10, not 13).
+//    GET  /session/:id         → resume / re-sync.
+// ─────────────────────────────────────────────────────────────────────────────
+const MAX_USER_ANSWER_LENGTH = 500;
+
+const sessionStartSchema = z.object({
+  limit: z.number().int().min(1).max(100).optional(),
+  box_number: z.number().int().min(1).max(5).optional(),
+});
+
+const sessionAnswerSchema = z
+  .object({
+    session_id: z.string().uuid(),
+    step_index: z.number().int().min(0),
+    user_answer: z.string().max(MAX_USER_ANSWER_LENGTH).optional(),
+    correct: z.boolean().optional(),
+    time_ms: z.number().int().min(0).max(3_600_000).optional(),
+  })
+  .refine((b) => b.user_answer !== undefined || b.correct !== undefined, {
+    message: 'user_answer hoặc correct là bắt buộc',
+  });
+
+const sessionCompleteSchema = z.object({
+  session_id: z.string().uuid(),
+});
+
+function sendSessionError(res: Response, err: unknown) {
+  if (err instanceof LeitnerSessionError) {
+    return apiError(res, err.status, err.code, err.message, err.details);
+  }
+  throw err;
+}
+
+// ── POST /api/v1/leitner/session/start ────────────────────────────────────────
+//  body: { limit?, box_number? }
+//    limit      counts words (default 20, max 100), not steps.
+//    box_number omitted → "review due now" (due cards only);
+//               1–5     → study that box on demand (cards of the box, due or not).
+router.post(
+  '/session/start',
+  validateBody(sessionStartSchema),
+  asyncHandler(async (req: ApiRequest, res: Response) => {
+    const { limit, box_number } = req.body as z.infer<typeof sessionStartSchema>;
+    try {
+      return apiSuccess(res, await startReviewSession(req.user!.id, limit ?? 20, box_number));
+    } catch (err) {
+      return sendSessionError(res, err);
+    }
+  })
+);
+
+// ── POST /api/v1/leitner/session/answer ───────────────────────────────────────
+//  body: { session_id, step_index, user_answer?, correct?, time_ms? }
+//  Box 4/5 steps need `user_answer` (the meaning asked by the step's `check`);
+//  `correct` (client-graded) is only accepted for single-check words.
+router.post(
+  '/session/answer',
+  validateBody(sessionAnswerSchema),
+  asyncHandler(async (req: ApiRequest, res: Response) => {
+    const body = req.body as z.infer<typeof sessionAnswerSchema>;
+    try {
+      return apiSuccess(
+        res,
+        await answerReviewStep(req.user!.id, {
+          sessionId: body.session_id,
+          stepIndex: body.step_index,
+          userAnswer: body.user_answer,
+          correct: body.correct,
+          timeMs: body.time_ms,
+        })
+      );
+    } catch (err) {
+      return sendSessionError(res, err);
+    }
+  })
+);
+
+// ── POST /api/v1/leitner/session/complete ─────────────────────────────────────
+//  body: { session_id }
+router.post(
+  '/session/complete',
+  validateBody(sessionCompleteSchema),
+  asyncHandler(async (req: ApiRequest, res: Response) => {
+    const { session_id } = req.body as z.infer<typeof sessionCompleteSchema>;
+    try {
+      return apiSuccess(res, await completeReviewSession(req.user!.id, session_id));
+    } catch (err) {
+      return sendSessionError(res, err);
+    }
+  })
+);
+
+// ── GET /api/v1/leitner/session/:id ───────────────────────────────────────────
+router.get(
+  '/session/:id',
+  asyncHandler(async (req: ApiRequest, res: Response) => {
+    const id = z.string().uuid().safeParse(req.params.id);
+    if (!id.success) {
+      return apiError(res, 404, 'SESSION_NOT_FOUND', 'Session không tồn tại');
+    }
+    try {
+      return apiSuccess(res, await getReviewSession(req.user!.id, id.data));
+    } catch (err) {
+      return sendSessionError(res, err);
+    }
   })
 );
 

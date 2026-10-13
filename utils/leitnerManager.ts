@@ -175,21 +175,43 @@ export async function applyPracticeCorrectAnswers(
   }
 }
 
+/** Anything that can run a query: the shared pool or a client inside a transaction. */
+export interface Queryable {
+  query(text: string, values?: any[]): Promise<{ rows: any[] }>;
+}
+
+export interface MoveCardOptions {
+  /** Run inside the caller's transaction instead of the shared pool. */
+  db?: Queryable;
+  /**
+   * Refuse (409 CARD_CHANGED) when the card's total_reviews differs from this value,
+   * i.e. it was already reviewed since the caller looked at it.
+   */
+  expectedTotalReviews?: number | null;
+}
+
 export async function moveCard(
   leitnerCardId: string,
   userId: string,
   correct: boolean,
-  timeMsArg?: number
+  timeMsArg?: number,
+  opts: MoveCardOptions = {}
 ): Promise<{ newBoxNumber: number; nextDueAt: Date; masteredNow: boolean }> {
+  const db: Queryable = opts.db ?? pool;
   const intervals = await getIntervals();
 
-  const { rows } = await pool.query(
-    `SELECT id, box_number FROM leitner_cards WHERE id = $1 AND user_id = $2`,
+  const { rows } = await db.query(
+    `SELECT id, box_number, COALESCE(total_reviews, 0) AS total_reviews
+       FROM leitner_cards WHERE id = $1 AND user_id = $2
+        FOR UPDATE`,
     [leitnerCardId, userId]
   );
   if (rows.length === 0) {
     const err = Object.assign(new Error('CARD_NOT_FOUND'), { statusCode: 404 });
     throw err;
+  }
+  if (opts.expectedTotalReviews != null && rows[0].total_reviews !== opts.expectedTotalReviews) {
+    throw Object.assign(new Error('CARD_CHANGED'), { statusCode: 409 });
   }
 
   const oldBox: number = rows[0].box_number;
@@ -197,7 +219,7 @@ export async function moveCard(
   const nextDueAt = new Date(Date.now() + intervals[newBox - 1] * 24 * 60 * 60 * 1000);
   const masteredNow = newBox === 5 && oldBox < 5;
 
-  await pool.query(
+  await db.query(
     `UPDATE leitner_cards
      SET box_number        = $1,
          due_at            = $2,
@@ -209,7 +231,7 @@ export async function moveCard(
     [newBox, nextDueAt, correct, leitnerCardId]
   );
 
-  await pool.query(
+  await db.query(
     `INSERT INTO leitner_reviews
        (leitner_card_id, user_id, correct, old_box, new_box, time_ms)
      VALUES ($1, $2, $3, $4, $5, $6)`,

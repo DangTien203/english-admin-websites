@@ -495,12 +495,59 @@ All Leitner endpoints are mounted behind `requireApiAuth`.
 - Auth: Auth
 - Body:
   - `leitner_card_id`: string
-  - `correct`: boolean
+  - `correct?`: boolean (client-graded)
+  - `user_answer?`: string (Vietnamese meaning; server-graded, wins over `correct`)
   - `time_ms?`: number
-- Returns: `{ new_box_number, next_due_at, mastered_now }`
+- Behavior: for cards in **box 1-3 only**. Box 4/5 cards must be checked on both the English and the Vietnamese meaning, spaced apart, which is only possible inside a review session (below).
+- Returns: `{ new_box_number, next_due_at, mastered_now, grading }`
 - Errors:
   - `400 VALIDATION_ERROR`
   - `404 CARD_NOT_FOUND`
+  - `409 REVIEW_SESSION_REQUIRED` (card is in box 4/5 - use `/session/start`)
+
+### Leitner review session (box 4/5 are checked on BOTH meanings)
+
+Words in Leitner **box 4/5** must be answered twice: the **English meaning** (`check: "en"`: definition / paraphrase / synonym) first, the **Vietnamese meaning** (`check: "vi"`) later. The two checks of one word are always at least **2 other steps apart** (English at step 1 -> Vietnamese at step 4 or later). Words in box 1-3 have a single Vietnamese check. So 10 due words with 3 of them in box 4/5 = **13 steps**, but every count in the summary is per **original word** (10, never 13).
+
+If a session has fewer than 3 words and contains a box 4/5 word, the gap cannot be reached; the checks are then placed as far apart as possible (see `min_steps_between_checks`).
+
+#### `POST /api/v1/leitner/session/start`
+
+- Auth: Auth
+- Body: `{ limit?: 1-100, box_number?: 1-5 }`
+  - `limit`: number of **words** (default 20), not steps. The server takes the first `limit` cards by `due_at` (most overdue / closest to due first), then shuffles them.
+  - `box_number` omitted: **"Review due now"** - due cards only.
+  - `box_number` 1-5: **study one box on demand** - cards of that box, due or not (closest to due first). Same rules apply: box 1-3 = one Vietnamese check per word; box 4/5 = English + Vietnamese check per word (2 steps, summary still 1 word; both right -> next box, either wrong -> box 1). If the box has fewer than `limit` cards, all of them are used. "All cards" in a box = `limit: min(cards in box, 100)`; per-box counts come from `GET /leitner/overview` (`boxes[].total_cards`).
+  - Box 4/5 with fewer than 3 words cannot keep the 2-step gap between the two checks; they are then spread as far apart as possible.
+- Returns: `{ session_id, box_number (null for "due now"), total_words, total_steps, completed, min_steps_between_checks, progress, steps }`; each step: `{ step_index, leitner_card_id, entry_id, check: "en"|"vi", check_number, checks_total, box_number, typed_answer_required, answered, correct, entry }`. `entry` never contains the meaning.
+- Errors: `400 NO_DUE_CARDS` (due-now session), `400 NO_CARDS_IN_BOX` (`details.box_number`)
+
+#### `POST /api/v1/leitner/session/answer`
+
+- Auth: Auth
+- Body: `{ session_id, step_index, user_answer?, correct?, time_ms? }` (one of `user_answer` / `correct`; `user_answer` max 500 chars)
+  - `user_answer` is the meaning asked by the step's `check`; the server grades it.
+  - `correct` (client-graded, e.g. swift-choice) is only accepted for single-check words (`typed_answer_required: false`).
+- Steps must be answered **in order** (`step_index` = `progress.next_step_index`).
+- Behavior: a word's Leitner box moves **once**, when its last step is answered - up one box if every check was right, otherwise back to box 1. If the card was already reviewed elsewhere in the meantime, its box is left alone (`word.applied: false`).
+- Returns: `{ step_index, check, grading, word: { checks_total, checks_done, checks_correct, resolved, correct, applied, new_box_number, next_due_at, mastered_now }, progress: { answered_steps, total_steps, resolved_words, total_words, next_step_index } }`
+- Errors:
+  - `400 VALIDATION_ERROR`, `400 TYPED_ANSWER_REQUIRED`, `400 SESSION_ALREADY_COMPLETED`
+  - `404 SESSION_NOT_FOUND`, `404 STEP_NOT_FOUND`, `404 CARD_NOT_FOUND`
+  - `409 STEP_OUT_OF_ORDER` (details: `expected_step_index`), `409 STEP_ALREADY_ANSWERED`
+
+#### `POST /api/v1/leitner/session/complete`
+
+- Auth: Auth
+- Body: `{ session_id }`
+- Returns: `{ session_id, summary: { total_words, correct_words, wrong_words, skipped_words, accuracy, mastered_now, time_total_ms }, words }`. `words` has one entry per original word (status `correct` | `wrong` | `skipped` when its steps were not all answered). A word counts as correct only if every one of its checks was right.
+- Errors: `400 SESSION_ALREADY_COMPLETED`, `404 SESSION_NOT_FOUND`
+
+#### `GET /api/v1/leitner/session/:id`
+
+- Auth: Auth
+- Returns: same shape as `/session/start` (resume / re-sync after a network error).
+- Errors: `404 SESSION_NOT_FOUND`
 
 ### `GET /api/v1/leitner/stats`
 

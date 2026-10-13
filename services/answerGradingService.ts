@@ -112,6 +112,16 @@ export async function gradeLeitnerAnswer(
   return gradeEntryAnswer(entry, userAnswer);
 }
 
+/** English-meaning check (definition / paraphrase / synonym) for a Leitner card in box 4/5. */
+export async function gradeLeitnerEnglishAnswer(
+  leitnerCardId: string,
+  userId: string,
+  userAnswer: string
+): Promise<PracticeAnswerGradeResult> {
+  const entry = await fetchEntryForLeitnerCard(leitnerCardId, userId);
+  return gradeEntryEnglishMeaning(entry, userAnswer);
+}
+
 async function gradeEntryAnswer(
   entry: EntryForCard,
   userAnswer: string

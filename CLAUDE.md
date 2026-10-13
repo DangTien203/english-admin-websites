@@ -26,7 +26,7 @@ npm test -- tests/auth.test.ts           # single file
 npm test -- -t "login happy path"        # by test name
 npm run test:watch
 
-npm run db:migrate    # run all 30 migrations (idempotent, tracked in schema_migrations)
+npm run db:migrate    # run all 32 migrations (idempotent, tracked in schema_migrations)
 npm run db:seed       # seed admin + sample data (scripts/seed.ts)
 npm run db:reset      # drop-all then migrate
 npm run db:fresh      # reset + seed
@@ -148,7 +148,7 @@ Order in `app.ts` matters — specific mounts before the broad cards mount.
 | `/api/v1/decks` | `routes/api/decks.ts` | `requireApiAuth` | GET `/system`, `/mine`, `/:id`; POST `/create` (gated by `requireFeature('flashcard_max_decks')`); PATCH `/:id`, DELETE `/:id`; POST `/:id/favorite/toggle`, `/:id/cards`, DELETE `/:id/cards/:entryId`. Ownership gate on writes. |
 | `/api/v1/cards` | `routes/api/cards.ts` | `requireApiAuth` (broad mount) | GET/POST/DELETE under broad `/api/v1` prefix — **must mount last**. |
 | `/api/v1/review` | `routes/api/review.ts` | `requireApiAuth` | Legacy review endpoints (swift-choice, cloze). Kept for older client builds; new clients use `/practice`. |
-| `/api/v1/leitner` | `routes/api/leitner.ts` | `requireApiAuth` | GET `/overview` (box distribution + retention), GET `/question` (swift-choice / cloze / pair-link), POST `/answer`, POST `/batch-add`. SRS box transitions in `utils/leitnerManager.ts`. |
+| `/api/v1/leitner` | `routes/api/leitner.ts` | `requireApiAuth` | GET `/overview` (box distribution + retention), GET `/question` (swift-choice / cloze / pair-link), POST `/answer`, POST `/batch-add`. SRS box transitions in `utils/leitnerManager.ts`. Review sessions (`/session/start|answer|complete`, GET `/session/:id`; `services/leitnerSessionService.ts`, step ordering in `utils/leitnerReviewQueue.ts`): box 4/5 words are checked on both English and Vietnamese meaning, ≥2 steps apart; summary counts original words; `/session/start` takes optional `box_number` (1–5) to study one box on demand. `POST /review` is box 1–3 only (409 `REVIEW_SESSION_REQUIRED` otherwise). |
 | `/api/v1/practice` | `routes/api/practice.ts` | `requireApiAuth` | POST `/session/start`, `/session/:id/question`, `/session/:id/answer`, `/session/:id/complete`. Modes: flashcard, swift-choice, cloze, pair-link. Tracks practice sessions + answers; updates streak. |
 | `/api/v1/subscriptions` | `routes/api/subscriptions.ts` | none (per-route) | GET `/plans` (public, 5-min in-memory cache), GET `/plans/:id`, GET `/:userId/active`, POST `/initiate` (transaction creation). |
 | `/api/v1/retrieval` | `routes/api/retrieval.ts` | `requireApiAuth` + `requireFeature('retrieval_practice_daily')` on POST | POST `/start`, `/sentence`, `/answer`, `/complete`. AI sentence grading via OpenAI; word translation fallback via Claude. |
@@ -297,6 +297,10 @@ The runner uses opaque `key` strings — **do not rename keys post-deploy**. New
 | 26 | `26_word_translation_cache` | `word_translation_cache` + fallback fields on `word_lookups` |
 | 27 | `27_rename_plan_features` | Rename feature keys to mobile contract; add `translation_daily` quotas |
 | 28 | `28_user_notifications` | `user_notifications, user_fcm_tokens` (FCM push) |
+| 29 | `29_answer_grading` | `entry_answer_aliases, answer_semantic_cache` + grading columns on `practice_answers` |
+| 30 | `30_answer_cache_lang` | `answer_semantic_cache.lang` (vi/en) + unique `(entry_id, lang, normalized_answer)` |
+| 31 | `31_leitner_review_sessions` | `leitner_review_sessions, leitner_review_steps` (box 4/5 dual-meaning checks) |
+| 32 | `32_leitner_session_box` | `leitner_review_sessions.box_number` (study one box), `leitner_review_steps.start_total_reviews` (reviewed-elsewhere guard) |
 
 ### Schema by domain
 
