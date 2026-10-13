@@ -1,4 +1,6 @@
 import 'dotenv/config';
+// Validates lookup / enrichment env vars at boot: invalid values stop the process with a clear message.
+import './config/lookup';
 import express, { Request, Response, NextFunction } from 'express';
 import session from 'express-session';
 import flash from 'connect-flash';

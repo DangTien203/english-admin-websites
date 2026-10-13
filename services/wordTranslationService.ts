@@ -2,6 +2,11 @@
  * Word translation fallback — used by POST /api/v1/ebooks/:id/lookup when a
  * tapped word is not in `dictionary_entries`.
  *
+ * @deprecated The `word_translation_cache` table (migration 26) is superseded by the
+ * temporary-lookup flow in docs/lookup-spec.md (§5 F7: no cache of translated words;
+ * §3: the table must stop being read AND written). Behavior is unchanged until P2
+ * replaces this path. Do NOT drop the table — it is kept for rollback.
+ *
  * Pipeline:
  *   1. Cache lookup in word_translation_cache (by lowercased word).
  *   2. Cache miss → Promise.allSettled([Google Translate v2, Free Dictionary API]).
