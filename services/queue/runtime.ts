@@ -1,6 +1,7 @@
 import pool from '../../config/db';
 import { lookupConfig } from '../../config/lookup';
 import { runEnrichment } from '../enrichment/pipeline';
+import { loadTopicIds } from '../enrichment/topics';
 import { getBoss, stopBoss, type BossRole } from './boss';
 import { SHUTDOWN_GRACE_MS } from './constants';
 import { EnrichmentWorker, registerEnrichmentWorkers } from './enrichmentWorker';
@@ -45,6 +46,8 @@ export async function startEnrichmentRuntime(mode: 'api' | 'worker'): Promise<En
 
   let worker: EnrichmentWorker | null = null;
   if (runWorker) {
+    // Fail loudly at start, not on the first job: without the 30 topic tags every job ends failed / config_error.
+    await loadTopicIds(pool).catch((err) => logEvent('error', 'topics_not_seeded', { error: errMessage(err) }));
     worker = new EnrichmentWorker({ db: pool, runEnrichment });
     await registerEnrichmentWorkers(boss, worker, { concurrency: lookupConfig.queue.workerConcurrency });
   }

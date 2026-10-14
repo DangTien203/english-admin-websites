@@ -84,8 +84,8 @@ describe('lifecycle: row → running → result', () => {
   });
 
   it('the P5 placeholder pipeline ends as skipped / pipeline_not_ready', async () => {
-    const { runEnrichment } = await import('../../services/enrichment/pipeline');
-    const worker = new EnrichmentWorker({ db, runEnrichment });
+    const { createPipeline } = await import('../../services/enrichment/pipeline');
+    const worker = new EnrichmentWorker({ db, runEnrichment: createPipeline({ ensureTopics: async () => undefined }) });
     await worker.handle([job()]);
     expect(M.finish).toHaveBeenCalledWith(db, ROW, expect.objectContaining({ status: 'skipped', reason: 'pipeline_not_ready' }));
   });
@@ -204,6 +204,20 @@ describe('f) UpstreamConfigError', () => {
     expect(M.finish).toHaveBeenCalledWith(db, ROW, { status: 'failed', reason: 'config_error' });
     expect(M.markQueued).not.toHaveBeenCalled();
     expect(console.error).toHaveBeenCalledWith(expect.stringContaining('"reason":"config_error"'));
+  });
+});
+
+describe('f2) EnrichmentConfigError (e.g. topics_not_seeded)', () => {
+  it('failed / config_error, logged at error level with its code, NOT retried', async () => {
+    const { EnrichmentConfigError } = await import('../../services/enrichment/errors');
+    const { worker } = setup(async () => {
+      throw new EnrichmentConfigError('topics_not_seeded', 'topics_not_seeded: 3 of 30 topic tags are missing from the "tags" table: a, b, c. Run docs/seed-topics.sql.');
+    });
+    await expect(worker.handle([job()])).resolves.toBeUndefined();
+    expect(M.finish).toHaveBeenCalledWith(db, ROW, { status: 'failed', reason: 'config_error' });
+    expect(M.markQueued).not.toHaveBeenCalled();
+    expect(M.failIfActive).not.toHaveBeenCalled();
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('"code":"topics_not_seeded"'));
   });
 });
 

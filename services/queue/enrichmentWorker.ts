@@ -2,6 +2,7 @@ import type { JobWithMetadata, PgBoss, WorkWithMetadataHandler } from 'pg-boss';
 import * as Jobs from '../../models/EnrichmentJob';
 import type { EnrichmentJobDb, EnrichmentJobRow } from '../../models/EnrichmentJob';
 import { OUTCOME_STATUSES, type EnrichmentOutcome, type RunEnrichment } from '../enrichment/pipeline';
+import { EnrichmentConfigError } from '../enrichment/errors';
 import { BudgetExceeded, UpstreamConfigError } from '../upstream/errors';
 import { ENRICH_DLQ, ENRICH_QUEUE, type EnrichJobData } from './constants';
 import { errMessage, incr, logEvent } from './log';
@@ -179,10 +180,17 @@ export class EnrichmentWorker {
     const { db } = this.deps;
 
     // f) configuration problem: a retry cannot help
-    if (err instanceof UpstreamConfigError) {
+    if (err instanceof UpstreamConfigError || err instanceof EnrichmentConfigError) {
       await Jobs.finish(db, row.id, { status: 'failed', reason: 'config_error' });
       incr('job.failed');
-      logEvent('error', 'enrich', { word: row.word, job_id: row.id, status: 'failed', reason: 'config_error', provider: err.provider, http_status: err.status ?? null, error: errMessage(err) });
+      logEvent('error', 'enrich', {
+        word: row.word,
+        job_id: row.id,
+        status: 'failed',
+        reason: 'config_error',
+        ...(err instanceof UpstreamConfigError ? { provider: err.provider, http_status: err.status ?? null } : { code: err.code }),
+        error: errMessage(err),
+      });
       return;
     }
 

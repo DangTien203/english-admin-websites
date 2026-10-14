@@ -1,15 +1,20 @@
+import pool from '../../config/db';
+import { loadTopicIds } from './topics';
+
 /**
  * The enrichment pipeline entry point called by the queue worker (docs/lookup-spec.md §8).
  *
- * P5 only provides the seam: the worker's lifecycle (running → succeeded / skipped / failed / retry) is
- * complete and tested against fake pipelines, while the real stages S0–S7 arrive in P6a / P6b.
+ * P5 built the worker lifecycle around this seam; P6a adds the first half of the stages in separate modules
+ * (S1 sources/, S3 haiku/ + draft.ts, S4 haiku/validators.ts) and the topic check below. The stages are NOT
+ * connected here yet: P6b wires S0–S2 and writes the dictionary (S5–S7).
  *
  * Contract with the worker (services/queue/enrichmentWorker.ts):
  *   - RETURN an outcome for every business result, including the "negative" ones (rejected, skipped,
  *     failed with invalid_output): the job is then completed and never retried.
  *   - THROW UpstreamUnavailable (or any unexpected error) for a transient problem: the worker puts the
  *     row back to `queued` and pg-boss retries with backoff.
- *   - THROW UpstreamConfigError for a configuration problem (row → failed / config_error, no retry).
+ *   - THROW UpstreamConfigError or EnrichmentConfigError for a configuration problem (row → failed / config_error,
+ *     no retry). Example: the 30 topic tags are missing from the `tags` table (topics_not_seeded).
  *   - THROW BudgetExceeded when a spend limit is hit (row → skipped / budget, no retry).
  *   - Honor `signal`: it aborts when the job expires or the process is shutting down.
  */
@@ -30,7 +35,7 @@ export type EnrichmentOutcomeStatus = 'succeeded' | 'rejected' | 'skipped' | 'fa
 
 export interface EnrichmentOutcome {
   status: EnrichmentOutcomeStatus;
-  /** Short code (docs/lookup-queue.md): unknown_word, proper_noun, exists, form_linked, ... */
+  /** Short code (docs/lookup-queue.md): unknown_word, proper_noun, not_english, variant_form, exists, form_linked, ... */
   reason?: string;
   entryId?: string | null;
   model?: string | null;
@@ -42,12 +47,24 @@ export const OUTCOME_STATUSES: readonly EnrichmentOutcomeStatus[] = ['succeeded'
 
 export type RunEnrichment = (job: EnrichmentJob) => Promise<EnrichmentOutcome>;
 
+export interface PipelineDeps {
+  /**
+   * Makes sure the environment can enrich at all. Throws EnrichmentConfigError("topics_not_seeded") when the 30
+   * topic tags are missing; resolves once they are known (their ids are cached in memory by loadTopicIds).
+   */
+  ensureTopics: () => Promise<unknown>;
+}
+
 /**
- * Placeholder until P6.
- * TODO(P6b): replace the body with the real pipeline (S0 existence check → S1 collect → S2 lemma → S3 Haiku →
- * S4 validate → S5 merge → S6 transactional write → S7 bookkeeping). Keep the signature and the contract above.
+ * TODO(P6b): after ensureTopics, run S0 (exists?) → S1 collectSources → S2 (form / variant / unknown decisions, see
+ * haikuSkipReason) → S3/S4 generateDraft → S5 merge → S6 transactional write → S7 bookkeeping. Keep the signature
+ * and the contract above. Until then every job ends skipped / pipeline_not_ready.
  */
-export const runEnrichment: RunEnrichment = async (_job) => ({
-  status: 'skipped',
-  reason: 'pipeline_not_ready',
-});
+export function createPipeline(deps: PipelineDeps): RunEnrichment {
+  return async (_job) => {
+    await deps.ensureTopics();
+    return { status: 'skipped', reason: 'pipeline_not_ready' };
+  };
+}
+
+export const runEnrichment: RunEnrichment = createPipeline({ ensureTopics: () => loadTopicIds(pool) });

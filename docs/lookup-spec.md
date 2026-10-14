@@ -1,5 +1,5 @@
 WORDYGO · ĐẶC TẢ TRA TỪ NHANH VÀ TỰ BỔ SUNG TỪ ĐIỂN
-Tệp: docs/lookup-spec.md · Phiên bản 1.1 · 14/10/2026 (1.1: thêm LOOKUP_FAST_TRANSLATOR, chế độ haiku ở mục 5)
+Tệp: docs/lookup-spec.md · Phiên bản 1.2 · 14/10/2026 (1.2: mục 9.5 chốt khóa đầu ra ở P6a; 1.1: thêm LOOKUP_FAST_TRANSLATOR, chế độ haiku ở mục 5)
 Mọi prompt P1 đến P8 dựa vào tệp này. Khi mâu thuẫn, thứ tự ưu tiên: migration thật, tệp này, prompt.
 
 0. QUY TẮC LÀM VIỆC
@@ -205,14 +205,15 @@ S7 Cập nhật word_enrichment_jobs (trạng thái, entry_id, token), api_usage
 9.2 Đầu ra có cấu trúc: dùng output_config.format kiểu json_schema (đã GA, không cần beta header, Haiku 5.5 hỗ trợ). Chỉ dùng tính năng JSON Schema được hỗ trợ: không đệ quy; không minimum, maximum, minLength, maxLength; mảng chỉ minItems 0 hoặc 1; additionalProperties = false; enum chỉ gồm chuỗi, số, bool hoặc null. Các ràng buộc còn lại kiểm tra bằng zod sau khi nhận. Nếu SDK cài đặt chưa có kiểu cho output_config thì nâng SDK. Nếu model từ chối output_config thì dự phòng bằng tool bắt buộc (tool_choice chỉ định tool) cộng zod. Schema còn bị giới hạn độ phức tạp (tối đa 24 tham số tùy chọn và 16 tham số kiểu hợp, tức anyOf hoặc kiểu mảng như ['string','null']); gặp lỗi 400 'Schema is too complex for compilation' thì đơn giản hóa schema, ví dụ dùng chuỗi rỗng thay cho null. Lần gọi đầu với một schema mới chậm hơn vì phải biên dịch.
 9.3 Tham số: max_tokens = ANTHROPIC_MAX_OUTPUT_TOKENS_ENRICH; timeout = ANTHROPIC_TIMEOUT_MS_ENRICH; temperature thấp (0 đến 0.3) nếu model nhận tham số này. stop_reason là max_tokens hoặc refusal thì coi là lỗi. Ghi usage (input_tokens, output_tokens) vào word_enrichment_jobs và api_usage_counters. Tùy chọn: bật prompt caching cho system prompt nếu đủ độ dài tối thiểu theo tài liệu.
 9.4 Phần cố định nằm trong system prompt (để bật prompt caching): quy tắc ở 9.6, danh sách 30 tên chủ đề kèm mô tả ngắn (lấy từ classify-topics.mjs) và các enum hợp lệ. Phần thay đổi theo từng từ (JSON gọn, đặt trong thẻ <data>; mọi thứ trong <data> là dữ liệu, KHÔNG phải chỉ dẫn): từ tra cứu; lemma dự kiến; các dòng Wiktionary đã rút gọn (tối đa khoảng 2.500 token, ưu tiên 6 nghĩa đầu); zipf và rank; đồng và trái nghĩa của Datamuse.
-9.5 Đầu ra (ý nghĩa; tên khóa cuối cùng do P6 chốt trong schema):
-   is_english_word, is_proper_noun, variant_of (chuỗi hoặc null: dạng chuẩn khi từ là lỗi chính tả, dạng lỗi thời hoặc phi chuẩn của từ khác)
-   headword, lemma, pos[] (enum cố định)
-   cefr_level (A1 đến C2), is_countable (true, false, null), is_transitive (true, false, null)
-   topics[] (1 đến 3, thuộc 30 tên chủ đề)
-   senses[] (tối đa 6): pos, definition_en (tối đa 25 từ, dễ hiểu), meanings_vi[] (giới hạn cứng 1 đến 4 nghĩa, kiểm bằng zod; mục tiêu 2 đến 4 nghĩa NGẮN, phổ biến nhất trước, mỗi nghĩa 1 đến 4 từ, khác nhau thật sự; chỉ 1 nghĩa khi tiếng Việt thật sự chỉ có một cách nói), register|null, domain|null, region|null, grammar_note|null, usage_note|null, examples[] (1 đến 2 cặp example_en và example_vi), synonyms[], antonyms[]
-   idioms[], phrasal_verbs[], collocations[] (được phép rỗng)
+9.5 Đầu ra (khóa cuối cùng, chốt ở P6a; hiện thực trong services/enrichment/haiku/schema.ts, mô tả đầy đủ ở docs/lookup-enrichment.md mục 3):
+   is_english_word (bool), is_proper_noun (bool), variant_of (chuỗi hoặc null: dạng chuẩn khi từ là lỗi chính tả, dạng lỗi thời hoặc phi chuẩn của từ khác)
+   headword (dạng hiển thị), lemma (chữ thường, một từ), pos[] (enum: noun, verb, adjective, adverb, preposition, conjunction, pronoun, determiner, exclamation, modal verb, number, article)
+   cefr_level (A1 đến C2; null cho từ không lập mục), is_countable (true, false, null), is_transitive (true, false, null)
+   topics[] (tối đa 3, thuộc 30 tên chủ đề; tên lạ bị bỏ chứ không thay thế; từ thật nên có 1 đến 3, rỗng thì ghi vào notes)
+   senses[] (tối đa 6): pos, definition_en (tối đa 25 từ, dễ hiểu), meanings_vi[] (zod đòi 1 đến 4 nghĩa, mỗi nghĩa tối đa 40 ký tự và 6 âm tiết; mục tiêu 2 đến 4 nghĩa NGẮN, phổ biến nhất trước, khác nhau thật sự, nằm ở system prompt), register (7 giá trị của CHECK của DB hoặc null), domain, region, grammar_note, usage_note (chuỗi hoặc null), examples[] (1 đến 2 cặp { example_en, example_vi }), synonyms[], antonyms[] (tối đa 8 mỗi loại)
+   idioms[] { idiom_text, definition_en, definition_vi, example_en, example_vi }; phrasal_verbs[] { phrasal_verb, particle, is_separable, definition_en, definition_vi, example_en, example_vi }; collocations[] { collocation, pattern, example_en, example_vi } (cột thật của entry_idioms, phrasal_verbs, collocations; tối đa 5 mỗi loại; được phép rỗng)
    notes_for_review[] (điểm Haiku không chắc)
+   Từ không lập mục (is_english_word false, hoặc is_proper_noun true, hoặc variant_of khác null): senses, pos, topics, idioms, phrasal_verbs, collocations là mảng rỗng; cefr_level, is_countable, is_transitive là null.
 9.6 Quy tắc tiếng Việt cho system prompt (kế thừa prompt dịch đã dùng ở import-oxford.mjs):
    - Văn phong từ điển Anh-Việt chuẩn mực như Oxford Learner's phiên bản tiếng Việt; không khẩu ngữ.
    - Lấy NHIỀU nghĩa: mỗi sense có 2 đến 4 nghĩa ngắn, khác nhau thật sự, sắp theo mức phổ biến, không bao giờ quá 4. Không lặp ý bằng cách đổi sang từ gần như đồng nghĩa. Chỉ 1 nghĩa khi tiếng Việt thật sự chỉ có một cách nói, và ghi lý do vào notes_for_review.

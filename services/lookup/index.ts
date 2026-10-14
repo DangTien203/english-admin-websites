@@ -1,4 +1,3 @@
-import { Pool } from 'pg';
 import pool from '../../config/db';
 import { lookupConfig } from '../../config/lookup';
 import { createPgBossEnqueuer } from '../queue';
@@ -7,6 +6,7 @@ import { getUpstreamClients, UpstreamClients } from '../upstream';
 import { EnrichmentEnqueuer, NoopEnqueuer } from './enqueuer';
 import { FallbackFastTranslator, FastTranslator, GoogleFastTranslator } from './fastTranslator';
 import { HaikuFastTranslator } from './haikuFastTranslator';
+import { getRefDb } from './refDb';
 import { WordLookupService } from './lookupService';
 import { UserRateLimiter } from './rateLimiter';
 import { SingleFlight } from './singleFlight';
@@ -18,7 +18,6 @@ import type { Db, UpstreamBundle } from './types';
  */
 
 let enqueuer: EnrichmentEnqueuer | undefined;
-let refPool: Pool | undefined;
 let service: WordLookupService | undefined;
 // Module-level so replacing the enqueuer does not reset the rate-limit counters or in-flight lookups.
 let rateLimiter: UserRateLimiter | undefined;
@@ -34,18 +33,6 @@ function getEnqueuer(): EnrichmentEnqueuer {
 export function setEnrichmentEnqueuer(next: EnrichmentEnqueuer): void {
   enqueuer = next;
   service = undefined; // rebuilt with the new enqueuer on next use
-}
-
-/** The main pool, or a small dedicated pool when REFDATA_DATABASE_URL puts ref_* tables elsewhere. */
-function getRefDb(): Db {
-  const url = lookupConfig.refdata.databaseUrl;
-  if (!url) return pool;
-  refPool ??= new Pool({
-    connectionString: url,
-    max: 3,
-    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-  });
-  return refPool;
 }
 
 /** Usage ledger name for the fast-path Haiku calls (api_usage_counters.provider). */
