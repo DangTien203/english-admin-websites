@@ -1,0 +1,30 @@
+{
+  "word": "bank",
+  "source": "fallback",
+  "captured_at": "2026-10-13T14:38:00.335Z",
+  "headline": "ngân hàng",
+  "senses": [
+    {
+      "pos": "noun",
+      "definition": "An institution that accepts deposits and lends money."
+    },
+    {
+      "pos": "verb",
+      "definition": "To tilt an aircraft sideways while turning."
+    },
+    {
+      "pos": "noun",
+      "definition": "The land alongside a river or lake."
+    }
+  ],
+  "queries": [
+    "bank: An institution that accepts deposits and lends money.",
+    "bank: To tilt an aircraft sideways while turning.",
+    "bank: The land alongside a river or lake."
+  ],
+  "translations": [
+    "Ngân hàng: Một tổ chức nhận tiền gửi và cho vay tiền.",
+    "Bank: Nghiêng máy bay sang một bên khi đang quay.",
+    "Bờ: Vùng đất nằm dọc theo sông hoặc hồ."
+  ]
+}

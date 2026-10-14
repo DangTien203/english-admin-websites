@@ -1,0 +1,36 @@
+{
+  "word": "right",
+  "source": "free-dictionary",
+  "captured_at": "2026-10-13T14:38:56.428Z",
+  "headline": "Phải",
+  "senses": [
+    {
+      "pos": "adjective",
+      "definition": "Straight, not bent."
+    },
+    {
+      "pos": "adverb",
+      "definition": "On the right side."
+    },
+    {
+      "pos": "interjection",
+      "definition": "Yes, that is correct; I agree."
+    },
+    {
+      "pos": "noun",
+      "definition": "That which complies with justice, law or reason."
+    }
+  ],
+  "queries": [
+    "right: Straight, not bent.",
+    "right: On the right side.",
+    "right: Yes, that is correct; I agree.",
+    "right: That which complies with justice, law or reason."
+  ],
+  "translations": [
+    "Bên phải: Thẳng, không cong.",
+    "phải: Ở phía bên phải.",
+    "Đúng vậy: Chính xác; tôi đồng ý.",
+    "Đúng: Điều phù hợp với công lý, pháp luật hoặc lý trí."
+  ]
+}

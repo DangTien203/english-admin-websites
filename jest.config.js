@@ -10,5 +10,8 @@ module.exports = {
   forceExit: true,
   transform: {
     '^.+\\.tsx?$': ['ts-jest', { tsconfig: 'tsconfig.test.json' }],
+    // pg-boss and the dependencies listed below ship as ES modules; Jest (CommonJS) has to compile them.
+    '^.+\\.m?js$': ['ts-jest', { tsconfig: 'tsconfig.test.json', diagnostics: false }],
   },
+  transformIgnorePatterns: ['/node_modules/(?!(pg-boss|rrule-temporal|serialize-error|non-error)/)'],
 };

@@ -1,0 +1,36 @@
+{
+  "word": "address",
+  "source": "fallback",
+  "captured_at": "2026-10-13T14:39:17.684Z",
+  "headline": "Địa chỉ",
+  "senses": [
+    {
+      "pos": "noun",
+      "definition": "The place where a person lives or an organization is located."
+    },
+    {
+      "pos": "verb",
+      "definition": "To speak or write to someone."
+    },
+    {
+      "pos": "noun",
+      "definition": "A formal speech."
+    },
+    {
+      "pos": "verb",
+      "definition": "To deal with a problem."
+    }
+  ],
+  "queries": [
+    "address: The place where a person lives or an organization is located.",
+    "address: To speak or write to someone.",
+    "address: A formal speech.",
+    "address: To deal with a problem."
+  ],
+  "translations": [
+    "Địa chỉ: Nơi một người sinh sống hoặc một tổ chức đặt trụ sở.",
+    "Địa chỉ: Nói chuyện hoặc viết thư cho ai đó.",
+    "Địa chỉ: Bài phát biểu trang trọng.",
+    "Địa chỉ: Để giải quyết một vấn đề."
+  ]
+}

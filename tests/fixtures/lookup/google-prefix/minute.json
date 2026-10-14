@@ -1,0 +1,30 @@
+{
+  "word": "minute",
+  "source": "fallback",
+  "captured_at": "2026-10-13T14:39:24.515Z",
+  "headline": "phút",
+  "senses": [
+    {
+      "pos": "noun",
+      "definition": "A period of sixty seconds."
+    },
+    {
+      "pos": "adjective",
+      "definition": "Extremely small."
+    },
+    {
+      "pos": "noun",
+      "definition": "A written record of a meeting."
+    }
+  ],
+  "queries": [
+    "minute: A period of sixty seconds.",
+    "minute: Extremely small.",
+    "minute: A written record of a meeting."
+  ],
+  "translations": [
+    "phút: Một khoảng thời gian sáu mươi giây.",
+    "phút: Cực kỳ nhỏ.",
+    "Biên bản: Bản ghi chép bằng văn bản về cuộc họp."
+  ]
+}

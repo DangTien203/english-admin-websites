@@ -22,6 +22,7 @@
   },
   "include": [
     "app.ts",
+    "worker.ts",
     "config/**/*.ts",
     "models/**/*.ts",
     "controllers/**/*.ts",

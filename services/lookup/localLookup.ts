@@ -1,5 +1,6 @@
 import { FULL_ENTRY_SQL } from '../../utils/entryQueries';
 import type { Db } from './types';
+import { isNonStandardSense, targetsOf } from './wiktionaryTags';
 
 /**
  * Local (database) part of the fast path — docs/lookup-spec.md §5 F4 and F4b. No external calls.
@@ -75,13 +76,19 @@ export function inferFormType(tags: readonly string[]): FormType | null {
   return null;
 }
 
-/** Collects tags from a reduced Wiktionary row: data.tags and data.senses[].tags (shape assumed for P4). */
-function tagsOf(data: any): string[] {
-  const out: string[] = [];
-  const add = (v: unknown) => Array.isArray(v) && v.forEach((x) => typeof x === 'string' && out.push(x));
-  add(data?.tags);
-  if (Array.isArray(data?.senses)) data.senses.forEach((s: any) => add(s?.tags));
-  return out;
+/**
+ * Tags that describe how `lemma` relates to the word, taken from ONE sense of a reduced row (shape produced by
+ * scripts/refdata, verified on the real dump): the first STANDARD sense whose form_of / alt_of points to the lemma.
+ * Mixing the tags of all senses is wrong: the row for "ran" has a sense "past of run", a sense "past of rin" and a
+ * colloquial NONSTANDARD "past participle of run" — the union of their tags reads as a past participle.
+ * Falls back to a non-standard sense, then to the row's own tags, when no standard sense qualifies.
+ */
+export function tagsForLemma(data: any, lemma: string): string[] {
+  const senses: any[] = Array.isArray(data?.senses) ? data.senses : [];
+  const pointing = senses.filter((s) => targetsOf(s).includes(lemma));
+  const chosen = pointing.find((s) => !isNonStandardSense(s)) ?? pointing[0];
+  if (chosen) return Array.isArray(chosen.tags) ? chosen.tags.filter((t: unknown) => typeof t === 'string') : [];
+  return Array.isArray(data?.tags) ? data.tags.filter((t: unknown) => typeof t === 'string') : [];
 }
 
 /**
@@ -100,8 +107,13 @@ export async function resolveViaForms(db: Db, refDb: Db, word: string): Promise<
   for (const lemma of lemmas) {
     const local = await lookupLocal(db, lemma);
     if (!local) continue;
-    const tags = refRows.filter((r) => String(r.lemma_of).toLowerCase() === lemma).flatMap((r) => tagsOf(r.data));
-    return { entry: local.entry, matchedForm: word, lemma, formType: inferFormType(tags) };
+    // First row that points to this lemma and yields a recognizable type (rows come in dump order).
+    let formType: FormType | null = null;
+    for (const row of refRows.filter((r) => String(r.lemma_of).toLowerCase() === lemma)) {
+      formType = inferFormType(tagsForLemma(row.data, lemma));
+      if (formType) break;
+    }
+    return { entry: local.entry, matchedForm: word, lemma, formType };
   }
   return null;
 }

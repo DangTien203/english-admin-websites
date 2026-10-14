@@ -1,0 +1,36 @@
+{
+  "word": "fair",
+  "source": "fallback",
+  "captured_at": "2026-10-13T14:39:03.680Z",
+  "headline": "hội chợ",
+  "senses": [
+    {
+      "pos": "adjective",
+      "definition": "Treating people equally; just."
+    },
+    {
+      "pos": "noun",
+      "definition": "An event with entertainment, rides and stalls."
+    },
+    {
+      "pos": "adjective",
+      "definition": "Light in colour, of hair or skin."
+    },
+    {
+      "pos": "adjective",
+      "definition": "Of moderate quality; neither good nor bad."
+    }
+  ],
+  "queries": [
+    "fair: Treating people equally; just.",
+    "fair: An event with entertainment, rides and stalls.",
+    "fair: Light in colour, of hair or skin.",
+    "fair: Of moderate quality; neither good nor bad."
+  ],
+  "translations": [
+    "Công bằng: Đối xử với mọi người một cách bình đẳng; chính trực.",
+    "Hội chợ: Một sự kiện có các hoạt động giải trí, trò chơi và gian hàng.",
+    "fair: Màu sáng, có thể là màu tóc hoặc da.",
+    "Khá: Chất lượng trung bình; không tốt cũng không xấu."
+  ]
+}

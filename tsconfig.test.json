@@ -5,6 +5,7 @@
   },
   "include": [
     "app.ts",
+    "worker.ts",
     "config/**/*.ts",
     "middlewares/**/*.ts",
     "routes/**/*.ts",

@@ -1,0 +1,30 @@
+{
+  "word": "run",
+  "source": "fallback",
+  "captured_at": "2026-10-13T14:37:52.695Z",
+  "headline": "chạy",
+  "senses": [
+    {
+      "pos": "verb",
+      "definition": "To move swiftly on foot so that both feet leave the ground in each stride."
+    },
+    {
+      "pos": "noun",
+      "definition": "An act of running; a journey made by running."
+    },
+    {
+      "pos": "verb",
+      "definition": "To operate or function, as of a machine."
+    }
+  ],
+  "queries": [
+    "run: To move swiftly on foot so that both feet leave the ground in each stride.",
+    "run: An act of running; a journey made by running.",
+    "run: To operate or function, as of a machine."
+  ],
+  "translations": [
+    "Chạy: Di chuyển nhanh bằng chân sao cho cả hai chân đều rời khỏi mặt đất trong mỗi bước chạy.",
+    "Chạy: Hành động chạy; một cuộc hành trình được thực hiện bằng cách chạy.",
+    "Chạy: Vận hành hoặc hoạt động, như đối với một máy móc."
+  ]
+}

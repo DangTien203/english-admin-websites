@@ -1,0 +1,36 @@
+{
+  "word": "light",
+  "source": "free-dictionary",
+  "captured_at": "2026-10-13T14:37:53.092Z",
+  "headline": "ánh sáng",
+  "senses": [
+    {
+      "pos": "noun",
+      "definition": "Visible electromagnetic radiation. The human eye can typically detect radiation (light) in the wavelength range of about 400 to 750 nanometers. Nearby shorter and longer wavelength ranges, although not visible, are commonly called ultraviolet and infrared light."
+    },
+    {
+      "pos": "verb",
+      "definition": "To start (a fire)."
+    },
+    {
+      "pos": "adjective",
+      "definition": "Having light; bright; clear; not dark or obscure."
+    },
+    {
+      "pos": "adverb",
+      "definition": "Carrying little."
+    }
+  ],
+  "queries": [
+    "light: Visible electromagnetic radiation. The human eye can typically detect radiation (light) in the wavelength range of about 400 to 750 nanometers. Nearby shorter",
+    "light: To start (a fire).",
+    "light: Having light; bright; clear; not dark or obscure.",
+    "light: Carrying little."
+  ],
+  "translations": [
+    "Ánh sáng: Bức xạ điện từ nhìn thấy được. Mắt người thường có thể phát hiện bức xạ (ánh sáng) trong phạm vi bước sóng khoảng 400 đến 750 nanomet. Các bước sóng ngắn hơn ở gần đó có thể phát hiện được.",
+    "đốt lửa: Bắt đầu (một ngọn lửa).",
+    "Ánh sáng: Có ánh sáng; sáng sủa; rõ ràng; không tối tăm hoặc mờ ảo.",
+    "Nhẹ: Mang theo ít đồ."
+  ]
+}

@@ -1,6 +1,6 @@
 import 'dotenv/config';
 // Validates lookup / enrichment env vars at boot: invalid values stop the process with a clear message.
-import './config/lookup';
+import { lookupConfig } from './config/lookup';
 import express, { Request, Response, NextFunction } from 'express';
 import session from 'express-session';
 import flash from 'connect-flash';
@@ -9,6 +9,10 @@ import expressLayouts from 'express-ejs-layouts';
 
 import { injectAdmin } from './middlewares/auth';
 import { errorHandler } from './middlewares/errorHandler';
+import pool from './config/db';
+import { startEnrichmentRuntime } from './services/queue';
+import { errMessage, logEvent } from './services/queue/log';
+import { installShutdownHandlers } from './services/queue/shutdown';
 import { apiError } from './utils/apiResponse';
 
 import cors from 'cors';
@@ -165,12 +169,37 @@ app.use(errorHandler);
 // ── Start ── (chỉ listen khi chạy trực tiếp; import trong tests không khởi server)
 if (require.main === module) {
   const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
-  app.listen(PORT, () => {
+  const server = app.listen(PORT, () => {
     console.log(`\n══════════════════════════════════════`);
     console.log(`  English Admin Dashboard`);
     console.log(`  http://localhost:${PORT}`);
     console.log(`══════════════════════════════════════\n`);
   });
+
+  // Background enrichment queue (pg-boss). Nothing happens unless ENRICHMENT_ENABLED=true.
+  // ENRICHMENT_WORKER_ENABLED decides whether this process also works the queue or only sends jobs.
+  if (lookupConfig.flags.enrichmentEnabled) {
+    startEnrichmentRuntime('api')
+      .then((runtime) => {
+        // Graceful shutdown only when the queue is in use: stop taking requests, let running jobs finish, close pools.
+        installShutdownHandlers([
+          {
+            name: 'http_server',
+            run: () =>
+              new Promise<void>((resolve) => {
+                server.close(() => resolve());
+                server.closeIdleConnections();
+              }),
+          },
+          { name: 'stop_queue', run: async () => void (await runtime?.stop()) },
+          { name: 'close_pool', run: () => pool.end() },
+        ]);
+      })
+      .catch((err) => {
+        // The API keeps serving: lookups still work, and an enqueue retries the pg-boss start on its next call.
+        logEvent('error', 'enrichment_runtime_start_failed', { error: errMessage(err) });
+      });
+  }
 }
 
 export default app;

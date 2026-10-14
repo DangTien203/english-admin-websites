@@ -6,6 +6,4 @@ node_modules/
 /public/uploads/
 dist/
 *.tsbuildinfo
-/docs
-/scripts
-/tests
+data

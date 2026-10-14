@@ -1,0 +1,524 @@
+{
+  "when": "2026-10-13T17:14:15.079Z",
+  "runs": 20,
+  "A": {
+    "warm_ms": 2496,
+    "google": {
+      "p50": 109,
+      "p95": 124,
+      "samples": [
+        322,
+        121,
+        124,
+        108,
+        120,
+        114,
+        115,
+        113,
+        89,
+        109,
+        103,
+        109,
+        105,
+        112,
+        107,
+        105,
+        93,
+        104,
+        83,
+        112
+      ]
+    },
+    "haiku": {
+      "p50": 1681,
+      "p95": 2024,
+      "samples": [
+        2011,
+        1894,
+        1681,
+        1273,
+        1262,
+        1887,
+        2713,
+        1241,
+        1307,
+        1983,
+        1248,
+        1812,
+        1888,
+        1787,
+        1584,
+        1276,
+        1955,
+        2024,
+        1676,
+        1518
+      ],
+      "failures": [],
+      "slower_than_timeout": 1
+    },
+    "haiku_tokens": {
+      "inputTokens": 13350,
+      "outputTokens": 1657,
+      "usd_per_lookup": 0.000108175
+    }
+  },
+  "C": [
+    {
+      "word": "run",
+      "google": [
+        "chạy"
+      ],
+      "haiku": {
+        "vi": [
+          "chạy",
+          "quản lý",
+          "chuyến đi"
+        ],
+        "pos": [
+          "verb",
+          "verb",
+          "noun"
+        ]
+      },
+      "senses_from": "fallback"
+    },
+    {
+      "word": "light",
+      "google": [
+        "ánh sáng",
+        "đốt lửa",
+        "nhẹ"
+      ],
+      "haiku": {
+        "vi": [
+          "ánh sáng",
+          "nhẹ",
+          "nhẹ nhàng",
+          "bật"
+        ],
+        "pos": [
+          "noun",
+          "adjective",
+          "adjective",
+          "verb"
+        ]
+      },
+      "senses_from": "free-dictionary"
+    },
+    {
+      "word": "bank",
+      "google": [
+        "ngân hàng",
+        "bờ"
+      ],
+      "haiku": {
+        "vi": [
+          "ngân hàng",
+          "bờ",
+          "gửi tiền"
+        ],
+        "pos": [
+          "noun",
+          "noun",
+          "verb"
+        ]
+      },
+      "senses_from": "fallback"
+    },
+    {
+      "word": "bat",
+      "google": [
+        "con dơi",
+        "đánh bóng",
+        "gậy bóng chày"
+      ],
+      "haiku": {
+        "vi": [
+          "con dơi",
+          "cây gậy",
+          "đánh bóng"
+        ],
+        "pos": [
+          "noun",
+          "noun",
+          "verb"
+        ]
+      },
+      "senses_from": "fallback"
+    },
+    {
+      "word": "match",
+      "google": [
+        "cuộc thi đấu",
+        "trận đấu",
+        "phù hợp"
+      ],
+      "haiku": {
+        "vi": [
+          "trận đấu",
+          "que diêm",
+          "phù hợp",
+          "tương xứng"
+        ],
+        "pos": [
+          "noun",
+          "noun",
+          "verb",
+          "verb"
+        ]
+      },
+      "senses_from": "free-dictionary"
+    },
+    {
+      "word": "spring",
+      "google": [
+        "mùa xuân",
+        "nhảy",
+        "lò xo",
+        "suối"
+      ],
+      "haiku": {
+        "vi": [
+          "mùa xuân",
+          "lò xo",
+          "nhảy",
+          "suối nước"
+        ],
+        "pos": [
+          "noun",
+          "noun",
+          "verb",
+          "noun"
+        ]
+      },
+      "senses_from": "fallback"
+    },
+    {
+      "word": "right",
+      "google": [
+        "phải",
+        "bên phải",
+        "đúng vậy",
+        "đúng"
+      ],
+      "haiku": {
+        "vi": [
+          "đúng",
+          "phải",
+          "quyền",
+          "ngay"
+        ],
+        "pos": [
+          "adjective",
+          "adjective",
+          "noun",
+          "adverb"
+        ]
+      },
+      "senses_from": "free-dictionary"
+    },
+    {
+      "word": "lead",
+      "google": [
+        "chỉ huy",
+        "chì",
+        "dẫn đầu"
+      ],
+      "haiku": {
+        "vi": [
+          "dẫn dắt",
+          "chì",
+          "sự dẫn đầu",
+          "vai chính"
+        ],
+        "pos": [
+          "verb",
+          "noun",
+          "noun",
+          "noun"
+        ]
+      },
+      "senses_from": "free-dictionary"
+    },
+    {
+      "word": "fair",
+      "google": [
+        "hội chợ",
+        "công bằng",
+        "khá"
+      ],
+      "haiku": {
+        "vi": [
+          "công bằng",
+          "đẹp",
+          "hội chợ",
+          "khá"
+        ],
+        "pos": [
+          "adjective",
+          "adjective",
+          "noun",
+          "adverb"
+        ]
+      },
+      "senses_from": "fallback"
+    },
+    {
+      "word": "close",
+      "google": [
+        "đóng",
+        "gần",
+        "kết thúc"
+      ],
+      "haiku": {
+        "vi": [
+          "đóng",
+          "gần",
+          "thân thiết",
+          "gần gũi"
+        ],
+        "pos": [
+          "verb",
+          "adjective",
+          "adjective",
+          "adverb"
+        ]
+      },
+      "senses_from": "fallback"
+    },
+    {
+      "word": "address",
+      "google": [
+        "địa chỉ"
+      ],
+      "haiku": {
+        "vi": [
+          "địa chỉ",
+          "bài diễn văn",
+          "giải quyết"
+        ],
+        "pos": [
+          "noun",
+          "noun",
+          "verb"
+        ]
+      },
+      "senses_from": "fallback"
+    },
+    {
+      "word": "minute",
+      "google": [
+        "phút",
+        "biên bản"
+      ],
+      "haiku": {
+        "vi": [
+          "phút",
+          "tí xíu"
+        ],
+        "pos": [
+          "noun",
+          "adjective"
+        ]
+      },
+      "senses_from": "fallback"
+    }
+  ],
+  "B": {
+    "google": {
+      "total": [
+        320,
+        360,
+        111,
+        3006,
+        444,
+        130,
+        350,
+        319,
+        113,
+        128,
+        149,
+        124,
+        167,
+        360,
+        127,
+        3012,
+        410,
+        118,
+        287,
+        361
+      ],
+      "translation": [
+        86,
+        92,
+        110,
+        111,
+        212,
+        105,
+        102,
+        120,
+        98,
+        128,
+        98,
+        123,
+        143,
+        118,
+        113,
+        120,
+        233,
+        94,
+        109,
+        93
+      ],
+      "fd": [
+        318,
+        126,
+        103,
+        3006,
+        263,
+        130,
+        151,
+        155,
+        113,
+        104,
+        149,
+        120,
+        167,
+        155,
+        127,
+        3012,
+        275,
+        118,
+        146,
+        157
+      ],
+      "step2Ms": [
+        232,
+        181,
+        198,
+        164,
+        203,
+        135,
+        141,
+        204
+      ],
+      "step2Status": {
+        "skipped_no_fd": 12,
+        "ran": 8
+      },
+      "partial": 12,
+      "full": 8,
+      "notFound": 0,
+      "unavailable": 0,
+      "fallbacks": [],
+      "engines": {
+        "google": 20
+      },
+      "googleChars": 2130,
+      "total_p50": 287,
+      "total_p95": 3006,
+      "translation_p50": 110,
+      "translation_p95": 212
+    },
+    "haiku": {
+      "total": [
+        1933,
+        2254,
+        1775,
+        3008,
+        1657,
+        2041,
+        2044,
+        1882,
+        1566,
+        1563,
+        1327,
+        1770,
+        1922,
+        2251,
+        1860,
+        3007,
+        2232,
+        1803,
+        1606,
+        1946
+      ],
+      "translation": [
+        1932,
+        1945,
+        1775,
+        1651,
+        1523,
+        2041,
+        1737,
+        1678,
+        1566,
+        1563,
+        1327,
+        1770,
+        1922,
+        2049,
+        1860,
+        1634,
+        2055,
+        1803,
+        1405,
+        1740
+      ],
+      "fd": [
+        82,
+        93,
+        93,
+        3007,
+        397,
+        112,
+        128,
+        91,
+        154,
+        105,
+        118,
+        90,
+        129,
+        96,
+        124,
+        3007,
+        313,
+        111,
+        135,
+        147
+      ],
+      "step2Ms": [
+        309,
+        134,
+        307,
+        204,
+        202,
+        177,
+        201,
+        205
+      ],
+      "step2Status": {
+        "skipped_no_fd": 12,
+        "ran": 8
+      },
+      "partial": 12,
+      "full": 8,
+      "notFound": 0,
+      "unavailable": 0,
+      "fallbacks": [],
+      "engines": {
+        "haiku": 20
+      },
+      "googleChars": 2038,
+      "total_p50": 1882,
+      "total_p95": 3007,
+      "translation_p50": 1740,
+      "translation_p95": 2049
+    }
+  },
+  "B_haiku_tokens": {
+    "inputTokens": 13350,
+    "outputTokens": 1692
+  }
+}

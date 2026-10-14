@@ -1,0 +1,147 @@
+{
+  "word": "ran",
+  "captured_at": "2026-10-13T12:36:00.000Z",
+  "captured_with": "curl (smoke script got HTML 404/522 on that word at the time)",
+  "status": 200,
+  "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "max-age=14400",
+    "x-ratelimit-limit": "450",
+    "x-ratelimit-remaining": "449",
+    "x-ratelimit-reset": "1785662021"
+  },
+  "body": [
+    {
+      "word": "ran",
+      "phonetic": "/ɹæn/",
+      "phonetics": [
+        {
+          "text": "/ɹæn/",
+          "audio": "https://api.dictionaryapi.dev/media/pronunciations/en/ran-us.mp3",
+          "sourceUrl": "https://commons.wikimedia.org/w/index.php?curid=1212359",
+          "license": {
+            "name": "BY-SA 3.0",
+            "url": "https://creativecommons.org/licenses/by-sa/3.0"
+          }
+        }
+      ],
+      "meanings": [
+        {
+          "partOfSpeech": "verb",
+          "definitions": [
+            {
+              "definition": "To run.",
+              "synonyms": [],
+              "antonyms": []
+            }
+          ],
+          "synonyms": [],
+          "antonyms": []
+        },
+        {
+          "partOfSpeech": "verb",
+          "definitions": [
+            {
+              "definition": "To move swiftly.",
+              "synonyms": [],
+              "antonyms": []
+            },
+            {
+              "definition": "(fluids) To flow.",
+              "synonyms": [],
+              "antonyms": []
+            },
+            {
+              "definition": "(of a vessel) To sail before the wind, in distinction from reaching or sailing close-hauled.",
+              "synonyms": [],
+              "antonyms": []
+            }
+          ],
+          "synonyms": [],
+          "antonyms": []
+        }
+      ],
+      "license": {
+        "name": "CC BY-SA 3.0",
+        "url": "https://creativecommons.org/licenses/by-sa/3.0"
+      },
+      "sourceUrls": [
+        "https://en.wiktionary.org/wiki/ran",
+        "https://en.wiktionary.org/wiki/rin",
+        "https://en.wiktionary.org/wiki/run"
+      ]
+    },
+    {
+      "word": "ran",
+      "phonetic": "/ɹæn/",
+      "phonetics": [
+        {
+          "text": "/ɹæn/",
+          "audio": "https://api.dictionaryapi.dev/media/pronunciations/en/ran-us.mp3",
+          "sourceUrl": "https://commons.wikimedia.org/w/index.php?curid=1212359",
+          "license": {
+            "name": "BY-SA 3.0",
+            "url": "https://creativecommons.org/licenses/by-sa/3.0"
+          }
+        }
+      ],
+      "meanings": [
+        {
+          "partOfSpeech": "noun",
+          "definitions": [
+            {
+              "definition": "Yarns coiled on a spun-yarn winch.",
+              "synonyms": [],
+              "antonyms": []
+            }
+          ],
+          "synonyms": [],
+          "antonyms": []
+        }
+      ],
+      "license": {
+        "name": "CC BY-SA 3.0",
+        "url": "https://creativecommons.org/licenses/by-sa/3.0"
+      },
+      "sourceUrls": [
+        "https://en.wiktionary.org/wiki/ran"
+      ]
+    },
+    {
+      "word": "ran",
+      "phonetic": "/ɹæn/",
+      "phonetics": [
+        {
+          "text": "/ɹæn/",
+          "audio": "https://api.dictionaryapi.dev/media/pronunciations/en/ran-us.mp3",
+          "sourceUrl": "https://commons.wikimedia.org/w/index.php?curid=1212359",
+          "license": {
+            "name": "BY-SA 3.0",
+            "url": "https://creativecommons.org/licenses/by-sa/3.0"
+          }
+        }
+      ],
+      "meanings": [
+        {
+          "partOfSpeech": "noun",
+          "definitions": [
+            {
+              "definition": "Open robbery.",
+              "synonyms": [],
+              "antonyms": []
+            }
+          ],
+          "synonyms": [],
+          "antonyms": []
+        }
+      ],
+      "license": {
+        "name": "CC BY-SA 3.0",
+        "url": "https://creativecommons.org/licenses/by-sa/3.0"
+      },
+      "sourceUrls": [
+        "https://en.wiktionary.org/wiki/ran"
+      ]
+    }
+  ]
+}

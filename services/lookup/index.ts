@@ -1,6 +1,7 @@
 import { Pool } from 'pg';
 import pool from '../../config/db';
 import { lookupConfig } from '../../config/lookup';
+import { createPgBossEnqueuer } from '../queue';
 import { currentPeriod } from '../upstream/apiUsage';
 import { getUpstreamClients, UpstreamClients } from '../upstream';
 import { EnrichmentEnqueuer, NoopEnqueuer } from './enqueuer';
@@ -16,14 +17,20 @@ import type { Db, UpstreamBundle } from './types';
  * Created lazily, once per process.
  */
 
-let enqueuer: EnrichmentEnqueuer = new NoopEnqueuer();
+let enqueuer: EnrichmentEnqueuer | undefined;
 let refPool: Pool | undefined;
 let service: WordLookupService | undefined;
 // Module-level so replacing the enqueuer does not reset the rate-limit counters or in-flight lookups.
 let rateLimiter: UserRateLimiter | undefined;
 let singleFlight: SingleFlight<UpstreamBundle> | undefined;
 
-/** P5 registers the real queue here; until then the Noop enqueuer reports 'disabled'. */
+/** ENRICHMENT_ENABLED=true → the pg-boss enqueuer (P5); otherwise the Noop one, which reports 'disabled'. */
+function getEnqueuer(): EnrichmentEnqueuer {
+  enqueuer ??= lookupConfig.flags.enrichmentEnabled ? createPgBossEnqueuer() : new NoopEnqueuer();
+  return enqueuer;
+}
+
+/** Replaces the enqueuer (tests). */
 export function setEnrichmentEnqueuer(next: EnrichmentEnqueuer): void {
   enqueuer = next;
   service = undefined; // rebuilt with the new enqueuer on next use
@@ -73,7 +80,7 @@ export function getWordLookupService(): WordLookupService {
     translator: buildFastTranslator(clients),
     google: clients.google,
     freeDictionary: clients.freeDictionary,
-    enqueuer,
+    enqueuer: getEnqueuer(),
     rateLimiter: (rateLimiter ??= new UserRateLimiter(lookupConfig.lookup.missRateLimitPerMin)),
     singleFlight: (singleFlight ??= new SingleFlight<UpstreamBundle>()),
     config: {

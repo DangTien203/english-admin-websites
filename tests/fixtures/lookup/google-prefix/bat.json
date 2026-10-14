@@ -1,0 +1,30 @@
+{
+  "word": "bat",
+  "source": "fallback",
+  "captured_at": "2026-10-13T14:38:38.979Z",
+  "headline": "con dơi",
+  "senses": [
+    {
+      "pos": "noun",
+      "definition": "A flying nocturnal mammal with wings made of skin."
+    },
+    {
+      "pos": "verb",
+      "definition": "To hit a ball with a bat."
+    },
+    {
+      "pos": "noun",
+      "definition": "A club used to hit the ball in sports such as baseball."
+    }
+  ],
+  "queries": [
+    "bat: A flying nocturnal mammal with wings made of skin.",
+    "bat: To hit a ball with a bat.",
+    "bat: A club used to hit the ball in sports such as baseball."
+  ],
+  "translations": [
+    "Dơi: Một loài động vật có vú sống về đêm, biết bay, có đôi cánh làm bằng da.",
+    "Đánh bóng: Dùng gậy đánh bóng.",
+    "Gậy bóng chày: Một loại gậy dùng để đánh bóng trong các môn thể thao như bóng chày."
+  ]
+}

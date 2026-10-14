@@ -1,0 +1,36 @@
+{
+  "word": "match",
+  "source": "free-dictionary",
+  "captured_at": "2026-10-13T14:38:49.310Z",
+  "headline": "cuộc thi đấu",
+  "senses": [
+    {
+      "pos": "noun",
+      "definition": "A competitive sporting event such as a boxing meet, a baseball game, or a cricket match."
+    },
+    {
+      "pos": "verb",
+      "definition": "To agree; to be equal; to correspond."
+    },
+    {
+      "pos": "noun",
+      "definition": "Any contest or trial of strength or skill, or to determine superiority."
+    },
+    {
+      "pos": "verb",
+      "definition": "To agree with; to be equal to; to correspond to."
+    }
+  ],
+  "queries": [
+    "match: A competitive sporting event such as a boxing meet, a baseball game, or a cricket match.",
+    "match: To agree; to be equal; to correspond.",
+    "match: Any contest or trial of strength or skill, or to determine superiority.",
+    "match: To agree with; to be equal to; to correspond to."
+  ],
+  "translations": [
+    "Trận đấu: Một sự kiện thể thao mang tính cạnh tranh, chẳng hạn như một cuộc thi đấu quyền anh, một trận bóng chày hoặc một trận đấu cricket.",
+    "Phù hợp: Đồng ý; bằng nhau; tương ứng.",
+    "Trận đấu: Bất kỳ cuộc thi hoặc thử thách nào về sức mạnh hoặc kỹ năng, hoặc để xác định sự vượt trội.",
+    "Phù hợp: Đồng ý với; bằng với; tương ứng với."
+  ]
+}

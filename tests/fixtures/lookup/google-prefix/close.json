@@ -1,0 +1,36 @@
+{
+  "word": "close",
+  "source": "fallback",
+  "captured_at": "2026-10-13T14:39:10.620Z",
+  "headline": "đóng",
+  "senses": [
+    {
+      "pos": "verb",
+      "definition": "To shut something so that it is no longer open."
+    },
+    {
+      "pos": "adjective",
+      "definition": "Near in space or time."
+    },
+    {
+      "pos": "adverb",
+      "definition": "In a near position."
+    },
+    {
+      "pos": "noun",
+      "definition": "The end of something."
+    }
+  ],
+  "queries": [
+    "close: To shut something so that it is no longer open.",
+    "close: Near in space or time.",
+    "close: In a near position.",
+    "close: The end of something."
+  ],
+  "translations": [
+    "Đóng: Đóng một thứ gì đó lại để nó không còn mở nữa.",
+    "Gần: Gần về không gian hoặc thời gian.",
+    "gần: Ở vị trí gần.",
+    "Kết thúc: Sự kết thúc của một việc gì đó."
+  ]
+}

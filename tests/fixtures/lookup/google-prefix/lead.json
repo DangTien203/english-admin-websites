@@ -1,0 +1,36 @@
+{
+  "word": "lead",
+  "source": "free-dictionary",
+  "captured_at": "2026-10-13T14:38:56.899Z",
+  "headline": "chỉ huy",
+  "senses": [
+    {
+      "pos": "noun",
+      "definition": "A heavy, pliable, inelastic metal element, having a bright, bluish color, but easily tarnished; both malleable and ductile, though with little tenacity. It is easily fusible, forms alloys with other metals, and is an ingredient of solder and type metal. Atomic number 82, symbol Pb (from Latin plumbum)."
+    },
+    {
+      "pos": "verb",
+      "definition": "To cover, fill, or affect with lead"
+    },
+    {
+      "pos": "adjective",
+      "definition": "Foremost."
+    },
+    {
+      "pos": "noun",
+      "definition": "A plummet or mass of lead attached to a line, used in sounding depth at sea or to estimate velocity in knots."
+    }
+  ],
+  "queries": [
+    "lead: A heavy, pliable, inelastic metal element, having a bright, bluish color, but easily tarnished; both malleable and ductile, though with little tenacity. It is",
+    "lead: To cover, fill, or affect with lead",
+    "lead: Foremost.",
+    "lead: A plummet or mass of lead attached to a line, used in sounding depth at sea or to estimate velocity in knots."
+  ],
+  "translations": [
+    "Chì: Một nguyên tố kim loại nặng, dễ uốn, không đàn hồi, có màu xanh lam sáng nhưng dễ bị xỉn màu; vừa dễ uốn vừa dễ kéo sợi, mặc dù độ bền kém. Nó là",
+    "Chì: Phủ, lấp đầy hoặc tác động bằng chì",
+    "dẫn đầu: Quan trọng nhất.",
+    "Chì: Một vật nặng hoặc khối chì được gắn vào dây, dùng để đo độ sâu dưới biển hoặc ước tính vận tốc tính bằng hải lý/giờ."
+  ]
+}

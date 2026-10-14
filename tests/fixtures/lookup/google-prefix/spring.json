@@ -1,0 +1,36 @@
+{
+  "word": "spring",
+  "source": "fallback",
+  "captured_at": "2026-10-13T14:38:56.062Z",
+  "headline": "mùa xuân",
+  "senses": [
+    {
+      "pos": "noun",
+      "definition": "The season between winter and summer."
+    },
+    {
+      "pos": "verb",
+      "definition": "To jump or move suddenly."
+    },
+    {
+      "pos": "noun",
+      "definition": "A coiled piece of metal that returns to its shape after being pressed."
+    },
+    {
+      "pos": "noun",
+      "definition": "A place where water comes out of the ground."
+    }
+  ],
+  "queries": [
+    "spring: The season between winter and summer.",
+    "spring: To jump or move suddenly.",
+    "spring: A coiled piece of metal that returns to its shape after being pressed.",
+    "spring: A place where water comes out of the ground."
+  ],
+  "translations": [
+    "Mùa xuân: Mùa nằm giữa mùa đông và mùa hè.",
+    "Nhảy: Nhảy hoặc di chuyển đột ngột.",
+    "Lò xo: Một mảnh kim loại được cuộn lại, có khả năng trở lại hình dạng ban đầu sau khi bị nén.",
+    "Suối: Nơi nước chảy ra từ lòng đất."
+  ]
+}
