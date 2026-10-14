@@ -1,6 +1,7 @@
 import type { FdLookupResult } from '../upstream/freeDictionaryClient';
+import type { FastTranslator } from './fastTranslator';
 import { buildPrefixedQuery, selectSenses, splitGloss } from './senseSelection';
-import type { FdOutcome, GoogleOutcome, SenseResult, Step2Outcome, UpstreamBundle } from './types';
+import type { FdOutcome, SenseResult, Step2Outcome, TranslationOutcome, UpstreamBundle } from './types';
 
 /**
  * Steps 1 and 2 of the fast path (docs/lookup-spec.md §5 F8, F9). Everything here talks to external
@@ -18,6 +19,9 @@ export interface UpstreamConfig {
 }
 
 export interface UpstreamDeps {
+  /** Step 1: the short Vietnamese meanings (Google or Haiku), run in parallel with Free Dictionary. */
+  translator: FastTranslator;
+  /** Step 2 (definitions) is always Google, in both translator modes. */
   google: { translate: (texts: string[], opts?: { deadlineAt?: number }) => Promise<string[]> };
   freeDictionary: { lookup: (word: string, opts?: { deadlineAt?: number }) => Promise<FdLookupResult> };
   config: UpstreamConfig;
@@ -53,9 +57,9 @@ export async function fetchUpstream(word: string, deps: UpstreamDeps, opts: { st
   const start = opts.startedAt ?? now();
   const deadlineAt = start + cfg.totalDeadlineMs;
 
-  // ── Step 1: Google (headline) and Free Dictionary in parallel ──
+  // ── Step 1: the fast translator (Google headline, or Haiku meanings) and Free Dictionary in parallel ──
   const [g, f] = await Promise.all([
-    timed(now, async () => (await deps.google.translate([word], { deadlineAt }))[0] ?? ''),
+    timed(now, () => deps.translator.translate({ word, deadlineAt })),
     timed(now, () => deps.freeDictionary.lookup(word, { deadlineAt })),
   ]);
 
@@ -67,23 +71,30 @@ export async function fetchUpstream(word: string, deps: UpstreamDeps, opts: { st
         : { status: 'not_found', ms: f.ms };
 
   const fdFound = fd.status === 'found';
-  let google: GoogleOutcome = g.status === 'ok' ? { status: 'ok', headline: g.value.trim(), ms: g.ms } : { status: 'error', error: g.error, ms: g.ms };
-  // An unusable headline (empty, or an untranslated echo of an unconfirmed word) is "no Google result".
-  if (google.status === 'ok' && !isHeadlineUsable(google.headline, word, fdFound)) {
-    google = { status: 'error', error: new Error('headline unusable (empty or untranslated echo)'), ms: google.ms };
+  let translation: TranslationOutcome;
+  if (g.status === 'err') {
+    translation = { status: 'error', error: g.error, ms: g.ms };
+  } else {
+    // Unusable meanings (empty, or an untranslated echo of a word Free Dictionary does not confirm) are dropped;
+    // none left = "no translation".
+    const meanings = g.value.meanings_vi.map((m) => m.trim()).filter((m) => isHeadlineUsable(m, word, fdFound));
+    translation =
+      meanings.length > 0
+        ? { status: 'ok', meanings, engine: g.value.engine, ms: g.ms, fallback: g.value.fallback, usage: g.value.usage }
+        : { status: 'error', error: new Error('no usable meaning (empty or untranslated echo)'), ms: g.ms };
   }
 
   // ── Step 2: translate the selected definitions in ONE request (F9) ──
-  const step2 = await runStep2(word, fd, google, deadlineAt, deps, now);
+  const step2 = await runStep2(word, fd, translation, deadlineAt, deps, now);
 
   const totalMs = now() - start;
-  return { word, google, fd, step2, totalMs, deadlineExceeded: now() >= deadlineAt || step2.status === 'skipped_no_time' };
+  return { word, translation, fd, step2, totalMs, deadlineExceeded: now() >= deadlineAt || step2.status === 'skipped_no_time' };
 }
 
 async function runStep2(
   word: string,
   fd: FdOutcome,
-  google: GoogleOutcome,
+  translation: TranslationOutcome,
   deadlineAt: number,
   deps: UpstreamDeps,
   now: () => number
@@ -104,7 +115,7 @@ async function runStep2(
   const without = (status: Step2Outcome['status']): Step2Outcome => ({ status, senses: untranslated, glosses: [], ms: 0 });
 
   if (!cfg.translateDefinitions) return without('skipped_flag');
-  if (google.status !== 'ok') return without('skipped_no_google');
+  if (translation.status !== 'ok') return without('skipped_no_translation');
   if (deadlineAt - now() < MIN_STEP2_MS) return without('skipped_no_time');
 
   const headword = fd.entry.headword;
@@ -113,7 +124,7 @@ async function runStep2(
   if (r.status === 'err') return { ...without('failed'), ms: r.ms, error: r.error };
 
   // An echoed gloss is a real answer only for loanwords: the headline echoed the word too.
-  const keepEcho = google.headline.toLowerCase() === word.toLowerCase();
+  const keepEcho = translation.meanings[0].toLowerCase() === word.toLowerCase();
   const senses: SenseResult[] = untranslated.map((s, i) => {
     const split = splitGloss(r.value[i] ?? '', headword, keepEcho);
     return { ...s, gloss_vi: split.gloss_vi, definition_vi: split.definition_vi };

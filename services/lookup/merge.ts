@@ -42,16 +42,21 @@ export type Merged =
 const lowerFirst = (s: string): string => (s ? s.charAt(0).toLocaleLowerCase('vi') + s.slice(1) : s);
 
 export function mergeOutcome(bundle: UpstreamBundle, maxMeanings: number): Merged {
-  const googleUsable = bundle.google.status === 'ok';
+  const tr = bundle.translation;
+  const googleUsable = tr.status === 'ok'; // "G": the fast translator produced a usable meaning
   const verdict = decide(googleUsable, bundle.fd.status);
   if (verdict.kind === 'not_found') return { kind: 'not_found' };
   if (verdict.kind === 'unavailable') return { kind: 'unavailable' };
 
-  // meanings_vi = unique([headline, ...glosses]) cut to the maximum. When Google failed it is EMPTY:
-  // translation_vi is null, never the looked-up word (the old bug: "Google down → echo the word").
-  const meanings = googleUsable
-    ? dedupeMeanings([lowerFirst((bundle.google as { headline: string }).headline), ...bundle.step2.glosses.map(lowerFirst)], maxMeanings)
-    : [];
+  // google engine: meanings_vi = unique([headline, ...glosses]) cut to the maximum.
+  // haiku engine:  meanings_vi = Haiku's meanings only; the step-2 glosses stay on senses[].gloss_vi.
+  // When the translator failed it is EMPTY: translation_vi is null, never the looked-up word
+  // (the old bug: "Google down → echo the word").
+  let meanings: string[] = [];
+  if (tr.status === 'ok') {
+    const fromTranslator = tr.meanings.map(lowerFirst);
+    meanings = dedupeMeanings(tr.engine === 'haiku' ? fromTranslator : [...fromTranslator, ...bundle.step2.glosses.map(lowerFirst)], maxMeanings);
+  }
 
   const missing = [...verdict.missing];
   let partial = verdict.kind === 'partial';
@@ -95,7 +100,9 @@ export function composeTemporary(
   const ipa = fd?.ipa.any ?? null;
 
   const providers: string[] = [];
-  if (bundle.google.status === 'ok') providers.push('google_translate');
+  const tr = bundle.translation;
+  if (tr.status === 'ok' && tr.engine === 'haiku') providers.push('claude_haiku');
+  if ((tr.status === 'ok' && tr.engine === 'google') || bundle.step2.status === 'ran') providers.push('google_translate');
   if (fd) providers.push('free_dictionary_api');
 
   return {

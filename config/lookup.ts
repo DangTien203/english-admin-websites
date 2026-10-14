@@ -88,6 +88,10 @@ const envSchema = z.object({
   LOOKUP_TOTAL_DEADLINE_MS: envInt(3000, 200, 60_000),
   LOOKUP_MAX_MEANINGS: envInt(4, 1, 10),
   LOOKUP_TRANSLATE_DEFINITIONS: envBool(true),
+  LOOKUP_FAST_TRANSLATOR: z.preprocess(
+    blankToUndefined,
+    z.enum(['google', 'haiku'], { error: 'must be "google" or "haiku"' }).default('google')
+  ),
   LOOKUP_MISS_RATE_LIMIT_PER_MIN: envInt(20, 1, 1000),
 
   GOOGLE_TRANSLATE_API_KEY: envOptionalString,
@@ -149,6 +153,8 @@ export interface LookupConfig {
     totalDeadlineMs: number;
     maxMeanings: number;
     translateDefinitions: boolean;
+    /** Who produces the short Vietnamese meanings on the fast path (docs/lookup-spec.md §5). */
+    fastTranslator: 'google' | 'haiku';
     missRateLimitPerMin: number;
   };
   google: {
@@ -231,6 +237,8 @@ export function loadLookupConfig(env: NodeJS.ProcessEnv): DeepReadonly<LookupCon
     }
   } else if (parsed.data.ENRICHMENT_ENABLED && !parsed.data.ANTHROPIC_API_KEY) {
     issues.push('ANTHROPIC_API_KEY: required when ENRICHMENT_ENABLED=true');
+  } else if (parsed.data.LOOKUP_FAST_TRANSLATOR === 'haiku' && !parsed.data.ANTHROPIC_API_KEY) {
+    issues.push('ANTHROPIC_API_KEY: required when LOOKUP_FAST_TRANSLATOR=haiku');
   }
 
   if (!parsed.success || issues.length > 0) {
@@ -250,6 +258,7 @@ export function loadLookupConfig(env: NodeJS.ProcessEnv): DeepReadonly<LookupCon
       totalDeadlineMs: e.LOOKUP_TOTAL_DEADLINE_MS,
       maxMeanings: e.LOOKUP_MAX_MEANINGS,
       translateDefinitions: e.LOOKUP_TRANSLATE_DEFINITIONS,
+      fastTranslator: e.LOOKUP_FAST_TRANSLATOR,
       missRateLimitPerMin: e.LOOKUP_MISS_RATE_LIMIT_PER_MIN,
     },
     google: {

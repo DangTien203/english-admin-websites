@@ -14,11 +14,20 @@ import { TokenBucket } from './tokenBucket';
  * (P3 connects the fast path, P6 the enrichment job). Clients are created lazily, once per process.
  */
 
+/** max_tokens for the fast-path Haiku call (a handful of short meanings). */
+export const ANTHROPIC_FAST_MAX_TOKENS = 300;
+
 export interface UpstreamClients {
   google: GoogleTranslateClient;
   freeDictionary: FreeDictionaryClient;
   datamuse: DatamuseClient;
   anthropic: AnthropicEnrichClient;
+  /**
+   * Same provider and model as `anthropic`, but tuned for the lookup fast path (LOOKUP_UPSTREAM_TIMEOUT_MS,
+   * max_tokens 300) and with its OWN circuit breaker, so short fast-path timeouts can never lock out the
+   * background enrichment job (60 s timeout) — and the other way round.
+   */
+  anthropicFast: AnthropicEnrichClient;
   usage: ApiUsage;
   breakers: Record<UpstreamProvider, CircuitBreaker>;
 }
@@ -53,6 +62,15 @@ export function getUpstreamClients(): UpstreamClients {
   instance = {
     usage,
     breakers,
+    anthropicFast: new AnthropicEnrichClient(
+      {
+        apiKey: cfg.anthropic.apiKey,
+        model: cfg.anthropic.modelEnrich,
+        maxOutputTokens: ANTHROPIC_FAST_MAX_TOKENS,
+        timeoutMs: cfg.lookup.upstreamTimeoutMs,
+      },
+      { breaker: makeBreaker('anthropic') }
+    ),
     google: new GoogleTranslateClient(
       {
         apiKey: cfg.google.apiKey,

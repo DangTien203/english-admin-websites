@@ -1,5 +1,6 @@
 import { UpstreamUnavailable } from '../upstream/errors';
 import type { EnrichmentEnqueuer } from './enqueuer';
+import type { FastTranslator } from './fastTranslator';
 import { isKnownInReferenceData, lookupLocal, recordForm, resolveViaForms } from './localLookup';
 import { composeTemporary, mergeOutcome } from './merge';
 import type { UserRateLimiter } from './rateLimiter';
@@ -21,6 +22,9 @@ export interface LookupServiceDeps {
   db: Db;
   /** Database holding ref_* tables (the main one unless REFDATA_DATABASE_URL is set). */
   refDb: Db;
+  /** Step 1: short Vietnamese meanings (Google or Haiku, chosen by LOOKUP_FAST_TRANSLATOR). */
+  translator: FastTranslator;
+  /** Step 2 (definition translation) is always Google. */
   google: UpstreamDeps['google'];
   freeDictionary: UpstreamDeps['freeDictionary'];
   enqueuer: EnrichmentEnqueuer;
@@ -82,7 +86,7 @@ export class WordLookupService {
     const { value: bundle, shared } = await this.deps.singleFlight.run(word, () =>
       fetchUpstream(
         word,
-        { google: this.deps.google, freeDictionary: this.deps.freeDictionary, config: this.deps.config, now: this.now },
+        { translator: this.deps.translator, google: this.deps.google, freeDictionary: this.deps.freeDictionary, config: this.deps.config, now: this.now },
         { startedAt: started }
       )
     );
@@ -195,10 +199,16 @@ export class WordLookupService {
         partial: d.partial,
         latency_ms: this.now() - d.started,
         local_ms: d.localMs ?? null,
-        google_ms: d.bundle?.google.ms ?? null,
+        translator: d.bundle ? translatorLabel(d.bundle) : null,
+        translation_ms: d.bundle?.translation.ms ?? null,
+        // kept for the §12.1 field list: the Google headline time (null when Haiku answered)
+        google_ms: d.bundle && d.bundle.translation.status === 'ok' && d.bundle.translation.engine === 'google' ? d.bundle.translation.ms : null,
+        fallback_reason: d.bundle?.translation.status === 'ok' ? (d.bundle.translation.fallback?.reason ?? null) : null,
+        haiku_tokens_in: d.bundle?.translation.status === 'ok' ? (d.bundle.translation.usage?.inputTokens ?? null) : null,
+        haiku_tokens_out: d.bundle?.translation.status === 'ok' ? (d.bundle.translation.usage?.outputTokens ?? null) : null,
         fd_ms: d.bundle?.fd.ms ?? null,
         step2_ms: d.bundle?.step2.ms ?? null,
-        google: d.bundle ? describe(d.bundle.google) : null,
+        google: d.bundle ? describe(d.bundle.translation) : null,
         fd: d.bundle ? describe(d.bundle.fd) : null,
         step2: d.bundle?.step2.status ?? null,
         shared: d.shared ?? false,
@@ -209,6 +219,13 @@ export class WordLookupService {
       /* logging must never break a lookup */
     }
   }
+}
+
+/** 'google', 'haiku' or 'google_fallback' (Haiku failed, Google answered) — for the logs. */
+function translatorLabel(b: UpstreamBundle): string {
+  const t = b.translation;
+  if (t.status !== 'ok') return 'none';
+  return t.fallback ? 'google_fallback' : t.engine;
 }
 
 /** Short, content-free description of one upstream outcome for the log. */

@@ -22,8 +22,19 @@ export interface LookupInput {
 
 // ── Upstream (fast path steps 1 and 2) ───────────────────────────────────────
 
-export type GoogleOutcome =
-  | { status: 'ok'; headline: string; ms: number }
+/**
+ * Result of the fast translator step (the short Vietnamese meanings). 'ok' means at least one usable meaning.
+ * `engine` is who actually produced them (after a Haiku → Google fallback it is 'google').
+ */
+export type TranslationOutcome =
+  | {
+      status: 'ok';
+      meanings: string[];
+      engine: 'google' | 'haiku';
+      ms: number;
+      fallback?: { from: 'haiku'; reason: string };
+      usage?: { inputTokens: number; outputTokens: number };
+    }
   | { status: 'error'; error: unknown; ms: number };
 
 export type FdOutcome =
@@ -43,7 +54,7 @@ export type Step2Status =
   | 'ran' // definitions were sent to Google
   | 'skipped_flag' // LOOKUP_TRANSLATE_DEFINITIONS=false
   | 'skipped_no_fd' // nothing to translate
-  | 'skipped_no_google' // headline unusable: Google is down / unusable
+  | 'skipped_no_translation' // no usable meaning from the fast translator
   | 'skipped_no_time' // not enough of the total deadline left
   | 'failed'; // Google call failed or returned garbage
 
@@ -59,7 +70,7 @@ export interface Step2Outcome {
 
 export interface UpstreamBundle {
   word: string;
-  google: GoogleOutcome;
+  translation: TranslationOutcome;
   fd: FdOutcome;
   step2: Step2Outcome;
   totalMs: number;

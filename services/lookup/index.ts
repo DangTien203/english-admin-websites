@@ -1,8 +1,11 @@
 import { Pool } from 'pg';
 import pool from '../../config/db';
 import { lookupConfig } from '../../config/lookup';
-import { getUpstreamClients } from '../upstream';
+import { currentPeriod } from '../upstream/apiUsage';
+import { getUpstreamClients, UpstreamClients } from '../upstream';
 import { EnrichmentEnqueuer, NoopEnqueuer } from './enqueuer';
+import { FallbackFastTranslator, FastTranslator, GoogleFastTranslator } from './fastTranslator';
+import { HaikuFastTranslator } from './haikuFastTranslator';
 import { WordLookupService } from './lookupService';
 import { UserRateLimiter } from './rateLimiter';
 import { SingleFlight } from './singleFlight';
@@ -38,6 +41,28 @@ function getRefDb(): Db {
   return refPool;
 }
 
+/** Usage ledger name for the fast-path Haiku calls (api_usage_counters.provider). */
+export const HAIKU_FAST_USAGE_PROVIDER = 'anthropic_fast';
+
+/** LOOKUP_FAST_TRANSLATOR: google (default) or haiku-with-automatic-Google-fallback. */
+export function buildFastTranslator(clients: UpstreamClients): FastTranslator {
+  const google = new GoogleFastTranslator(clients.google);
+  if (lookupConfig.lookup.fastTranslator !== 'haiku') return google;
+
+  const haiku = new HaikuFastTranslator({
+    client: clients.anthropicFast,
+    maxMeanings: lookupConfig.lookup.maxMeanings,
+    recordUsage: async ({ inputTokens, outputTokens }) => {
+      const period = currentPeriod('day');
+      await clients.usage.add(HAIKU_FAST_USAGE_PROVIDER, 'input_tokens', period, inputTokens);
+      await clients.usage.add(HAIKU_FAST_USAGE_PROVIDER, 'output_tokens', period, outputTokens);
+    },
+  });
+  return new FallbackFastTranslator(haiku, google, (reason, err) =>
+    console.warn(JSON.stringify({ evt: 'fast_translator_fallback', from: 'haiku', to: 'google', reason, error: String((err as Error)?.message ?? err).slice(0, 160) }))
+  );
+}
+
 export function getWordLookupService(): WordLookupService {
   if (service) return service;
 
@@ -45,6 +70,7 @@ export function getWordLookupService(): WordLookupService {
   service = new WordLookupService({
     db: pool,
     refDb: getRefDb(),
+    translator: buildFastTranslator(clients),
     google: clients.google,
     freeDictionary: clients.freeDictionary,
     enqueuer,
