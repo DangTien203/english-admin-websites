@@ -119,4 +119,14 @@ Mục (d) của prompt P1, trước đây chưa trả lời được vì DB chư
 | Bảng mới của migration 33 | Đã tồn tại. `ref_wiktionary_en` 0 dòng, `ref_word_frequency` 0 dòng, `api_usage_counters` 0 dòng trước P3 |
 | Từ dùng thử | `run` và `ubiquitous` **không có** trong từ điển; `address`, `bank`, `bat`, `close` có (`source = wiktionary`) |
 
-Hệ quả cho các bước sau: `sense_order` khi ghi mục từ mới bắt đầu từ **0**; `word_forms.form_type` không có `possessive` trong dữ liệu nên không cần ưu tiên; `ref_*` còn trống nên bước F4b (dạng biến cục bộ) chưa có tác dụng cho tới khi P4 nạp dữ liệu.
+Hệ quả cho các bước sau: `sense_order` khi ghi mục từ mới bắt đầu từ **0** (P6b: một số chạy cho cả mục từ, còn mục từ cũ đánh số theo từng loại từ: `noun 0, verb 0, noun 1, verb 1`); `word_forms.form_type` không có `possessive` trong dữ liệu nên không cần ưu tiên; `ref_*` còn trống nên bước F4b (dạng biến cục bộ) chưa có tác dụng cho tới khi P4 nạp dữ liệu.
+
+## 7. Bổ sung của P6b (đo ngày 15/10/2026 trên DB dev)
+
+| # | Phát hiện | Hệ quả |
+|---|---|---|
+| 1 | `dictionary_entries.meaning_vi` cho phép NULL trong DB thật (`information_schema.columns.is_nullable = 'YES'`), dù migration `01_auth_content.ts` ghi `NOT NULL` | Chênh lệch giữa migration và DB (có thể đã sửa tay ngoài migration). Mã P6b không dựa vào ràng buộc: luôn ghi `meaning_vi` khác rỗng, không thì hủy mục từ (`invalid_output`). Nếu muốn khôi phục ràng buộc, làm bằng một migration mới (chưa làm) |
+| 2 | `entry_senses.sense_order` của mục từ cũ đánh số theo từng loại từ (`noun 0, verb 0, noun 1, verb 1`) | Mục từ tự tạo dùng một số chạy chung 0, 1, 2... theo thứ tự của Haiku; cả hai thỏa `UNIQUE (entry_id, pos, sense_order)` |
+| 3 | Bảng không có khóa duy nhất: `sense_examples`, `entry_idioms`, `phrasal_verbs`, `collocations`, `word_families`, `entry_edit_history`. `entry_answer_aliases` chỉ có chỉ mục duy nhất MỘT PHẦN (`WHERE status = 'active'`) | Ghi bằng `INSERT ... WHERE NOT EXISTS`, không dùng `ON CONFLICT` |
+| 4 | Độ dài cột cần cắt (không bao giờ gặp 22001): `headword`, `lemma` 255; `ipa_*` 255; `audio_*_url` 500; `pos[]` phần tử 50; `entry_senses.pos` 30, `register` 30, `domain` 100, `region` 30; `word_forms.form_value` 255; `synonym_text` / `antonym_text` 255; `idiom_text` 500; `phrasal_verb` 255, `particle` 30; `collocation` 255, `pattern` 50; `family_root` 255 | `COLUMN_LIMITS` trong `services/enrichment/assemble.ts`. Khóa ngoại tới `dictionary_entries` đều `ON DELETE CASCADE` (trừ `collocations.sense_id`, `sense_synonyms.synonym_entry_id`, `sense_antonyms.antonym_entry_id`, `word_enrichment_jobs.entry_id`: `SET NULL`) nên xóa một mục từ xóa gọn mọi bảng con |
+| 5 | `word_forms.form_type`: bảng chia động từ của Wiktionary gán thẻ `past + singular + third-person` cho "ran" | Phải đọc thẻ theo loại từ của DÒNG (`wiktionaryFormType`), không dùng `inferFormType` của P3 cho các ô của bảng. Xem `docs/lookup-enrichment.md` mục 12 |

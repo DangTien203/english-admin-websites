@@ -2,6 +2,7 @@ import {
   alignSense,
   assembleEntry,
   buildMeaningVi,
+  wiktionaryFormType,
   cleanEtymology,
   cleanFreeDictionaryIpa,
   cleanIpa,
@@ -443,6 +444,42 @@ describe('word_forms', () => {
 
   it('sort_order is 0, 1, 2…', () => {
     expect(e().forms.map((f) => f.sortOrder)).toEqual([0, 1, 2]);
+  });
+
+  it('the conjugation table of the real "run" row gives exactly 3 verb forms (a past-tense cell is NOT a third person singular)', () => {
+    // forms of the verb row "run" as stored in ref_wiktionary_en (15/10/2026), and of its noun row
+    const verb = [
+      ['runs', ['present', 'singular', 'third-person']], ['running', ['participle', 'present']], ['ran', ['past']], ['run', ['participle', 'past']],
+      ['ran', ['colloquial', 'nonstandard', 'participle', 'past']], ['run', ['infinitive']], ['run', ['first-person', 'present', 'singular']],
+      ['ran', ['first-person', 'past', 'singular']], ['run', ['present', 'second-person', 'singular']], ['runnest', ['archaic', 'present', 'second-person', 'singular']],
+      ['ran', ['past', 'second-person', 'singular']], ['ranst', ['archaic', 'past', 'second-person', 'singular']], ['runneth', ['archaic', 'present', 'singular', 'third-person']],
+      ['ran', ['past', 'singular', 'third-person']], ['run', ['plural', 'present']], ['ran', ['past', 'plural']], ['run', ['present', 'subjunctive']],
+      ['ran', ['past', 'subjunctive']], ['run', ['imperative', 'present']],
+    ].map(([form, tags]) => ({ form, tags }));
+    const noun = [{ form: 'runs', tags: ['plural'] }, { form: 'rin', tags: ['alternative', 'dialectal'] }];
+    const out = entryOf(
+      makeBundle({ word: 'run', wiktionaryRows: [wrow({ id: 1, word: 'run', pos: 'verb', forms: verb as any }), wrow({ id: 2, word: 'run', pos: 'noun', forms: noun })] }),
+      makeDraft({ headword: 'run', lemma: 'run', senses: [sense(['chạy'], { pos: 'verb' }), sense(['cuộc chạy'], { pos: 'noun' })] })
+    );
+    expect(out.forms.map((f) => [f.formValue, f.formType])).toEqual([
+      ['runs', 'third_person_singular'],
+      ['running', 'present_participle'],
+      ['ran', 'past_simple'],
+      ['runs', 'plural'],
+    ]);
+  });
+
+  it('wiktionaryFormType reads the tags with the part of speech of the row', () => {
+    expect(wiktionaryFormType('verb', ['present', 'singular', 'third-person'])).toBe('third_person_singular');
+    expect(wiktionaryFormType('verb', ['past', 'singular', 'third-person'])).toBe('past_simple');
+    expect(wiktionaryFormType('verb', ['plural', 'present'])).toBeNull(); // "are": a cell of the table, not a noun plural
+    expect(wiktionaryFormType('verb', ['past', 'participle'])).toBe('past_participle');
+    expect(wiktionaryFormType('noun', ['plural'])).toBe('plural');
+    expect(wiktionaryFormType('noun', ['possessive'])).toBe('possessive');
+    expect(wiktionaryFormType('adjective', ['comparative'])).toBe('comparative');
+    expect(wiktionaryFormType('adjective', ['superlative'])).toBe('superlative');
+    expect(wiktionaryFormType('adverb', ['canonical'])).toBeNull();
+    expect(wiktionaryFormType(null, ['plural'])).toBe('plural');
   });
 });
 

@@ -1,5 +1,5 @@
 import { normalizeVietnameseAnswer } from '../../utils/answerNormalizer';
-import { inferFormType, type FormType } from '../lookup/localLookup';
+import type { FormType } from '../lookup/localLookup';
 import { NON_STANDARD_TAGS } from '../lookup/wiktionaryTags';
 import { REGISTER_VALUES, type Draft, type PosValue } from './haiku/schema';
 import { normalizePos, normalizePosList } from './pos';
@@ -403,9 +403,34 @@ export function wiktionaryTransitive(rows: readonly WiktionaryRow[]): boolean | 
 
 const NON_STANDARD = new Set<string>(NON_STANDARD_TAGS);
 const TABLE_MARKERS = new Set(['table-tags', 'inflection-template', 'class']);
+/** Tags of the cells of a conjugation table ("ran" = past, 2nd person singular): not forms of their own. */
+const VERB_TABLE_CELL_TAGS = ['first-person', 'second-person', 'plural', 'subjunctive', 'imperative', 'infinitive', 'indicative', 'conditional'];
 
 /**
- * word_forms from the `forms` of Wiktionary. A form is kept when its tags map to one of the 9 form_type values (inferFormType);
+ * word_forms.form_type of one entry of `forms` in a Wiktionary row, or null when the tags do not name one of the 9 types.
+ * The part of speech of the ROW matters: the dump lists the whole conjugation table of a verb, where "ran" appears with the tags
+ * past + singular + third-person (that is the past tense, not the third person singular of the present), and "are" with
+ * plural + present (a person / number cell, not a noun plural).
+ */
+export function wiktionaryFormType(pos: PosValue | null, tags: readonly string[]): FormType | null {
+  const t = new Set(tags);
+  if (pos === 'verb' || pos === 'modal verb') {
+    if (VERB_TABLE_CELL_TAGS.some((x) => t.has(x))) return null;
+    if (t.has('third-person') && t.has('singular') && t.has('present') && !t.has('past')) return 'third_person_singular';
+    if (t.has('participle') && t.has('present')) return 'present_participle';
+    if (t.has('participle') && t.has('past')) return 'past_participle';
+    if (t.has('past') && !t.has('participle')) return 'past_simple';
+    return null;
+  }
+  if (t.has('comparative')) return 'comparative';
+  if (t.has('superlative')) return 'superlative';
+  if (t.has('plural') && !t.has('present') && !t.has('past')) return 'plural';
+  if (t.has('possessive')) return 'possessive';
+  return null;
+}
+
+/**
+ * word_forms from the `forms` of Wiktionary. A form is kept when its tags map to one of the 9 form_type values (wiktionaryFormType);
  * otherwise it is dropped, as is a form tagged misspelling / obsolete / archaic / nonstandard / dialectal / rare / proscribed,
  * a multi-word form ("more careful": the lookup matches single words), and a form equal to the headword or the lemma.
  */
@@ -419,7 +444,7 @@ export function buildForms(rows: readonly WiktionaryRow[], headword: string, lem
       if (lower(value) === lemma || lower(value) === lower(headword)) continue;
       const tags = tagsOf(f);
       if (tags.some((t) => TABLE_MARKERS.has(t) || NON_STANDARD.has(t))) continue;
-      const type = inferFormType(tags);
+      const type = wiktionaryFormType(normalizePos(row.pos), tags);
       if (!type) continue;
       const key = `${type}|${lower(value)}`;
       if (seen.has(key)) continue;

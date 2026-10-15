@@ -3,6 +3,14 @@
 Ngày chạy: 14/10/2026 · Model: `claude-haiku-5-5` (lấy từ ANTHROPIC_MODEL_ENRICH) · Lệnh: `npm run enrich:draft -- --word <w> --json` (ba từ cuối thêm `--force`) · Chạy một lần mỗi từ, **không ghi vào DB** (chỉ đọc `ref_*`, `tags`).
 Dữ liệu thô: các tệp JSON do lệnh in ra (không lưu trong repo). Đây là bản nháp để bạn duyệt chất lượng tiếng Việt trước khi sang P6b.
 
+> **Trạng thái các đề xuất ở mục 4 (cập nhật 15/10/2026, P6b):**
+> 1. Tăng số sense gửi cho Haiku — **ĐÃ LÀM** (bạn chọn): từ có hơn 8 sense gửi 12 sense và ngân sách 4000 token (`haiku/user-message.ts`); Haiku vẫn viết tối đa 6 sense. `quarantine` (15 sense) vào 9.940 token đầu vào thay vì khoảng 8.500.
+> 2. Viết 3 nghĩa mỗi sense — không làm (tăng nguy cơ độn nghĩa).
+> 3. `academic_formal` — không làm (bạn không chọn); các chủ đề yếu sau khi bỏ nó vẫn còn (`serendipity`, `ephemeral` chỉ còn 1 chủ đề).
+> 4. Duyệt tay tiếng Việt gượng — việc của bạn; các mục từ P6b ở `published = false` chờ duyệt (`npm run enrich:review`).
+>
+> Lỗi không bắt được bằng validator (nghĩa độn về ý, nghĩa trùng giữa các sense, nghĩa sai) vẫn là giới hạn đã biết; xem `docs/lookup-enrichment.md` mục 16.
+
 ## Tóm tắt
 
 | Từ | Số sense | Sense có ≥ 2 nghĩa | Số nghĩa mỗi sense | Phải sửa lại | Token vào / ra | Chi phí ước tính | Thời gian Haiku |

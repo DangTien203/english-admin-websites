@@ -1,9 +1,11 @@
-# WordyGo · Làm giàu từ điển, phần 1: thu thập nguồn, gọi Claude Haiku, kiểm tra đầu ra (P6a)
+# WordyGo · Làm giàu từ điển: thu thập nguồn, Claude Haiku, kiểm tra, gộp và ghi database (P6a + P6b)
 
-Cập nhật: 14/10/2026 · Đặc tả gốc: `docs/lookup-spec.md` §8, §8.1, §9, §11, §12.4 · Hàng đợi và worker: `docs/lookup-queue.md` · Dữ liệu `ref_*`: `docs/lookup-refdata.md`.
-Mẫu đã chạy thật và đánh giá: `docs/lookup-enrichment-samples.md`.
+Cập nhật: 15/10/2026 · Đặc tả gốc: `docs/lookup-spec.md` §8, §8.1, §9, §10, §11, §12 · Hàng đợi và worker: `docs/lookup-queue.md` · Dữ liệu `ref_*`: `docs/lookup-refdata.md`.
+Mẫu đã chạy thật và đánh giá: `docs/lookup-enrichment-samples.md` (P6a), mục 17 dưới đây (P6b).
 
-**Phạm vi P6a:** các giai đoạn S1 đến S4, tức thu thập nguồn, gọi Haiku, kiểm tra đầu ra. **Chưa ghi vào `dictionary_entries` hay bảng con nào** (S5 đến S7 thuộc P6b). Hàm chính là `generateDraft(bundle)` trong `services/enrichment/draft.ts`; xem bản nháp bằng `npm run enrich:draft -- --word <w>`.
+**Phạm vi:** đường ống đầy đủ S0 đến S7. Một job đi từ một từ tra cứu đến mục từ hoàn chỉnh trong `dictionary_entries` và các bảng con, trong MỘT transaction, idempotent, theo chính sách xuất bản `ENRICHMENT_PUBLISH_POLICY`.
+- **P6a (mục 1 đến 9):** S1 đến S4, thu thập nguồn, gọi Haiku, kiểm tra đầu ra. `generateDraft(bundle)` trong `services/enrichment/draft.ts`; xem bản nháp bằng `npm run enrich:draft -- --word <w>` (không ghi DB).
+- **P6b (mục 10 đến 16):** S0, S2, S5 đến S7. `runEnrichment(job)` trong `services/enrichment/pipeline.ts` thay chỗ gắn rỗng của P5; chạy tay bằng `npm run enrich:run -- --word <w> [--dry-run]`, duyệt bằng `npm run enrich:review`.
 
 ---
 
@@ -29,7 +31,9 @@ Mẫu đã chạy thật và đánh giá: `docs/lookup-enrichment-samples.md`.
 
 ### 1.2 Audio: app có phát được URL tuyệt đối của Wikimedia không?
 
-**Kết luận: không xác minh được từ repo này, nhưng có bằng chứng gián tiếp là có.**
+**Kết luận (đã cập nhật ở P6b): app phát được URL tuyệt đối; nó KHÔNG ghép tiền tố cho tên tệp.** Mã Flutter (`wordygo/lib`) truyền giá trị của `audio_*_url` nguyên văn vào `just_audio`: `word_lookup_popup.dart` (`_audio.setUrl(url)`), `dictionary/widgets/audio_button.dart` (`_player.setUrl(url)`), `ebook/providers/*` (`AudioSource.uri(Uri.parse(...))`). Không có chỗ nào nối tiền tố. Vì vậy P6b ghi URL tuyệt đối (`mp3_url` của Wikimedia). Chưa thử phát một URL `upload.wikimedia.org` trên máy thật: nếu thiết bị chặn, đổi `pickWiktionaryAudio` (một hàm) để trả NULL, endpoint TTS sẽ tạo bản R2 khi cần.
+
+Kết luận gốc của P6a (giữ để tham khảo): không xác minh được từ repo back-end, nhưng có bằng chứng gián tiếp là có.
 
 - **Back-end không biến tên tệp thành URL ở bất kỳ chỗ nào.** Mọi chỗ đọc `audio_us_url` / `audio_uk_url` (`routes/api/home.ts`, `routes/api/leitner.ts`, `routes/api/practice.ts`, `routes/api/retrieval.ts`, `services/leitnerSessionService.ts`, `routes/api/dictionary.ts`) trả giá trị **nguyên văn** cho app. `views/dictionary/show.ejs` cũng đặt nguyên giá trị vào `data-url`.
 - `POST /api/v1/dictionary/entries/:id/tts` lưu **URL tuyệt đối** (`R2_PUBLIC_URL/...mp3`) vào đúng hai cột này. Vậy các cột đã chứa lẫn lộn: 40 tên tệp tương đối (từ lần nhập Oxford) và, khi có người bấm phát âm, URL tuyệt đối của R2. App đã phải xử lý URL tuyệt đối `https://` cho trường hợp thứ hai.
@@ -127,7 +131,7 @@ Model, `max_tokens` và timeout lấy từ `AnthropicEnrichClient` (`ANTHROPIC_M
 | `output_config.effort` | `low` | cặp với `thinking: disabled` |
 | `temperature`, `top_p`, `top_k` | **không gửi** | **Đã thử một lần (14/10/2026):** `temperature: 0.2` → HTTP 400 "`temperature` is deprecated for this model" (request `req_011Cg2EQStz9kHgcn37PsRDu`). Mô hình chỉ nhận giá trị mặc định. Client chỉ gửi nếu truyền `temperature` rõ ràng (để thử lại sau khi model đổi) |
 | `system` | một khối `text` có `cache_control: { type: 'ephemeral' }` | prompt caching; phần tĩnh |
-| dự phòng | nếu model từ chối `output_config` (lỗi 400 nhắc `output_config` / `json_schema`), gọi lại **một lần** với tool bắt buộc `submit_entry` có cùng schema | spec §9.2; chưa từng xảy ra, được test bằng mock |
+| dự phòng | nếu model từ chối `output_config` (lỗi 400 nhắc `output_config` / `json_schema`), gọi lại **một lần** với tool bắt buộc `submit_entry` có cùng schema | spec §9.2; chưa từng xảy ra ngoài test. **Đã vá ở P6b:** trước đó lỗi 400 này làm mở circuit breaker nên lần gọi dự phòng bị chặn (`breaker_open`) và dự phòng không bao giờ chạy. Giờ lỗi 400 mang `output_config` được đánh dấu `affectsBreaker=false` (`UpstreamConfigError`), breaker bỏ qua nó; mọi lỗi 400 / 401 / 403 khác vẫn mở breaker. Có test với breaker THẬT (`tests/enrichment/p6aFixes.test.ts`) |
 
 **Kích thước thực đo:** system prompt khoảng 10,3K ký tự tiếng Việt; API tính **khoảng 7,7K đến 7,9K token** cho khối được cache (gồm cả JSON Schema, và tiếng Việt chia token dày hơn ước lượng ký tự / 4 nhiều). Tin nhắn người dùng 140 đến 1500 token. Token ra 170 đến 1840 mỗi từ. Chi phí: xem `docs/lookup-enrichment-samples.md` (trung bình khoảng $0.0008 cho mục từ đầy đủ, $0.0002 cho từ bị loại, khi cache còn ấm). Bảng giá nhập tay ở `services/enrichment/pricing.ts` (đã đối chiếu trang giá chính thức ngày 14/10/2026: Haiku 5.5 $0.10 vào / $0.50 ra mỗi triệu token cho prompt đến 100K; ghi cache 5 phút $0.125; đọc cache $0.01), **phải xác minh lại** trước khi dựa vào.
 
@@ -194,6 +198,9 @@ Dựa trên dữ liệu thật (`docs/lookup-refdata.md` §5). `ref_wiktionary_e
 | thành ngữ / cụm động từ / cụm kết hợp hỏng (rỗng, quá dài, ký tự lạ, cụm động từ không bắt đầu bằng động từ) | (ghi chú) | **bỏ** mục đó, không thử lại; quá 5 mục thì cắt |
 | đồng/trái nghĩa trùng, quá 8, hoặc là chính từ đang xét | (ghi chú) | làm sạch |
 | `definition_en` dùng lại chính từ | (ghi chú) | không từ chối, chỉ ghi `[kiểm tra]` |
+| từ không lập mục (không phải tiếng Anh, tên riêng, `variant_of` khác null) mà bản nháp vẫn có senses, pos, topics, cụm từ, cefr_level, is_countable, is_transitive | (ghi chú) | **bỏ hết** nội dung đó, không kiểm tra, không thử lại; ghi `[kiểm tra] bỏ nội dung của từ không lập mục` (P6b; trước đó nội dung lọt qua không kiểm tra) |
+| `lemma` chứa ký tự regex (`c++`, `foo(`) | `format` | là một lỗi `lemma` như thường; `escapeRegExp` bảo đảm validator không ném `SyntaxError` (P6b) |
+| quá 10 ghi chú của Haiku | (ghi chú) | cắt còn 10 ghi chú của Haiku; các dòng `[kiểm tra]` của validator luôn được giữ đủ (P6b; trước đó chúng bị cắt trước) |
 
 **Thử lại đúng một lần**, bằng cuộc hội thoại: tin nhắn gốc, bản trả lời trước (assistant), tin nhắn mới liệt kê lỗi kèm đường dẫn và yêu cầu trả **toàn bộ** JSON đã sửa. Vẫn sai: `{ ok: false, reason: 'invalid_output', details }` (details là lỗi của lần cuối). Không có lần thứ ba.
 
@@ -204,7 +211,7 @@ Dựa trên dữ liệu thật (`docs/lookup-refdata.md` §5). `ref_wiktionary_e
 | Free Dictionary lỗi tạm (không phải 404) khi Wiktionary không có dòng | `UpstreamUnavailable` → worker đặt hàng `queued`, pg-boss thử lại |
 | Free Dictionary 404 JSON | `not_found` (bình thường) |
 | Wiktionary / tần suất / Datamuse lỗi hoặc quá hạn | nguồn đó coi như thiếu, ghi vào `sourceErrors`; không làm hỏng job; `noSourceRecognizesWord` không được đặt true |
-| Thiếu bất kỳ tên nào trong 30 chủ đề ở bảng `tags` | `EnrichmentConfigError` mã `topics_not_seeded` (liệt kê tên thiếu) → worker: `failed / config_error`, **không thử lại**. Kiểm tra khi worker khởi động (log mức error) và ở đầu mỗi job |
+| Thiếu bất kỳ tên nào trong 30 chủ đề ở bảng `tags` | `EnrichmentConfigError` mã `topics_not_seeded` (liệt kê tên thiếu). **Khi khởi động (P6b):** `startEnrichmentRuntime` ném lỗi TRƯỚC khi mở pg-boss và đăng ký worker (log `topics_not_seeded`, tiến trình `npm run worker` thoát mã 1; API vẫn phục vụ), nên job nằm yên trong hàng đợi. Trước đó worker vẫn khởi động rồi làm mọi job `failed / config_error` vĩnh viễn. Ở đầu mỗi job vẫn kiểm tra: `failed / config_error`, không thử lại. Lỗi cơ sở dữ liệu khi kiểm tra KHÔNG bị báo là `topics_not_seeded` |
 | 400 / 401 / 403 từ Anthropic | `UpstreamConfigError` → `failed / config_error` |
 | Hết ngân sách Anthropic | `BudgetExceeded` → `skipped / budget` |
 | 429, 5xx, hết thời gian | `UpstreamUnavailable` → thử lại theo pg-boss |
@@ -215,6 +222,11 @@ Dựa trên dữ liệu thật (`docs/lookup-refdata.md` §5). `ref_wiktionary_e
 ## 8. Lệnh và tệp
 
 ```bash
+# (P6b) đường ống đầy đủ S0 đến S7 cho một từ, không qua hàng đợi; xem mục 10 đến 16
+npm run enrich:run -- --word serendipity --dry-run   # S0 đến S5: gọi Haiku, in mục từ và bảng sẽ ghi, KHÔNG ghi DB
+npm run enrich:run -- --word serendipity             # ghi DB (từ chối chạy khi ENRICHMENT_PUBLISH_POLICY=auto, trừ khi có --allow-auto)
+npm run enrich:review -- [--limit 20] [--unpublished] [--word serendipity]   # duyệt các mục từ tự tạo (admin_note bắt đầu bằng "[auto]")
+
 # S1 đến S4 cho một từ, KHÔNG ghi DB (không bỏ qua từ đã có trong từ điển, dùng được cho "run")
 npm run enrich:draft -- --word ubiquitous            # báo cáo dễ đọc
 npm run enrich:draft -- --word recieve --force       # vẫn gọi Haiku dù không đáng (xem Haiku tự phân loại)
@@ -234,6 +246,13 @@ Mặc định lệnh **không gọi Haiku** khi `noSourceRecognizesWord` (`unkno
 | `services/enrichment/errors.ts` | `EnrichmentConfigError` |
 | `services/lookup/refDb.ts` | `getRefDb()` dùng chung (tách khỏi `services/lookup/index.ts`) |
 | `scripts/enrichment/draft.ts` | lệnh `enrich:draft` |
+| `services/enrichment/pos.ts` | (P6b) `normalizePos`: mã loại từ của nguồn → 12 giá trị của DB |
+| `services/enrichment/assemble.ts` | (P6b) S5, `assembleEntry`, `buildMeaningVi`, cắt chuỗi theo cột |
+| `services/enrichment/persist.ts` | (P6b) S6, `persistEntry`, `linkFormOnly`, `findExistingEntry` |
+| `services/enrichment/pipeline.ts` | (P6b) `runPipeline`, `createPipeline`, `runEnrichment` (S0 đến S7) |
+| `services/enrichment/wiring.ts` | (P6b) nối pipeline với DB, client và breaker thật |
+| `services/enrichment/usage.ts` | (P6b) token → `api_usage_counters` sau mỗi lần gọi Haiku |
+| `scripts/enrichment/run.ts`, `review.ts` | (P6b) lệnh `enrich:run`, `enrich:review` |
 
 Test (không gọi mạng): `tests/enrichment/*` (schema, prompt, summarize, validators, draft/client, sources, topics) và `sourceFlags.realdata.test.ts` (chỉ đọc `ref_*` thật, không gọi Haiku).
 
@@ -249,3 +268,320 @@ Test (không gọi mạng): `tests/enrichment/*` (schema, prompt, summarize, val
 6. Free Dictionary treo (timeout / 522) với từ không tồn tại: từ rác sẽ đi vào `failed / upstream_error` chứ không phải `rejected / unknown_word` nếu không xử lý ở S2.
 7. `word_families` chưa được đưa vào schema.
 8. System prompt thực tế khoảng 7,9K token (không phải 2,5K): đổi bất kỳ ký tự nào là vô hiệu hóa cache (ghi cache khoảng $0.001 một lần mỗi 5 phút không hoạt động).
+
+
+---
+
+# Phần 2 (P6b): từ job đến mục từ hoàn chỉnh
+
+## 10. Sơ đồ S0 đến S7
+
+```
+ job { word (đã chuẩn hóa), jobRowId, signal }
+   │
+   ├─ (đầu job) loadTopicIds(): thiếu 30 chủ đề → EnrichmentConfigError (xem mục 15)
+   │
+   ├─ S0  findExistingEntry([word])   headword | lemma | word_forms.form_value, lower(), published hay không
+   │        có ─────────────────────────────────────────────────► skipped / exists   (không dịch vụ ngoài, không khóa)
+   │
+   ├─ S1  collectSources(word)        Wiktionary + tần suất + Datamuse song song; Free Dictionary CHỈ khi không có dòng Wiktionary
+   │        Free Dictionary lỗi tạm (không phải 404) ───────────► ném UpstreamUnavailable → pg-boss thử lại
+   │
+   ├─ S2  quyết định lemma
+   │        mọi dòng là lỗi chính tả / lỗi thời ────────────────► skipped / variant_form      (KHÔNG gọi Haiku)
+   │        không nguồn nào nhận ra từ ─────────────────────────► rejected / unknown_word     (KHÔNG gọi Haiku)
+   │        chỉ là dạng biến của lemma L:
+   │            entry của L đã có ──► linkFormOnly ─────────────► succeeded / form_linked     (KHÔNG gọi Haiku)
+   │            entry của L chưa có ─► S1 lần nữa cho L (dòng, tần suất, Datamuse CỦA L), làm giàu L,
+   │                                   thêm dạng biến vào word_forms trong cùng transaction
+   │        còn lại ────────────────► làm giàu chính từ
+   │
+   ├─ S3/S4  generateDraft(bundle)    1 lần gọi + tối đa 1 lần sửa
+   │        sai sau lần sửa ────────────────────────────────────► failed / invalid_output     (không thử lại)
+   │        is_proper_noun ─────────────────────────────────────► rejected / proper_noun
+   │        !is_english_word ───────────────────────────────────► rejected / not_english
+   │        variant_of khác null ───────────────────────────────► skipped / variant_form
+   │        lemma của bản nháp khác từ đang làm giàu ───────────► skipped / lemma_mismatch    (không tạo mục từ)
+   │
+   ├─ S5  assembleEntry(bundle, draft, ctx)   thuần, không DB
+   │        meaning_vi rỗng ────────────────────────────────────► failed / invalid_output
+   │
+   ├─ S6  persistEntry   MỘT transaction, khóa advisory theo lemma, kiểm tra lại sự tồn tại
+   │        entry đã có (job khác vừa ghi) + có dạng biến ──────► succeeded / form_linked
+   │        entry đã có, không có gì để nối ────────────────────► skipped / exists
+   │        tạo mới ────────────────────────────────────────────► succeeded
+   │
+   └─ S7  trả EnrichmentOutcome { status, reason, entryId, model, inputTokens, outputTokens, stagesMs } cho worker.
+          Worker ghi word_enrichment_jobs và dòng log `enrich` (có stages_ms). Token đã được cộng vào api_usage_counters
+          NGAY SAU MỖI LẦN GỌI Haiku (services/enrichment/usage.ts), nên không mất khi một giai đoạn sau lỗi.
+```
+
+**Lỗi thì ném, kết quả nghiệp vụ thì trả** (hợp đồng với `services/queue/enrichmentWorker.ts`): `UpstreamUnavailable` và lỗi lạ → pg-boss thử lại; `UpstreamConfigError` / `EnrichmentConfigError` → `failed / config_error`; `BudgetExceeded` → `skipped / budget`. Breaker `anthropic` mở ngay khi `BudgetExceeded` (`spend_limit`, `provider_quota`) hoặc lỗi cấu hình 400 / 401 / 403 (trừ 400 về `output_config`), nên các job sau nhận `breaker_open` (`UpstreamUnavailable`, thử lại sau) thay vì gọi vô ích.
+
+**Một job cho dạng biến.** Khi `ran` chỉ là dạng biến của `run` và `run` chưa có, pipeline thu thập nguồn LẦN HAI cho `run` (dòng Wiktionary, tần suất, ứng viên Datamuse của `run`), nhờ Haiku viết mục từ `run`, và thêm `ran` (`past_simple`) vào `word_forms` trong cùng transaction. Bản nháp luôn nói về lemma, không bao giờ về dạng biến. Chỉ đi một bước (dạng biến của dạng biến → `skipped / lemma_mismatch`).
+
+**Từ có nghĩa riêng thì không phải dạng biến thuần.** `running` có cả nghĩa danh từ, tính từ, trạng từ của riêng nó (`onlyFormRows = false`), nên job `running` làm giàu chính `running`. Khi `run` đã có thì `running` nằm trong `word_forms` của `run` (Wiktionary liệt kê `running` trong `forms` của `run`) và S0 dừng ở `exists`. Tương tự `ran` và `runs`: sau khi `run` được tạo, cả ba đều dừng ở S0 và không tốn token. Nhánh `form_linked` chỉ chạy khi dạng biến CHƯA nằm trong `word_forms` (ví dụ `appreciations` của `appreciation`, mục từ cũ).
+
+## 11. Bảng mã `reason` cuối cùng
+
+| Mã | `status` | Ai đặt | Ý nghĩa |
+|---|---|---|---|
+| (không có) | `succeeded` | pipeline | Đã tạo mục từ mới; `entry_id` trỏ tới nó |
+| `form_linked` | `succeeded` | pipeline | Chỉ thêm dạng biến vào `word_forms` của entry đã có (hoặc vừa được job khác tạo); không gọi Haiku khi entry đã có từ trước |
+| `exists` | `skipped` | pipeline (S0, S2, S6) | Đã có entry khớp headword / lemma / `word_forms`, published hay chưa; hoặc không có gì để nối (loại dạng biến không xác định) |
+| `variant_form` | `skipped` | pipeline (S2, S4) | Mọi dòng Wiktionary là lỗi chính tả / lỗi thời / phi chuẩn, hoặc Haiku đặt `variant_of` |
+| `lemma_mismatch` | `skipped` | pipeline (S2, S4) | Lemma của bản nháp khác từ tra, hoặc dạng biến của một dạng biến; không tạo mục từ, admin xử lý |
+| `budget` | `skipped` | worker | `BudgetExceeded` (hết ngân sách Anthropic) |
+| `daily_cap` | (không có hàng) | enqueuer | Hết `ENRICHMENT_MAX_JOBS_PER_DAY` |
+| `duplicate` | `skipped` | enqueuer | `send` trả `null` |
+| `unknown_word` | `rejected` | pipeline (S2) | Không nguồn nào nhận ra từ |
+| `proper_noun` | `rejected` | pipeline (S4) | Haiku: tên riêng |
+| `not_english` | `rejected` | pipeline (S4) | Haiku: không phải từ tiếng Anh |
+| `invalid_output` | `failed` | pipeline (S4, S5) | Bản nháp sai sau một lần sửa, hoặc không thể tạo `meaning_vi`; không thử lại |
+| `config_error` | `failed` | worker | `UpstreamConfigError` / `EnrichmentConfigError` (`topics_not_seeded`) |
+| `upstream_error` | `queued` → `failed` | worker | `UpstreamUnavailable` hoặc lỗi lạ; lần cuối thì `failed` |
+| `dead_letter`, `stale`, `queue_error`, `invalid_word` | | worker / reconcile / enqueuer | Xem `docs/lookup-queue.md` §9 |
+| `pipeline_not_ready` | | | Của chỗ gắn rỗng P5. **Không còn được tạo** từ P6b; có thể còn trong hàng sổ cũ |
+
+## 12. Quy tắc gộp (S5, `services/enrichment/assemble.ts`)
+
+`assembleEntry` thuần (không DB, không mạng, không đồng hồ). Nguồn theo trường (spec §8.1, sửa theo dữ liệu thật):
+
+| Trường | Nguồn và quy tắc |
+|---|---|
+| `lemma` | Bản nháp (đã kiểm tra: chữ thường, một từ, bằng `expectedLemma` nếu nguồn nêu) |
+| `headword` | Dạng chữ của Wiktionary: chữ thường nếu có dòng không phải tên riêng viết thường; nếu không thì `data.word` (`April`, `AIDS`); không có Wiktionary thì của Haiku. Chỉ khác `lemma` ở chữ hoa chữ thường |
+| `pos[]` | Loại từ của các sense đã ghi, theo thứ tự xuất hiện, bỏ trùng, đúng 12 giá trị của DB (`normalizePos` đổi mã Wiktionary / Free Dictionary: `adj` → `adjective`, `intj` → `exclamation`...; `name`, `phrase`, `prefix`... → bỏ). Khác loại từ của Wiktionary thì ghi vào `admin_note` |
+| `ipa_us`, `ipa_uk` | Wiktionary `sounds` có thẻ giọng: Mỹ = `US`, `General-American`; Anh = `UK`, `Received-Pronunciation`, `Southern-England`. Giữ dấu gạch chéo `/…/` (như 838 / 840 dòng hiện có); bỏ giá trị trong ngoặc vuông và IPA cụt (`/-ˌkæst/`). Rồi Free Dictionary (`us`, `uk`; nếu cả hai thiếu thì IPA không rõ giọng vào `ipa_us`, ghi vào `admin_note`). Rồi NULL. **Không bao giờ lấy IPA từ Haiku.** IPA không có thẻ giọng của Wiktionary KHÔNG được dùng (xem mục 16) |
+| `audio_us_url`, `audio_uk_url` | `mp3_url` (rồi `ogg_url`) của Wiktionary; giọng theo thẻ, nếu không có thì theo tên tệp (`en-us-*`, `En-uk-*`); tệp Lingua Libre lấy giọng của thẻ vùng. **URL tuyệt đối**, giữ nguyên hoặc bỏ (dài hơn 500 ký tự thì bỏ, không cắt). Rồi Free Dictionary. Rồi NULL |
+| `meaning_vi` | Vòng tròn (spec §9.8): nghĩa thứ nhất của từng sense theo thứ tự sense, rồi nghĩa thứ hai... bỏ nghĩa trùng (chuẩn hóa bằng `normalizeVietnameseAnswer`); dừng khi đủ 6 nghĩa hoặc khi thêm một nghĩa nữa vượt 200 ký tự; nối bằng `'; '`. Rỗng thì lấy nghĩa đầu của sense đầu; vẫn rỗng thì `failed / invalid_output` (không bao giờ ghi chuỗi rỗng) |
+| `meaning_en`, `example_en`, `example_vi` | Của sense đầu (ví dụ đầu); sense đầu không có ví dụ thì ví dụ đầu tiên tìm được |
+| sense | `pos`, `definition_en`, `register` (chỉ 7 giá trị của CHECK, khác thì NULL), `domain`, `region`, `grammar_note`, `usage_note`, ví dụ: **của Haiku** (Haiku đã thấy thẻ Wiktionary; danh sách sense của nó đã viết lại và đổi thứ tự nên không ghép 1-1 với Wiktionary được). `definition_vi` = tối đa 4 nghĩa nối bằng `'; '`. `sense_order` bắt đầu từ 0, một số chạy cho cả mục từ (xem mục 16) |
+| `cefr_level` | Haiku; luôn ghi là ước tính trong `admin_note` |
+| `frequency_rank` | `ref_word_frequency.rank` của LEMMA; thiếu thì NULL |
+| `is_countable`, `is_transitive` | Wiktionary trước (`head_templates`: `countable` / `uncountable`; thẻ sense: `transitive`, `intransitive`, `ambitransitive`), rồi Haiku; chỉ khi mục từ có nghĩa danh từ / động từ |
+| `etymology` | `etymology_text` của dòng Wiktionary không phải tên riêng, bỏ phần "Etymology tree" (cây tổ tiên, mỗi dòng 2 đến 4 từ) rồi lấy từ dòng văn xuôi đầu tiên; cây không có văn xuôi (bị loader cắt ở 1000 ký tự) thì NULL; tối đa 1000 ký tự |
+| `register` (mục từ) | `register` của sense đầu |
+| `word_forms` | `forms` của Wiktionary, theo loại từ của DÒNG (bảng chia động từ liệt kê cả "ran" với thẻ quá khứ + ngôi 3 số ít: ô của bảng không phải dạng riêng). Bỏ dạng không ánh xạ được vào 9 `form_type`, mang thẻ misspelling / obsolete / archaic / nonstandard / dialectal / rare / proscribed, nhiều từ, bằng headword / lemma; tối đa 20 |
+| `sense_synonyms`, `sense_antonyms` | Danh sách của sense Wiktionary khớp nhất (cùng loại từ, trùng nội dung định nghĩa tiếng Anh ≥ 0,25 theo hệ số Dice; không khớp thì không mượn) ĐỨNG TRƯỚC, rồi lựa chọn của Haiku; chữ thường, bỏ trùng, khác headword và lemma, tối đa 8. Datamuse chỉ là ứng viên Haiku đã thấy, không ghi trực tiếp. `synonym_entry_id` trỏ tới entry ĐÃ CÓ và published (khớp lemma), không thì NULL |
+| `entry_synonyms`, `entry_antonyms` | Chỉ nối tới entry ĐÃ CÓ và published (khớp `lemma`); không tạo entry mới để nối |
+| `entry_tags` | Haiku, 30 tên chủ đề, tối đa 3 (id lấy từ bộ nhớ `loadTopicIds`) |
+| `entry_answer_aliases` | Các nghĩa của mọi sense còn lại sau khi trừ những nghĩa đã nằm trong `meaning_vi`; `normalized_answer` = `normalizeVietnameseAnswer`; `source = 'ai_accepted'`, `status = 'active'`. Chỉ mục duy nhất là chỉ mục MỘT PHẦN nên dùng `INSERT ... WHERE NOT EXISTS` |
+| `entry_idioms`, `phrasal_verbs`, `collocations` | Chỉ các mục Haiku đã qua kiểm tra, tối đa 5 mỗi loại (`collocations.sense_id` và `frequency` để NULL) |
+| `word_families` | Chỉ khi `derived` / `related` của Wiktionary có từ đơn đã là entry published: tạo (hoặc dùng lại) họ `family_root = lemma`, thành viên `root` (mục từ mới) và tối đa 5 entry có sẵn (`noun_form`, `verb_form`, `adj_form`, `adv_form`, `other` theo loại từ đầu của entry đó) |
+| `source`, `created_by` | `'wiktionary'`, NULL |
+| `entry_edit_history` | Một dòng `auto_created`, `admin_id` NULL, `new_value` = `{"job_id", "sources", "model"}` |
+
+**Phân tầng và `published`** (spec §3, §10.3). Tầng A (thiếu thì `published = false`): headword, lemma, pos (từ 1), `meaning_vi`, từ 1 sense có `definition_en` và `definition_vi`, từ 1 ví dụ có cả hai thứ tiếng. Tầng B (thiếu vẫn xuất bản, ghi vào `admin_note`): IPA (một trong hai), `cefr_level`, `frequency_rank`, `is_countable` (khi có nghĩa danh từ), `is_transitive` (khi có nghĩa động từ), từ 1 chủ đề, `etymology`. `ENRICHMENT_PUBLISH_POLICY=review` → luôn `false`; `auto` → `true` khi đủ tầng A.
+
+**`admin_note`** bắt đầu bằng `[auto]`, rồi (ngăn cách bằng ` · `): nguồn đã dùng, model, id job, trạng thái xuất bản, tầng A thiếu, tầng B thiếu, trường là ước tính (`cefr_level=B1`), cảnh báo giọng IPA, loại từ Wiktionary không có trong mục, ghi chú của Haiku (kể cả dòng `[kiểm tra]` của validator). Không chứa email, tên hay nội dung của người dùng. Tối đa 4000 ký tự.
+
+**Cắt chuỗi theo cột** (không bao giờ gặp 22001; `COLUMN_LIMITS` trong `assemble.ts`, đo từ `information_schema` ngày 15/10/2026): headword 255, lemma 255, ipa 255, audio 500, phần tử `pos` 50, `cefr_level` 2, `entry_senses.pos` 30, `register` 30, `domain` 100, `region` 30, `form_value` 255, `synonym_text` 255, `idiom_text` 500, `phrasal_verb` 255, `particle` 30, `collocation` 255, `pattern` 50, `family_root` 255. URL không bị cắt: dài quá thì bỏ.
+
+## 13. Ghi database (S6, `services/enrichment/persist.ts`)
+
+1. `BEGIN`, rồi `pg_advisory_xact_lock(hashtextextended('enrich:' || lemma, 0))`: các job cùng lemma (`ran`, `running`, `run`) xếp hàng ở đây. Khóa chỉ lấy lúc ghi, không giữ trong lúc chờ Wiktionary / Free Dictionary / Haiku.
+2. Kiểm tra lại sự tồn tại (headword, lemma, `word_forms.form_value`, `lower()`). Đã có: nếu job xuất phát từ một dạng biến thì thêm dạng biến, trả `form_linked`; không thì trả `exists`. Không sửa gì của entry đã có.
+3. Thứ tự ghi (spec §10.4): `dictionary_entries` → `entry_senses` → `sense_examples` → `word_forms` → `sense_synonyms` → `sense_antonyms` → `entry_synonyms` → `entry_antonyms` → `entry_tags` → `entry_answer_aliases` → `entry_idioms` → `phrasal_verbs` → `collocations` → `word_families` / `word_family_members` → `entry_edit_history`. Mỗi bảng MỘT câu lệnh (`unnest` các mảng), khoảng 15 lượt gọi cho cả transaction.
+4. `ON CONFLICT DO NOTHING` ở mọi bảng có khóa (`dictionary_entries (headword, lemma)`, `entry_senses (entry_id, pos, sense_order)`, `word_forms (entry_id, form_type, form_value)`, `sense_synonyms`, `sense_antonyms`, `entry_synonyms`, `entry_antonyms`, `entry_tags`, `word_family_members`); `INSERT ... WHERE NOT EXISTS` ở bảng không có khóa (`sense_examples`, `entry_idioms`, `phrasal_verbs`, `collocations`, và `entry_answer_aliases` vì chỉ mục duy nhất chỉ áp khi `status='active'`). Không xóa rồi ghi lại.
+5. Lỗi giữa chừng: `ROLLBACK` toàn bộ (có test ép lỗi ở từng bảng con). Lỗi `23505` (một tiến trình khác vừa ghi) và `ON CONFLICT (headword, lemma)` không trả dòng được xử lý như "đã tồn tại".
+6. `linkFormOnly(entryId, form, type)`: thêm một dòng `word_forms` vào entry đã có, cũng dưới khóa advisory. Không thêm khi đã có dòng cùng `form_value` (không phân biệt hoa thường, bất kể `form_type`). Loại dạng biến không xác định thì không ghi (CHECK chỉ cho 9 giá trị).
+
+## 14. Công cụ dòng lệnh
+
+```bash
+npm run enrich:run -- --word <w> [--dry-run] [--allow-auto]
+```
+In từng giai đoạn kèm thời gian, token, chi phí ước tính (bảng giá nhập tay, phải xác minh lại) và kết quả. `--dry-run`: S0 đến S5 (CÓ gọi Haiku), in mục từ đã gộp và bảng sẽ ghi (bảng, số dòng), KHÔNG ghi. Không dùng hàng đợi, không tạo hàng `word_enrichment_jobs`; mã job trong `admin_note` có dạng `cli-<uuid>`. Từ chối ghi khi `ENRICHMENT_PUBLISH_POLICY=auto` (mục từ đủ tầng A sẽ được xuất bản ngay) trừ khi có `--allow-auto`.
+
+```bash
+npm run enrich:review -- [--limit 20] [--unpublished] [--word serendipity]
+```
+Liệt kê các mục từ tự tạo (`admin_note LIKE '[auto]%'`) kèm `published`, loại từ, số sense, `meaning_vi`, tầng B còn thiếu; `--word` in một mục từ đầy đủ (sense, nghĩa tiếng Việt, ví dụ, dạng biến, `admin_note`). Chỉ đọc. Dùng cho đến khi có trang quản trị ở P8.
+
+Test (không gọi mạng): `tests/enrichment/{pos,assemble,pipeline,p6aFixes}.test.ts`; trên Postgres thật `persist.integration.test.ts` (fixture `qzq<mã>…`, tự xóa); trên dữ liệu `ref_*` thật, chỉ đọc, `pipeline.realdata.test.ts`; `tests/queue/runtime.test.ts`.
+
+## 15. Xử lý sự cố thường gặp
+
+| Triệu chứng | Nguyên nhân thường gặp | Cách xử lý |
+|---|---|---|
+| `npm run worker` thoát mã 1, log `topics_not_seeded` (liệt kê tên thiếu) | Bảng `tags` chưa có đủ 30 chủ đề | Chạy `psql $DATABASE_URL -f docs/seed-topics.sql`; job vẫn nằm trong hàng đợi, không mất |
+| Hàng `failed / config_error`, log có `provider` và `http_status` | Thiếu hoặc sai `ANTHROPIC_API_KEY`, hoặc model không tồn tại (401 / 403 / 404) | Sửa khóa hoặc `ANTHROPIC_MODEL_ENRICH`; breaker `anthropic` mở ngay, sau `UPSTREAM_BREAKER_RESET_MS` thử lại. Gửi lại từ bằng `enrich:enqueue` |
+| Hàng `skipped / budget` | Hết ngân sách Anthropic (`enforced_spend_limit_reached` hoặc "reached your specified API usage limits") | Nâng giới hạn ở console Anthropic, rồi gửi lại. Breaker mở nên các job khác nhận `breaker_open` và thử lại sau |
+| Hàng `failed / upstream_error` sau 4 lần chạy với một từ vô nghĩa | Free Dictionary treo (timeout / 522) với từ không tồn tại, không phải 404 | Đúng thiết kế (lỗi tạm thì ném để thử lại). Từ rác không tốn tiền Haiku. Xem mục 16 |
+| `skipped / exists` nhưng không thấy mục từ trên app | Entry có sẵn nhưng `published = false` (chính sách `review`) | `npm run enrich:review -- --unpublished`; duyệt rồi đặt `published = true` |
+| `skipped / lemma_mismatch` | Haiku trả lemma khác từ tra (ví dụ `geese` → `goose` khi Wiktionary không có dòng) | Không có entry nào bị tạo. Admin tạo tay, hoặc gửi job cho chính lemma |
+| `failed / invalid_output` | Bản nháp vẫn sai sau một lần sửa (xem lỗi bằng `enrich:run --dry-run`) | Chạy lại (Haiku không tất định); nếu lặp lại, xem validator ở mục 7 |
+| Mục từ thiếu IPA (`thiếu tầng B: ipa`) | Khoảng 47% dòng Wiktionary có IPA không kèm thẻ giọng; ví dụ `ephemeral` chỉ có file audio gắn thẻ US | Xem mục 16; điền tay hoặc đổi quy tắc `pickWiktionaryIpa` |
+| Cần chạy lại một từ đã tạo sai | Mục từ tự tạo có sai sót | Xóa mục từ: `DELETE FROM dictionary_entries WHERE id = '<id>' AND admin_note LIKE '[auto]%'` (mọi bảng con, kể cả `word_family_members` và `entry_edit_history`, xóa theo; `word_enrichment_jobs.entry_id` thành NULL); rồi `enrich:run` hoặc `enrich:enqueue` |
+| Hai job cùng lemma chờ nhau lâu | Một transaction S6 giữ khóa advisory (database chậm) | Bình thường, mỗi giao dịch cỡ 1 giây; xem `pg_stat_activity` nếu quá vài chục giây |
+| `23505` trong log | Job khác vừa ghi cùng lemma | Không cần làm gì: được xử lý như `exists` |
+
+## 16. Quyết định đã tự đưa ra, khác biệt với spec, giới hạn đã biết (P6b)
+
+**Quyết định**
+1. **`sense_order` là một số chạy cho cả mục từ** (0, 1, 2...), theo thứ tự của Haiku (phổ biến nhất trước). Mục từ cũ đánh số theo từng loại từ (`noun 0, verb 0, noun 1, verb 1`); app chỉ `ORDER BY sense_order`, nên số chạy chung giữ đúng thứ tự phổ biến và vẫn thỏa `UNIQUE (entry_id, pos, sense_order)`.
+2. **Sense lấy từ Haiku, không ghép với sense Wiktionary**, trừ đồng / trái nghĩa (ghép theo độ trùng định nghĩa, ngưỡng 0,25). Lý do ở mục 12.
+3. **IPA không có thẻ giọng không được dùng.** Đúng thứ tự spec (Wiktionary có thẻ → Free Dictionary → NULL) và "không đoán giọng". Hệ quả đo được: trong `ref_wiktionary_en`, 38.619 / 81.794 dòng (47%) có IPA `/…/` nhưng không có IPA nào gắn US hoặc UK; và Free Dictionary không được hỏi khi Wiktionary có dòng. Các mục từ này được tạo với `thiếu tầng B: ipa`. Phương án nếu muốn: lấy IPA đầu tiên không thẻ làm `ipa_us` (ghi chú rõ giọng), hoặc hỏi Free Dictionary khi thiếu IPA.
+4. **Audio ghi URL tuyệt đối** (mục 1.2). Dài quá 500 ký tự thì bỏ, không cắt (cắt làm hỏng URL).
+5. **Token ghi vào `word_enrichment_jobs` và `api_usage_counters` là mọi token đầu vào đã tính tiền**: đầu vào mới + ghi cache + đọc cache. System prompt (khoảng 7,9K token) gần như luôn là "đọc cache", nên chỉ đếm đầu vào mới sẽ giấu phần lớn khối lượng. `api_usage_counters`: `provider = 'anthropic'`, đơn vị `input_tokens` / `output_tokens`, kỳ `YYYY-MM` (UTC). Đường nhanh vẫn ghi `anthropic_fast` theo ngày.
+6. **Dòng log `enrich` do worker ghi** (một dòng mỗi job, có `stages_ms`, `entry_id`, `model`, token), không ghi thêm ở pipeline để tránh log đôi. Lệnh `enrich:run` tự in.
+7. **`lemma_mismatch` rộng hơn mô tả**: mọi trường hợp lemma của bản nháp khác từ đang làm giàu (không chỉ khi không có dòng Wiktionary), vì từ tra sẽ không tìm thấy mục từ bằng chính cách viết của nó.
+8. **Dạng biến của dạng biến chỉ đi một bước** (`lemma_mismatch`); và entry của lemma chỉ được nối khi khớp headword hoặc lemma (không nối dạng biến vào một entry tìm thấy qua `word_forms`).
+9. **Mở rộng cửa sổ Wiktionary cho Haiku**: từ có hơn 8 sense (`run` 22, `light` 43, `bank` 42) gửi 12 sense và ngân sách 4000 token thay vì 6 và 2500. Haiku vẫn viết tối đa 6 sense. Thêm khoảng 1K đến 2K token đầu vào mỗi từ như vậy (cỡ $0,0002).
+10. **Dạng nhiều từ và dạng bằng lemma không vào `word_forms`**; tối đa 20 dạng.
+11. **Ví dụ của sense** (`sense_examples.source`) ghi `ai_enrichment`.
+
+**Khác biệt đã sửa vào docs**
+- `dictionary_entries.meaning_vi`: migration 01 ghi `NOT NULL`, nhưng DB dev thật cho phép NULL (đo 15/10/2026, `information_schema`). Mã không dựa vào ràng buộc: ghi `meaning_vi` luôn khác rỗng (lỗi thì `invalid_output`).
+- Spec S1 nói Free Dictionary lỗi tạm thì ném để thử lại; với từ rác Free Dictionary treo nên kết quả là `failed / upstream_error` sau các lần thử, không phải `rejected / unknown_word` (quyết định giữ đúng spec, mục 15).
+- Spec §9.8 đã có vòng tròn; bổ sung cách bỏ trùng, dừng và dự phòng. §10.7 aliases: nghĩa còn lại SAU KHI trừ nghĩa đã nằm trong `meaning_vi`.
+- Breaker: `BudgetExceeded` của nhà cung cấp mở breaker (trước là trung tính); lỗi 400 về `output_config` không mở (trước là có, làm hỏng bước dự phòng).
+- `docs/lookup-spec.md` §9.4: cửa sổ Wiktionary 6 sense / 2500 token, hoặc 12 / 4000 token khi hơn 8 sense.
+
+**Giới hạn đã biết**
+- Nghĩa tiếng Việt sinh ra vẫn cần người duyệt (mục 4 của `docs/lookup-enrichment-samples.md`): nghĩa độn về ý, nghĩa trùng giữa các sense, chủ đề lệch sau khi bỏ `academic_formal`. Với chính sách `review`, mục từ luôn `published = false`.
+- Đồng / trái nghĩa của Wiktionary được xếp trước và có thể nhiều hơn Haiku chọn (ví dụ `serendipity`: "casualty", "hap", "chance-medley").
+- `word_families` và `entry_synonyms` chỉ nối tới entry đã có tại thời điểm tạo; entry tạo sau không quay lại nối (việc cho P7 nếu cần).
+- Neon (Singapore) từ máy dev: S6 cỡ 0,8 đến 1,8 giây, S1 cỡ 0,5 đến 2 giây.
+- Một job lỗi ở S6 rồi thử lại sẽ gọi Haiku lần nữa (không lưu bản nháp). Hiếm; mỗi lần cỡ $0,001.
+
+**Việc còn tồn**
+- P7: gắn lịch `reconcileStaleJobs`; nối lại `entry_synonyms` / `word_families` cho entry cũ; quyết định IPA không thẻ (mục 16.3).
+- P8: trang quản trị duyệt mục từ (`published`, sửa nghĩa, xem `admin_note`), lọc `[auto]`; phân quyền theo `admin_accounts.role`.
+
+
+## 17. Mục từ đã tạo thật ở P6b (DB dev, `ENRICHMENT_PUBLISH_POLICY=review`, 15/10/2026)
+
+Sáu từ chạy bằng `enrich:run` (`quarantine` qua hàng đợi và `npm run worker`). Tất cả `published = false`, `source = 'wiktionary'`, `created_by` NULL, `admin_note` bắt đầu bằng `[auto]`. Số dòng đo bằng SQL sau khi ghi (thêm một dòng `entry_edit_history` mỗi mục từ):
+
+| Từ | published | pos | cefr | rank | ipa | audio | etymology | entry_senses | sense_examples | word_forms | sense_synonyms | sense_antonyms | entry_synonyms | entry_tags | entry_answer_aliases | collocations | tầng B thiếu |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| serendipity | false | noun | C1 | 40016 | us+uk | us+uk | có | 1 | 2 | 1 | 4 | 3 | 2 | 1 | 0 | 1 | - |
+| ephemeral | false | adjective,noun | C1 | 29260 | - | us | có | 4 | 8 | 1 | 13 | 7 | 0 | 1 | 3 | 2 | ipa, is_countable |
+| podcast | false | noun,verb | B2 | 5615 | us+uk | uk | có | 2 | 2 | 3 | 1 | 0 | 0 | 2 | 0 | 0 | - |
+| karaoke | false | noun,verb | B1 | 16507 | uk | uk | có | 3 | 3 | 5 | 1 | 0 | 0 | 2 | 0 | 1 | - |
+| run | false | verb,noun,adjective | A1 | 309 | us+uk | us | có | 5 | 6 | 5 | 9 | 3 | 0 | 3 | 4 | 1 | - |
+| quarantine | false | noun,verb | B2 | 12306 | us+uk | us | có | 2 | 2 | 5 | 2 | 1 | 0 | 2 | 0 | 1 | - |
+
+Các từ này nằm trong DB dev để bạn duyệt (`npm run enrich:review`). Xóa mục từ nào để chạy lại: xem mục 15.
+
+### Ví dụ một mục từ hoàn chỉnh (`karaoke`, đọc từ DB, rút gọn một số chuỗi dài)
+
+```json
+{
+  "dictionary_entries": {
+    "headword": "karaoke",
+    "lemma": "karaoke",
+    "pos": [
+      "noun",
+      "verb"
+    ],
+    "ipa_us": null,
+    "ipa_uk": "/ˈkæ.ɹiˌəʊ.ki/",
+    "audio_us_url": null,
+    "audio_uk_url": "https://upload.wikimedia.org/wikipedia/commons/transcoded/2/2d/LL-Q1860_%28eng%29-Vealhurl…",
+    "meaning_vi": "karaoke; buổi hát karaoke; hát karaoke; quán karaoke",
+    "meaning_en": "A form of entertainment in which people sing along to recorded instrumental vers…",
+    "example_en": "We spent the evening singing karaoke with friends.",
+    "example_vi": "Chúng tôi dành cả buổi tối hát karaoke cùng bạn bè.",
+    "cefr_level": "B1",
+    "frequency_rank": 16507,
+    "register": null,
+    "is_countable": true,
+    "is_transitive": false,
+    "etymology": "Borrowed from Japanese カラオケ (karaoke), from 空(から) (kara, “empty”) + オケ (oke, “or…",
+    "source": "wiktionary",
+    "published": false,
+    "created_by": null,
+    "admin_note": "[auto] nguồn: wiktionary, ref_word_frequency, haiku · model: claude-haiku-5-5 · job: cli-caf3373c-94d8-419b-b0b3-b4ce4b1a3b2c · published=false: chờ duyệt (ENRICHMENT_PUBLISH_POLICY=review) · ước tính: cefr_level=B1 · ghi chú của Haiku: Dữ liệu không có từ đồng nghĩa hay trái nghĩa từ Datamuse; để trống. | Nghĩa tập thể dục (exe…"
+  },
+  "entry_senses": [
+    {
+      "sense_order": 0,
+      "pos": "noun",
+      "definition_en": "A form of entertainment in which people sing along to record…",
+      "definition_vi": "karaoke; hát karaoke",
+      "register": null,
+      "grammar_note": "Thường dùng không đếm được; khi chỉ một buổi hát t…",
+      "examples": [
+        {
+          "example_en": "We spent the evening singing karaoke with friends.",
+          "example_vi": "Chúng tôi dành cả buổi tối hát karaoke cùng bạn bè.",
+          "source": "ai_enrichment"
+        }
+      ],
+      "synonyms": []
+    },
+    {
+      "sense_order": 1,
+      "pos": "noun",
+      "definition_en": "A single session of singing karaoke, or a place where karaok…",
+      "definition_vi": "buổi hát karaoke; quán karaoke",
+      "register": null,
+      "grammar_note": "Danh từ đếm được.",
+      "examples": [
+        {
+          "example_en": "There is a popular karaoke down the street.",
+          "example_vi": "Có một quán karaoke nổi tiếng ngay cuối phố.",
+          "source": "ai_enrichment"
+        }
+      ],
+      "synonyms": [
+        "noraebang"
+      ]
+    },
+    {
+      "sense_order": 2,
+      "pos": "verb",
+      "definition_en": "To perform karaoke by singing along to a recorded backing tr…",
+      "definition_vi": "hát karaoke",
+      "register": "informal",
+      "grammar_note": "Động từ nội động; chia thêm đuôi -ing và -ed.",
+      "examples": [
+        {
+          "example_en": "After dinner, they karaoked until midnight.",
+          "example_vi": "Sau bữa tối, họ hát karaoke đến nửa đêm.",
+          "source": "ai_enrichment"
+        }
+      ],
+      "synonyms": []
+    }
+  ],
+  "word_forms": [
+    "karaokes (plural)",
+    "karaokes (third_person_singular)",
+    "karaokeing (present_participle)",
+    "karaoked (past_participle)",
+    "karaoked (past_simple)"
+  ],
+  "entry_tags": [
+    "arts_entertainment",
+    "sports_recreation"
+  ],
+  "entry_answer_aliases": [],
+  "collocations": [
+    {
+      "collocation": "go to karaoke",
+      "pattern": "verb + noun"
+    }
+  ],
+  "entry_edit_history": [
+    {
+      "field_name": "auto_created",
+      "admin_id": null,
+      "new_value": {
+        "job_id": "cli-caf3373c-94d8-419b-b0b3-b4ce4b1a3b2c",
+        "sources": [
+          "wiktionary",
+          "ref_word_frequency",
+          "haiku"
+        ],
+        "model": "claude-haiku-5-5"
+      }
+    }
+  ]
+}
+```
+
+`karaoke` chỉ có `ipa_uk`: Wiktionary chỉ gắn thẻ UK cho IPA của nó (dòng US chỉ có phiên âm `enpr`). `is_transitive: false` đến từ thẻ `intransitive` của Wiktionary, không phải từ Haiku. `meaning_vi` ghép vòng tròn nghĩa thứ nhất của 3 sense rồi nghĩa thứ hai, bỏ `hát karaoke` trùng.

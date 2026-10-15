@@ -4,7 +4,8 @@
  * Keys are (provider, period, unit):
  *   google_translate · 'YYYY-MM'      · chars
  *   enrichment       · 'YYYY-MM-DD'   · jobs
- *   anthropic        · 'YYYY-MM-DD'   · input_tokens | output_tokens
+ *   anthropic        · 'YYYY-MM'      · input_tokens | output_tokens   (enrichment job; input includes cache writes and reads)
+ *   anthropic_fast   · 'YYYY-MM-DD'   · input_tokens | output_tokens   (lookup fast path)
  * Periods are always UTC so every server instance agrees on the boundary.
  */
 

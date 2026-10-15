@@ -2,7 +2,7 @@
 
 Cập nhật: 14/10/2026 · Phiên bản pg-boss đối chiếu: **12.37.1** (đúng bản trong `node_modules`) · Đặc tả gốc: `docs/lookup-spec.md` §7, §8, §11, §12.
 
-P5 làm **hạ tầng**: hàng đợi, sổ job `word_enrichment_jobs`, worker, thử lại, dừng gọn. Bước làm giàu thật (Wiktionary, Haiku, ghi từ điển) chưa có: `services/enrichment/pipeline.ts` là chỗ gắn rỗng, luôn trả `skipped / pipeline_not_ready` (P6a, P6b thay thế).
+P5 làm **hạ tầng**: hàng đợi, sổ job `word_enrichment_jobs`, worker, thử lại, dừng gọn. Từ P6b, `services/enrichment/pipeline.ts` là đường ống thật (S0 đến S7, xem `docs/lookup-enrichment.md` mục 10); chỗ gắn rỗng luôn trả `skipped / pipeline_not_ready` của P5 không còn. Các mô tả bên dưới về hợp đồng worker ⇄ pipeline vẫn đúng.
 
 ---
 
@@ -76,7 +76,7 @@ Nguồn đối chiếu: tệp kiểu `node_modules/pg-boss/dist/types.d.ts` và 
 | `services/queue/shutdown.ts` | Bắt SIGTERM / SIGINT, chạy các bước dừng theo thứ tự |
 | `services/queue/reconcile.ts` | `reconcileStaleJobs()` (§7) |
 | `services/queue/log.ts` | Log JSON một dòng và bộ đếm trong tiến trình |
-| `services/enrichment/pipeline.ts` | `runEnrichment` (chỗ gắn rỗng) và hợp đồng với worker |
+| `services/enrichment/pipeline.ts` | `runEnrichment` (đường ống thật từ P6b) và hợp đồng với worker; `EnrichmentOutcome` có thêm `stagesMs` |
 | `models/EnrichmentJob.ts` | Truy vấn `word_enrichment_jobs` |
 | `worker.ts` | Tiến trình worker riêng (`npm run worker`) |
 | `scripts/enrichment/enqueue.ts`, `status.ts` | Công cụ dòng lệnh (§8) |
@@ -231,7 +231,7 @@ npm run enrich:enqueue -- --word ubiquitous
 npm run enrich:status -- [--word ubiquitous] [--limit 20]
 ```
 
-`enrich:enqueue` chỉ **gửi**; cần một worker đang chạy ở đâu đó để xử lý. Công cụ nằm trong `scripts/` (thư mục này đang bị `.gitignore`, như các script khác của dự án).
+`enrich:enqueue` chỉ **gửi**; cần một worker đang chạy ở đâu đó để xử lý. Từ P6b còn `npm run enrich:run -- --word <w> [--dry-run]` (chạy đường ống trực tiếp, không qua hàng đợi) và `npm run enrich:review` (duyệt mục từ tự tạo); xem `docs/lookup-enrichment.md` mục 14. **Worker từ chối khởi động khi thiếu 30 chủ đề** (`topics_not_seeded`): job nằm yên trong hàng đợi. Công cụ nằm trong `scripts/` (thư mục này đang bị `.gitignore`, như các script khác của dự án).
 
 ---
 
@@ -249,12 +249,14 @@ npm run enrich:status -- [--word ubiquitous] [--limit 20]
 | `budget` | `skipped` | hàng | worker | `BudgetExceeded` |
 | `dead_letter` | `failed` | hàng | worker hàng lỗi chết | Job vào DLQ khi hàng vẫn còn hoạt động |
 | `stale` | `failed` | hàng | `reconcileStaleJobs` | Hàng treo, pg-boss không còn job |
-| `pipeline_not_ready` | `skipped` | hàng | pipeline tạm (P5) | Bước làm giàu thật chưa có |
-| `unknown_word` | `rejected` (P6) / `skipped` (response, P3) | | P6, đường nhanh | Không nguồn nào nhận ra từ |
+| `pipeline_not_ready` | `skipped` | hàng | pipeline tạm (P5) | **Đã nghỉ hưu từ P6b**: không còn được tạo; có thể còn trong hàng sổ cũ |
+| `unknown_word` | `rejected` (P6) / `skipped` (response, P3) | | P6, đường nhanh | Không nguồn nào nhận ra từ (không gọi Haiku). Free Dictionary treo với từ rác thì KHÔNG ra mã này mà ra `upstream_error` sau các lần thử |
 | `proper_noun`, `not_english` | `rejected` | hàng | P6 | Haiku phán đoán |
 | `variant_form`, `lemma_mismatch` | `skipped` | hàng | P6 | Lỗi chính tả / dạng lỗi thời; lemma bản nháp khác từ tra |
-| `form_linked` | `succeeded` | hàng | P6 | Chỉ thêm dạng biến vào `word_forms` |
-| `invalid_output` | `failed` | hàng | P6 | Haiku sai định dạng sau một lần sửa |
+| `form_linked` | `succeeded` | hàng | P6 | Chỉ thêm dạng biến vào `word_forms` (entry của lemma đã có, hoặc job khác vừa tạo nó) |
+| `invalid_output` | `failed` | hàng | P6 | Haiku sai định dạng sau một lần sửa, hoặc không thể tạo `meaning_vi` |
+
+Bảng đầy đủ nhất, kèm giai đoạn đặt mã: `docs/lookup-enrichment.md` mục 11.
 
 ---
 
