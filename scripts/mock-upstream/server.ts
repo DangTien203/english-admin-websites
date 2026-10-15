@@ -355,7 +355,10 @@ export async function startMockUpstream(opts: { port?: number } = {}): Promise<M
     const kind: 'headline' | 'definitions' | 'other' = kinds.every((k) => k === 'definitions') && kinds.length > 0 ? 'definitions' : kinds.includes('headline') ? 'headline' : 'other';
     countWords('google', [...new Set(words)], [...new Set(words)].map((w) => kinds[words.indexOf(w)]));
 
-    const finish = (status: number) => record('google', words, kind, status, chars, keyInUrl, keyHeader);
+    // Counted on arrival: a request that is then dropped or left hanging never reaches finish().
+    if (keyInUrl) stats.google.keyInUrl = (stats.google.keyInUrl ?? 0) + 1;
+    if (keyHeader) stats.google.keyHeaderSeen = (stats.google.keyHeaderSeen ?? 0) + 1;
+    const finish = (status: number) => record('google', words, kind, status, chars);
 
     if (q.length === 0) {
       res.writeHead(400, { 'content-type': 'application/json' }).end(JSON.stringify({ error: { code: 400, message: 'Required: q', status: 'INVALID_ARGUMENT' } }));
@@ -490,12 +493,12 @@ export async function startMockUpstream(opts: { port?: number } = {}): Promise<M
   }
 
   function reset(keep?: 'control' | 'stats'): void {
-    if (keep !== 'stats') {
+    if (keep !== 'control') {
       control = { unknownWord: 'synthesize', seed: 1 };
       rng = mulberry32(1);
       failed = new Map();
     }
-    if (keep !== 'control') stats = newStats();
+    if (keep !== 'stats') stats = newStats();
   }
 
   await new Promise<void>((resolve, reject) => {

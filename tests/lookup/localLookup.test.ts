@@ -26,6 +26,15 @@ describe('lookupLocal SQL', () => {
     expect(calls[0].params).toEqual(['ran']);
   });
 
+  it('finds the candidates with a UNION of three index lookups, not an OR (an OR cannot use the lower() indexes: 42-56 ms at 200k entries)', async () => {
+    const { db, calls } = fakeDb(() => []);
+    await lookupLocal(db, 'ran');
+    const flat = calls[0].sql.replace(/\s+/g, ' ');
+    expect(flat).toContain('e.id IN (SELECT id FROM dictionary_entries WHERE LOWER(headword) = $1 UNION SELECT id FROM dictionary_entries WHERE LOWER(lemma) = $1 UNION SELECT wf.entry_id FROM word_forms wf WHERE LOWER(wf.form_value) = $1)');
+    expect(flat).not.toContain('= $1 OR');
+    expect(flat).not.toContain('OR e.id IN');
+  });
+
   it('matched_form comes from the stored form value (original casing)', async () => {
     const { db } = fakeDb(() => [{ id: 'e', headword: 'run', lemma: 'run', word_forms: [{ form_value: 'Running' }] }]);
     expect(await lookupLocal(db, 'running')).toMatchObject({ matchedForm: 'Running' });

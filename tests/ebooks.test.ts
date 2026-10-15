@@ -1,6 +1,7 @@
 import request from 'supertest';
 import app from '../app';
 import pool from '../config/db';
+import { bootLookupApp } from './helpers/lookupApp';
 
 const TS = Date.now();
 const EMAIL = `ebooks-test-${TS}@example.com`;
@@ -466,21 +467,17 @@ describe('POST /api/v1/ebooks/:id/lookup', () => {
   });
 
   it('returns 404 for unknown word (with TRANSLATION_FALLBACK_ENABLED off)', async () => {
-    // Make sure the translation fallback path isn't exercised by this test —
-    // we only want to verify the dict-miss path returns 404.
-    const orig = process.env.TRANSLATION_FALLBACK_ENABLED;
-    process.env.TRANSLATION_FALLBACK_ENABLED = 'false';
+    // The switch is read once, at start-up (config/lookup.ts freezes the environment), so setting process.env inside a test has
+    // no effect: this test used to do that, leave the fallback ON, and call the real Google and Free Dictionary. The app is
+    // started with the switch off instead, against the local mock upstream server, which also proves no outside request is made.
+    const off = await bootLookupApp({ env: { TRANSLATION_FALLBACK_ENABLED: 'false' } });
     try {
-      const res = await request(app)
-        .post(`/api/v1/ebooks/${testEbookId}/lookup`)
-        .set('Authorization', `Bearer ${access_token}`)
-        .send({ word: 'xyzzynosuchword' });
-
+      const res = await off.lookup('xyzzynosuchword');
       expect(res.status).toBe(404);
       expect(res.body.error.code).toBe('ENTRY_NOT_FOUND');
+      expect(off.mock.stats().total).toBe(0);
     } finally {
-      if (orig === undefined) delete process.env.TRANSLATION_FALLBACK_ENABLED;
-      else process.env.TRANSLATION_FALLBACK_ENABLED = orig;
+      await off.close();
     }
   });
 

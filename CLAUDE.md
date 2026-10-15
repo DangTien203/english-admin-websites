@@ -25,6 +25,11 @@ npm test              # jest (sequential, maxWorkers=1, forceExit, real PG)
 npm test -- tests/auth.test.ts           # single file
 npm test -- -t "login happy path"        # by test name
 npm run test:watch
+npm run test:chaos    # fault-injection scenarios (breaker, 429, budgets, killed connections / processes); slow, NOT part of npm test — docs/lookup-chaos.md
+npm run mock:upstream # local fake Google / Free Dictionary / Datamuse (127.0.0.1, dev and tests only) — docs/lookup-loadtest.md
+npm run loadtest:lookup  # burst load test of POST /api/v1/ebooks/:id/lookup (single-flight, per-user limit, latency, heap)
+npm run health:snapshot  # LookupHealthService.getSnapshot() as JSON (breakers, Google chars, tokens, jobs, queue depth)
+npm run enrich:redrive   # re-send dead-lettered enrichment jobs; dry-run unless --confirm — docs/lookup-runbook.md
 
 npm run db:migrate    # run all 32 migrations (idempotent, tracked in schema_migrations)
 npm run db:seed       # seed admin + sample data (scripts/seed.ts)
@@ -73,7 +78,7 @@ API request bodies are validated with Zod via `validateBody(schema, { rejectEmpt
 
 ### Database
 
-- Single `pg.Pool` from [config/db.ts](config/db.ts). Uses `DATABASE_URL` (Railway) when present, else discrete `DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD` env vars. SSL only enabled with `NODE_ENV=production`.
+- Single `pg.Pool` from [config/db.ts](config/db.ts). Uses `DATABASE_URL` (Railway) when present, else discrete `DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD` env vars. SSL only enabled with `NODE_ENV=production`. Pool and client `'error'` listeners (a dropped Neon connection must not crash the process) are attached by [config/poolErrors.ts](config/poolErrors.ts); any new `new Pool()` must call `attachPoolErrorHandlers`.
 - Models (`models/*.ts`) are **thin query wrappers** around `pool.query` — no ORM, no repository pattern. Read existing models before adding one.
 - Migrations registered in [database/migrate.ts](database/migrate.ts) `migrations` array. Each runs in its own transaction; tracked in `schema_migrations` (key, name, checksum, executed_at, duration_ms). The migrate script auto-seeds the tracking table for legacy DBs that already had migrations applied (proxy: `users` table exists).
 - Adding a new schema change: create the next-numbered file in `database/migrations/`, add a unique `key` to the migrations array, and **never rename the key after deploy** (the runner uses it for skip-on-replay).

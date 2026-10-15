@@ -50,9 +50,11 @@ export async function findExistingEntry(db: Queryable, words: string[]): Promise
                  WHEN lower(e.lemma) = ANY($1::text[]) THEN 'lemma'
                  ELSE 'form' END AS via
        FROM dictionary_entries e
-      WHERE lower(e.headword) = ANY($1::text[])
-         OR lower(e.lemma) = ANY($1::text[])
-         OR e.id IN (SELECT wf.entry_id FROM word_forms wf WHERE lower(wf.form_value) = ANY($1::text[]))
+      WHERE e.id IN (SELECT id FROM dictionary_entries WHERE lower(headword) = ANY($1::text[])
+                     UNION
+                     SELECT id FROM dictionary_entries WHERE lower(lemma) = ANY($1::text[])
+                     UNION
+                     SELECT wf.entry_id FROM word_forms wf WHERE lower(wf.form_value) = ANY($1::text[]))
       ORDER BY CASE WHEN lower(e.headword) = ANY($1::text[]) THEN 0 WHEN lower(e.lemma) = ANY($1::text[]) THEN 1 ELSE 2 END, e.created_at
       LIMIT 1`,
     [keys]

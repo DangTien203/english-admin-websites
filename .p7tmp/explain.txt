@@ -1,0 +1,697 @@
+database : ep-divine-field-aoljwkwq.c-2.ap-southeast-1.aws.neon.tech/neondb
+
+rows     : word_enrichment_jobs=7  dictionary_entries=852  word_forms=1607  ref_word_frequency=193844  ref_wiktionary_en=189456 
+
+── F4-headword · F4: published entry by headword ("a")
+   Limit  (cost=62.78..343.09 rows=1 width=1509) (actual time=0.543..0.551 rows=1.00 loops=1)
+     Buffers: shared hit=73
+     ->  Result  (cost=62.78..118070.49 rows=421 width=1509) (actual time=0.542..0.550 rows=1.00 loops=1)
+           Buffers: shared hit=73
+           ->  Sort  (cost=62.78..63.84 rows=421 width=1221) (actual time=0.346..0.347 rows=1.00 loops=1)
+                 Sort Key: (CASE WHEN (lower((e.headword)::text) = 'a'::text) THEN 0 WHEN (lower((e.lemma)::text) = 'a'::text) THEN 1 ELSE 2 END)
+                 Sort Method: quicksort  Memory: 25kB
+                 Buffers: shared hit=31
+                 ->  Seq Scan on dictionary_entries e  (cost=8.30..60.68 rows=421 width=1221) (actual time=0.022..0.278 rows=1.00 loops=1)
+                       Filter: (published AND ((lower((headword)::text) = 'a'::text) OR (lower((lemma)::text) = 'a'::text) OR (ANY (id = (hashed SubPlan 14).col1))))
+                       Rows Removed by Filter: 851
+                       Buffers: shared hit=31
+                       SubPlan 14
+                         ->  Index Scan using idx_word_forms_value_lower on word_forms wf_2  (cost=0.28..8.29 rows=1 width=16) (actual time=0.017..0.018 rows=0.00 loops=1)
+                               Index Cond: (lower((form_value)::text) = 'a'::text)
+                               Index Searches: 1
+                               Buffers: shared hit=2
+           SubPlan 4
+             ->  Aggregate  (cost=69.05..69.06 rows=1 width=32) (actual time=0.102..0.103 rows=1.00 loops=1)
+                   Buffers: shared hit=23
+                   ->  Sort  (cost=11.00..11.01 rows=2 width=301) (actual time=0.016..0.017 rows=2.00 loops=1)
+                         Sort Key: s.sense_order
+                         Sort Method: quicksort  Memory: 25kB
+                         Buffers: shared hit=3
+                         ->  Bitmap Heap Scan on entry_senses s  (cost=4.29..10.99 rows=2 width=301) (actual time=0.012..0.013 rows=2.00 loops=1)
+                               Recheck Cond: (entry_id = e.id)
+                               Heap Blocks: exact=1
+                               Buffers: shared hit=3
+                               ->  Bitmap Index Scan on idx_senses_pos  (cost=0.00..4.29 rows=2 width=0) (actual time=0.005..0.005 rows=2.00 loops=1)
+                                     Index Cond: (entry_id = e.id)
+                                     Index Searches: 1
+                                     Buffers: shared hit=2
+                   SubPlan 1
+                     ->  Aggregate  (cost=8.32..8.33 rows=1 width=32) (actual time=0.019..0.019 rows=1.00 loops=2)
+                           Buffers: shared hit=6
+                           ->  Sort  (cost=8.31..8.31 rows=1 width=99) (actual time=0.009..0.009 rows=1.50 loops=2)
+                                 Sort Key: ex.sort_order
+                                 Sort Method: quicksort  Memory: 25kB
+                                 Buffers: shared hit=6
+                                 ->  Index Scan using idx_sense_examples_sense on sense_examples ex  (cost=0.28..8.30 rows=1 width=99) (actual time=0.007..0.008 rows=1.50 loops=2)
+                                       Index Cond: (sense_id = s.id)
+                                       Index Searches: 2
+                                       Buffers: shared hit=6
+                   SubPlan 2
+                     ->  Aggregate  (cost=12.34..12.35 rows=1 width=32) (actual time=0.008..0.008 rows=1.00 loops=2)
+                           Buffers: shared hit=7
+                           ->  Index Only Scan using sense_synonyms_pkey on sense_synonyms ss  (cost=0.28..12.33 rows=3 width=8) (actual time=0.006..0.006 rows=1.00 loops=2)
+                                 Index Cond: (sense_id = s.id)
+                                 Heap Fetches: 0
+                                 Index Searches: 2
+                                 Buffers: shared hit=7
+                   SubPlan 3
+                     ->  Aggregate  (cost=8.32..8.33 rows=1 width=32) (actual time=0.005..0.005 rows=1.00 loops=2)
+                           Buffers: shared hit=7
+                           ->  Index Only Scan using sense_antonyms_pkey on sense_antonyms sa  (cost=0.28..8.31 rows=2 width=8) (actual time=0.004..0.004 rows=0.50 loops=2)
+                                 Index Cond: (sense_id = s.id)
+                                 Heap Fetches: 0
+                                 Index Searches: 2
+                                 Buffers: shared hit=7
+           SubPlan 5
+             ->  Aggregate  (cost=13.14..13.15 rows=1 width=32) (actual time=0.010..0.010 rows=1.00 loops=1)
+                   Buffers: shared hit=2
+                   ->  Sort  (cost=13.11..13.12 rows=3 width=1087) (actual time=0.009..0.010 rows=0.00 loops=1)
+                         Sort Key: wf.sort_order
+                         Sort Method: quicksort  Memory: 25kB
+                         Buffers: shared hit=2
+                         ->  Bitmap Heap Scan on word_forms wf  (cost=4.30..13.09 rows=3 width=1087) (actual time=0.008..0.008 rows=0.00 loops=1)
+                               Recheck Cond: (entry_id = e.id)
+                               Buffers: shared hit=2
+                               ->  Bitmap Index Scan on idx_word_forms_type  (cost=0.00..4.30 rows=3 width=0) (actual time=0.003..0.003 rows=0.00 loops=1)
+                                     Index Cond: (entry_id = e.id)
+                                     Index Searches: 1
+                                     Buffers: shared hit=2
+           SubPlan 6
+             ->  Aggregate  (cost=5.49..5.50 rows=1 width=32) (actual time=0.017..0.017 rows=1.00 loops=1)
+                   Buffers: shared hit=4
+                   ->  Seq Scan on phrasal_verbs pv  (cost=0.00..5.47 rows=2 width=178) (actual time=0.016..0.016 rows=0.00 loops=1)
+                         Filter: (entry_id = e.id)
+                         Rows Removed by Filter: 118
+                         Buffers: shared hit=4
+           SubPlan 7
+             ->  Aggregate  (cost=9.97..9.98 rows=1 width=32) (actual time=0.006..0.006 rows=1.00 loops=1)
+                   Buffers: shared hit=2
+                   ->  Bitmap Heap Scan on entry_idioms idi  (cost=4.29..9.96 rows=2 width=274) (actual time=0.005..0.005 rows=0.00 loops=1)
+                         Recheck Cond: (entry_id = e.id)
+                         Buffers: shared hit=2
+                         ->  Bitmap Index Scan on idx_idioms_entry  (cost=0.00..4.29 rows=2 width=0) (actual time=0.002..0.003 rows=0.00 loops=1)
+                               Index Cond: (entry_id = e.id)
+                               Index Searches: 1
+                               Buffers: shared hit=2
+           SubPlan 8
+             ->  Aggregate  (cost=10.94..10.95 rows=1 width=32) (actual time=0.006..0.007 rows=1.00 loops=1)
+                   Buffers: shared hit=2
+                   ->  Bitmap Heap Scan on collocations col  (cost=4.29..10.92 rows=2 width=142) (actual time=0.006..0.006 rows=0.00 loops=1)
+                         Recheck Cond: (entry_id = e.id)
+                         Buffers: shared hit=2
+                         ->  Bitmap Index Scan on idx_collocations_entry  (cost=0.00..4.29 rows=2 width=0) (actual time=0.003..0.003 rows=0.00 loops=1)
+                               Index Cond: (entry_id = e.id)
+                               Index Searches: 1
+                               Buffers: shared hit=2
+           SubPlan 9
+             ->  Aggregate  (cost=15.11..15.12 rows=1 width=32) (actual time=0.020..0.021 rows=1.00 loops=1)
+                   Buffers: shared hit=2
+                   ->  Sort  (cost=15.10..15.10 rows=2 width=218) (actual time=0.019..0.020 rows=0.00 loops=1)
+                         Sort Key: t.name
+                         Sort Method: quicksort  Memory: 25kB
+                         Buffers: shared hit=2
+                         ->  Hash Join  (cost=1.29..15.09 rows=2 width=218) (actual time=0.016..0.017 rows=0.00 loops=1)
+                               Hash Cond: (t.id = et.tag_id)
+                               Buffers: shared hit=2
+                               ->  Seq Scan on tags t  (cost=0.00..13.00 rows=300 width=234) (actual time=0.005..0.005 rows=1.00 loops=1)
+                                     Buffers: shared hit=1
+                               ->  Hash  (cost=1.26..1.26 rows=2 width=16) (actual time=0.005..0.006 rows=0.00 loops=1)
+                                     Buckets: 1024  Batches: 1  Memory Usage: 8kB
+                                     Buffers: shared hit=1
+                                     ->  Seq Scan on entry_tags et  (cost=0.00..1.26 rows=2 width=16) (actual time=0.005..0.005 rows=0.00 loops=1)
+                                           Filter: (entry_id = e.id)
+                                           Rows Removed by Filter: 21
+                                           Buffers: shared hit=1
+           SubPlan 10
+             ->  Aggregate  (cost=54.24..54.25 rows=1 width=32) (actual time=0.010..0.011 rows=1.00 loops=1)
+                   Buffers: shared hit=3
+                   ->  Hash Join  (cost=14.44..54.21 rows=7 width=23) (actual time=0.009..0.010 rows=0.00 loops=1)
+                         Hash Cond: (d.id = es.synonym_id)
+                         Buffers: shared hit=3
+                         ->  Seq Scan on dictionary_entries d  (cost=0.00..37.52 rows=852 width=23) (actual time=0.003..0.003 rows=1.00 loops=1)
+                               Buffers: shared hit=2
+                         ->  Hash  (cost=14.35..14.35 rows=7 width=16) (actual time=0.005..0.005 rows=0.00 loops=1)
+                               Buckets: 1024  Batches: 1  Memory Usage: 8kB
+                               Buffers: shared hit=1
+                               ->  Bitmap Heap Scan on entry_synonyms es  (cost=4.21..14.35 rows=7 width=16) (actual time=0.004..0.005 rows=0.00 loops=1)
+                                     Recheck Cond: (entry_id = e.id)
+                                     Buffers: shared hit=1
+                                     ->  Bitmap Index Scan on idx_synonyms_entry  (cost=0.00..4.21 rows=7 width=0) (actual time=0.002..0.002 rows=0.00 loops=1)
+                                           Index Cond: (entry_id = e.id)
+                                           Index Searches: 1
+                                           Buffers: shared hit=1
+           SubPlan 11
+             ->  Aggregate  (cost=54.24..54.25 rows=1 width=32) (actual time=0.009..0.010 rows=1.00 loops=1)
+                   Buffers: shared hit=3
+                   ->  Hash Join  (cost=14.44..54.21 rows=7 width=23) (actual time=0.008..0.009 rows=0.00 loops=1)
+                         Hash Cond: (d_1.id = ea.antonym_id)
+                         Buffers: shared hit=3
+                         ->  Seq Scan on dictionary_entries d_1  (cost=0.00..37.52 rows=852 width=23) (actual time=0.002..0.002 rows=1.00 loops=1)
+                               Buffers: shared hit=2
+                         ->  Hash  (cost=14.35..14.35 rows=7 width=16) (actual time=0.005..0.005 rows=0.00 loops=1)
+                               Buckets: 1024  Batches: 1  Memory Usage: 8kB
+                               Buffers: shared hit=1
+                               ->  Bitmap Heap Scan on entry_antonyms ea  (cost=4.21..14.35 rows=7 width=16) (actual time=0.005..0.005 rows=0.00 loops=1)
+                                     Recheck Cond: (entry_id = e.id)
+                                     Buffers: shared hit=1
+                                     ->  Bitmap Index Scan on idx_antonyms_entry  (cost=0.00..4.21 rows=7 width=0) (actual time=0.002..0.002 rows=0.00 loops=1)
+                                           Index Cond: (entry_id = e.id)
+                                           Index Searches: 1
+                                           Buffers: shared hit=1
+           SubPlan 13
+             ->  Limit  (cost=0.00..48.02 rows=1 width=32) (actual time=0.005..0.006 rows=0.00 loops=1)
+                   Buffers: shared hit=1
+                   ->  Nested Loop  (cost=0.00..144.07 rows=3 width=32) (actual time=0.004..0.005 rows=0.00 loops=1)
+                         Join Filter: (wfm.family_id = wf_1.id)
+                         Buffers: shared hit=1
+                         ->  Seq Scan on word_family_members wfm  (cost=0.00..17.38 rows=3 width=16) (actual time=0.004..0.004 rows=0.00 loops=1)
+                               Filter: (entry_id = e.id)
+                               Buffers: shared hit=1
+                         ->  Materialize  (cost=0.00..12.10 rows=140 width=532) (never executed)
+                               ->  Seq Scan on word_families wf_1  (cost=0.00..11.40 rows=140 width=532) (never executed)
+                         SubPlan 12
+                           ->  Aggregate  (cost=36.20..36.21 rows=1 width=32) (never executed)
+                                 ->  Nested Loop  (cost=4.45..36.19 rows=3 width=101) (never executed)
+                                       ->  Bitmap Heap Scan on word_family_members m  (cost=4.17..11.29 rows=3 width=94) (never executed)
+                                             Recheck Cond: (family_id = wf_1.id)
+                                             Filter: (entry_id <> e.id)
+                                             ->  Bitmap Index Scan on idx_family_members_family  (cost=0.00..4.17 rows=3 width=0) (never executed)
+                                                   Index Cond: (family_id = wf_1.id)
+                                                   Index Searches: 0
+                                       ->  Index Scan using dictionary_entries_pkey on dictionary_entries de  (cost=0.28..8.29 rows=1 width=23) (never executed)
+                                             Index Cond: (id = m.entry_id)
+                                             Index Searches: 0
+   Planning Time: 0.753 ms
+   Execution Time: 0.763 ms
+   [with enable_seqscan = off] 0.726 ms, index: idx_dict_published, idx_word_forms_value_lower, idx_senses_pos, idx_sense_examples_sense, sense_synonyms_pkey, sense_antonyms_pkey, idx_word_forms_type, idx_phrasal_entry, idx_idioms_entry, idx_collocations_entry, entry_tags_pkey, tags_pkey, idx_synonyms_entry, dictionary_entries_pkey, idx_antonyms_entry, idx_family_members_entry, word_families_pkey, idx_family_members_family
+
+── F4-form · F4: found through word_forms ("abandons")
+   Limit  (cost=62.78..343.09 rows=1 width=1509) (actual time=0.612..0.623 rows=1.00 loops=1)
+     Buffers: shared hit=86
+     ->  Result  (cost=62.78..118070.49 rows=421 width=1509) (actual time=0.611..0.621 rows=1.00 loops=1)
+           Buffers: shared hit=86
+           ->  Sort  (cost=62.78..63.84 rows=421 width=1221) (actual time=0.359..0.359 rows=1.00 loops=1)
+                 Sort Key: (CASE WHEN (lower((e.headword)::text) = 'abandons'::text) THEN 0 WHEN (lower((e.lemma)::text) = 'abandons'::text) THEN 1 ELSE 2 END)
+                 Sort Method: quicksort  Memory: 25kB
+                 Buffers: shared hit=32
+                 ->  Seq Scan on dictionary_entries e  (cost=8.30..60.68 rows=421 width=1221) (actual time=0.063..0.343 rows=1.00 loops=1)
+                       Filter: (published AND ((lower((headword)::text) = 'abandons'::text) OR (lower((lemma)::text) = 'abandons'::text) OR (ANY (id = (hashed SubPlan 14).col1))))
+                       Rows Removed by Filter: 851
+                       Buffers: shared hit=32
+                       SubPlan 14
+                         ->  Index Scan using idx_word_forms_value_lower on word_forms wf_2  (cost=0.28..8.29 rows=1 width=16) (actual time=0.015..0.016 rows=1.00 loops=1)
+                               Index Cond: (lower((form_value)::text) = 'abandons'::text)
+                               Index Searches: 1
+                               Buffers: shared hit=3
+           SubPlan 4
+             ->  Aggregate  (cost=69.05..69.06 rows=1 width=32) (actual time=0.124..0.129 rows=1.00 loops=1)
+                   Buffers: shared hit=32
+                   ->  Sort  (cost=11.00..11.01 rows=2 width=301) (actual time=0.021..0.025 rows=3.00 loops=1)
+                         Sort Key: s.sense_order
+                         Sort Method: quicksort  Memory: 25kB
+                         Buffers: shared hit=3
+                         ->  Bitmap Heap Scan on entry_senses s  (cost=4.29..10.99 rows=2 width=301) (actual time=0.015..0.019 rows=3.00 loops=1)
+                               Recheck Cond: (entry_id = e.id)
+                               Heap Blocks: exact=1
+                               Buffers: shared hit=3
+                               ->  Bitmap Index Scan on idx_senses_pos  (cost=0.00..4.29 rows=2 width=0) (actual time=0.005..0.009 rows=3.00 loops=1)
+                                     Index Cond: (entry_id = e.id)
+                                     Index Searches: 1
+                                     Buffers: shared hit=2
+                   SubPlan 1
+                     ->  Aggregate  (cost=8.32..8.33 rows=1 width=32) (actual time=0.013..0.013 rows=1.00 loops=3)
+                           Buffers: shared hit=9
+                           ->  Sort  (cost=8.31..8.31 rows=1 width=99) (actual time=0.007..0.007 rows=1.67 loops=3)
+                                 Sort Key: ex.sort_order
+                                 Sort Method: quicksort  Memory: 25kB
+                                 Buffers: shared hit=9
+                                 ->  Index Scan using idx_sense_examples_sense on sense_examples ex  (cost=0.28..8.30 rows=1 width=99) (actual time=0.004..0.004 rows=1.67 loops=3)
+                                       Index Cond: (sense_id = s.id)
+                                       Index Searches: 3
+                                       Buffers: shared hit=9
+                   SubPlan 2
+                     ->  Aggregate  (cost=12.34..12.35 rows=1 width=32) (actual time=0.007..0.007 rows=1.00 loops=3)
+                           Buffers: shared hit=10
+                           ->  Index Only Scan using sense_synonyms_pkey on sense_synonyms ss  (cost=0.28..12.33 rows=3 width=8) (actual time=0.004..0.005 rows=3.00 loops=3)
+                                 Index Cond: (sense_id = s.id)
+                                 Heap Fetches: 0
+                                 Index Searches: 3
+                                 Buffers: shared hit=10
+                   SubPlan 3
+                     ->  Aggregate  (cost=8.32..8.33 rows=1 width=32) (actual time=0.006..0.006 rows=1.00 loops=3)
+                           Buffers: shared hit=10
+                           ->  Index Only Scan using sense_antonyms_pkey on sense_antonyms sa  (cost=0.28..8.31 rows=2 width=8) (actual time=0.003..0.004 rows=2.67 loops=3)
+                                 Index Cond: (sense_id = s.id)
+                                 Heap Fetches: 0
+                                 Index Searches: 3
+                                 Buffers: shared hit=10
+           SubPlan 5
+             ->  Aggregate  (cost=13.14..13.15 rows=1 width=32) (actual time=0.022..0.023 rows=1.00 loops=1)
+                   Buffers: shared hit=3
+                   ->  Sort  (cost=13.11..13.12 rows=3 width=1087) (actual time=0.011..0.011 rows=4.00 loops=1)
+                         Sort Key: wf.sort_order
+                         Sort Method: quicksort  Memory: 25kB
+                         Buffers: shared hit=3
+                         ->  Bitmap Heap Scan on word_forms wf  (cost=4.30..13.09 rows=3 width=1087) (actual time=0.008..0.009 rows=4.00 loops=1)
+                               Recheck Cond: (entry_id = e.id)
+                               Heap Blocks: exact=1
+                               Buffers: shared hit=3
+                               ->  Bitmap Index Scan on idx_word_forms_type  (cost=0.00..4.30 rows=3 width=0) (actual time=0.004..0.004 rows=4.00 loops=1)
+                                     Index Cond: (entry_id = e.id)
+                                     Index Searches: 1
+                                     Buffers: shared hit=2
+           SubPlan 6
+             ->  Aggregate  (cost=5.49..5.50 rows=1 width=32) (actual time=0.029..0.029 rows=1.00 loops=1)
+                   Buffers: shared hit=4
+                   ->  Seq Scan on phrasal_verbs pv  (cost=0.00..5.47 rows=2 width=178) (actual time=0.028..0.028 rows=0.00 loops=1)
+                         Filter: (entry_id = e.id)
+                         Rows Removed by Filter: 118
+                         Buffers: shared hit=4
+           SubPlan 7
+             ->  Aggregate  (cost=9.97..9.98 rows=1 width=32) (actual time=0.012..0.013 rows=1.00 loops=1)
+                   Buffers: shared hit=3
+                   ->  Bitmap Heap Scan on entry_idioms idi  (cost=4.29..9.96 rows=2 width=274) (actual time=0.007..0.007 rows=1.00 loops=1)
+                         Recheck Cond: (entry_id = e.id)
+                         Heap Blocks: exact=1
+                         Buffers: shared hit=3
+                         ->  Bitmap Index Scan on idx_idioms_entry  (cost=0.00..4.29 rows=2 width=0) (actual time=0.003..0.003 rows=1.00 loops=1)
+                               Index Cond: (entry_id = e.id)
+                               Index Searches: 1
+                               Buffers: shared hit=2
+           SubPlan 8
+             ->  Aggregate  (cost=10.94..10.95 rows=1 width=32) (actual time=0.015..0.016 rows=1.00 loops=1)
+                   Buffers: shared hit=3
+                   ->  Bitmap Heap Scan on collocations col  (cost=4.29..10.92 rows=2 width=142) (actual time=0.008..0.008 rows=2.00 loops=1)
+                         Recheck Cond: (entry_id = e.id)
+                         Heap Blocks: exact=1
+                         Buffers: shared hit=3
+                         ->  Bitmap Index Scan on idx_collocations_entry  (cost=0.00..4.29 rows=2 width=0) (actual time=0.004..0.004 rows=2.00 loops=1)
+                               Index Cond: (entry_id = e.id)
+                               Index Searches: 1
+                               Buffers: shared hit=2
+           SubPlan 9
+             ->  Aggregate  (cost=15.11..15.12 rows=1 width=32) (actual time=0.016..0.017 rows=1.00 loops=1)
+                   Buffers: shared hit=2
+                   ->  Sort  (cost=15.10..15.10 rows=2 width=218) (actual time=0.016..0.016 rows=0.00 loops=1)
+                         Sort Key: t.name
+                         Sort Method: quicksort  Memory: 25kB
+                         Buffers: shared hit=2
+                         ->  Hash Join  (cost=1.29..15.09 rows=2 width=218) (actual time=0.012..0.013 rows=0.00 loops=1)
+                               Hash Cond: (t.id = et.tag_id)
+                               Buffers: shared hit=2
+                               ->  Seq Scan on tags t  (cost=0.00..13.00 rows=300 width=234) (actual time=0.004..0.004 rows=1.00 loops=1)
+                                     Buffers: shared hit=1
+                               ->  Hash  (cost=1.26..1.26 rows=2 width=16) (actual time=0.006..0.006 rows=0.00 loops=1)
+                                     Buckets: 1024  Batches: 1  Memory Usage: 8kB
+                                     Buffers: shared hit=1
+                                     ->  Seq Scan on entry_tags et  (cost=0.00..1.26 rows=2 width=16) (actual time=0.005..0.005 rows=0.00 loops=1)
+                                           Filter: (entry_id = e.id)
+                                           Rows Removed by Filter: 21
+                                           Buffers: shared hit=1
+           SubPlan 10
+             ->  Aggregate  (cost=54.24..54.25 rows=1 width=32) (actual time=0.009..0.010 rows=1.00 loops=1)
+                   Buffers: shared hit=3
+                   ->  Hash Join  (cost=14.44..54.21 rows=7 width=23) (actual time=0.009..0.009 rows=0.00 loops=1)
+                         Hash Cond: (d.id = es.synonym_id)
+                         Buffers: shared hit=3
+                         ->  Seq Scan on dictionary_entries d  (cost=0.00..37.52 rows=852 width=23) (actual time=0.003..0.003 rows=1.00 loops=1)
+                               Buffers: shared hit=2
+                         ->  Hash  (cost=14.35..14.35 rows=7 width=16) (actual time=0.005..0.005 rows=0.00 loops=1)
+                               Buckets: 1024  Batches: 1  Memory Usage: 8kB
+                               Buffers: shared hit=1
+                               ->  Bitmap Heap Scan on entry_synonyms es  (cost=4.21..14.35 rows=7 width=16) (actual time=0.004..0.004 rows=0.00 loops=1)
+                                     Recheck Cond: (entry_id = e.id)
+                                     Buffers: shared hit=1
+                                     ->  Bitmap Index Scan on idx_synonyms_entry  (cost=0.00..4.21 rows=7 width=0) (actual time=0.002..0.002 rows=0.00 loops=1)
+                                           Index Cond: (entry_id = e.id)
+                                           Index Searches: 1
+                                           Buffers: shared hit=1
+           SubPlan 11
+             ->  Aggregate  (cost=54.24..54.25 rows=1 width=32) (actual time=0.008..0.009 rows=1.00 loops=1)
+                   Buffers: shared hit=3
+                   ->  Hash Join  (cost=14.44..54.21 rows=7 width=23) (actual time=0.008..0.008 rows=0.00 loops=1)
+                         Hash Cond: (d_1.id = ea.antonym_id)
+                         Buffers: shared hit=3
+                         ->  Seq Scan on dictionary_entries d_1  (cost=0.00..37.52 rows=852 width=23) (actual time=0.002..0.002 rows=1.00 loops=1)
+                               Buffers: shared hit=2
+                         ->  Hash  (cost=14.35..14.35 rows=7 width=16) (actual time=0.004..0.005 rows=0.00 loops=1)
+                               Buckets: 1024  Batches: 1  Memory Usage: 8kB
+                               Buffers: shared hit=1
+                               ->  Bitmap Heap Scan on entry_antonyms ea  (cost=4.21..14.35 rows=7 width=16) (actual time=0.004..0.004 rows=0.00 loops=1)
+                                     Recheck Cond: (entry_id = e.id)
+                                     Buffers: shared hit=1
+                                     ->  Bitmap Index Scan on idx_antonyms_entry  (cost=0.00..4.21 rows=7 width=0) (actual time=0.002..0.002 rows=0.00 loops=1)
+                                           Index Cond: (entry_id = e.id)
+                                           Index Searches: 1
+                                           Buffers: shared hit=1
+           SubPlan 13
+             ->  Limit  (cost=0.00..48.02 rows=1 width=32) (actual time=0.005..0.005 rows=0.00 loops=1)
+                   Buffers: shared hit=1
+                   ->  Nested Loop  (cost=0.00..144.07 rows=3 width=32) (actual time=0.004..0.004 rows=0.00 loops=1)
+                         Join Filter: (wfm.family_id = wf_1.id)
+                         Buffers: shared hit=1
+                         ->  Seq Scan on word_family_members wfm  (cost=0.00..17.38 rows=3 width=16) (actual time=0.004..0.004 rows=0.00 loops=1)
+                               Filter: (entry_id = e.id)
+                               Buffers: shared hit=1
+                         ->  Materialize  (cost=0.00..12.10 rows=140 width=532) (never executed)
+                               ->  Seq Scan on word_families wf_1  (cost=0.00..11.40 rows=140 width=532) (never executed)
+                         SubPlan 12
+                           ->  Aggregate  (cost=36.20..36.21 rows=1 width=32) (never executed)
+                                 ->  Nested Loop  (cost=4.45..36.19 rows=3 width=101) (never executed)
+                                       ->  Bitmap Heap Scan on word_family_members m  (cost=4.17..11.29 rows=3 width=94) (never executed)
+                                             Recheck Cond: (family_id = wf_1.id)
+                                             Filter: (entry_id <> e.id)
+                                             ->  Bitmap Index Scan on idx_family_members_family  (cost=0.00..4.17 rows=3 width=0) (never executed)
+                                                   Index Cond: (family_id = wf_1.id)
+                                                   Index Searches: 0
+                                       ->  Index Scan using dictionary_entries_pkey on dictionary_entries de  (cost=0.28..8.29 rows=1 width=23) (never executed)
+                                             Index Cond: (id = m.entry_id)
+                                             Index Searches: 0
+   Planning Time: 0.788 ms
+   Execution Time: 0.797 ms
+   [with enable_seqscan = off] 0.885 ms, index: idx_dict_published, idx_word_forms_value_lower, idx_senses_pos, idx_sense_examples_sense, sense_synonyms_pkey, sense_antonyms_pkey, idx_word_forms_type, idx_phrasal_entry, idx_idioms_entry, idx_collocations_entry, entry_tags_pkey, tags_pkey, idx_synonyms_entry, dictionary_entries_pkey, idx_antonyms_entry, idx_family_members_entry, word_families_pkey, idx_family_members_family
+
+── F4-miss · F4: dictionary miss ("qzqexplainmiss")
+   Limit  (cost=62.78..343.09 rows=1 width=1509) (actual time=0.266..0.270 rows=0.00 loops=1)
+     Buffers: shared hit=31
+     ->  Result  (cost=62.78..118070.49 rows=421 width=1509) (actual time=0.266..0.269 rows=0.00 loops=1)
+           Buffers: shared hit=31
+           ->  Sort  (cost=62.78..63.84 rows=421 width=1221) (actual time=0.265..0.266 rows=0.00 loops=1)
+                 Sort Key: (CASE WHEN (lower((e.headword)::text) = 'qzqexplainmiss'::text) THEN 0 WHEN (lower((e.lemma)::text) = 'qzqexplainmiss'::text) THEN 1 ELSE 2 END)
+                 Sort Method: quicksort  Memory: 25kB
+                 Buffers: shared hit=31
+                 ->  Seq Scan on dictionary_entries e  (cost=8.30..60.68 rows=421 width=1221) (actual time=0.262..0.262 rows=0.00 loops=1)
+                       Filter: (published AND ((lower((headword)::text) = 'qzqexplainmiss'::text) OR (lower((lemma)::text) = 'qzqexplainmiss'::text) OR (ANY (id = (hashed SubPlan 14).col1))))
+                       Rows Removed by Filter: 852
+                       Buffers: shared hit=31
+                       SubPlan 14
+                         ->  Index Scan using idx_word_forms_value_lower on word_forms wf_2  (cost=0.28..8.29 rows=1 width=16) (actual time=0.011..0.011 rows=0.00 loops=1)
+                               Index Cond: (lower((form_value)::text) = 'qzqexplainmiss'::text)
+                               Index Searches: 1
+                               Buffers: shared hit=2
+           SubPlan 4
+             ->  Aggregate  (cost=69.05..69.06 rows=1 width=32) (never executed)
+                   ->  Sort  (cost=11.00..11.01 rows=2 width=301) (never executed)
+                         Sort Key: s.sense_order
+                         ->  Bitmap Heap Scan on entry_senses s  (cost=4.29..10.99 rows=2 width=301) (never executed)
+                               Recheck Cond: (entry_id = e.id)
+                               ->  Bitmap Index Scan on idx_senses_pos  (cost=0.00..4.29 rows=2 width=0) (never executed)
+                                     Index Cond: (entry_id = e.id)
+                                     Index Searches: 0
+                   SubPlan 1
+                     ->  Aggregate  (cost=8.32..8.33 rows=1 width=32) (never executed)
+                           ->  Sort  (cost=8.31..8.31 rows=1 width=99) (never executed)
+                                 Sort Key: ex.sort_order
+                                 ->  Index Scan using idx_sense_examples_sense on sense_examples ex  (cost=0.28..8.30 rows=1 width=99) (never executed)
+                                       Index Cond: (sense_id = s.id)
+                                       Index Searches: 0
+                   SubPlan 2
+                     ->  Aggregate  (cost=12.34..12.35 rows=1 width=32) (never executed)
+                           ->  Index Only Scan using sense_synonyms_pkey on sense_synonyms ss  (cost=0.28..12.33 rows=3 width=8) (never executed)
+                                 Index Cond: (sense_id = s.id)
+                                 Heap Fetches: 0
+                                 Index Searches: 0
+                   SubPlan 3
+                     ->  Aggregate  (cost=8.32..8.33 rows=1 width=32) (never executed)
+                           ->  Index Only Scan using sense_antonyms_pkey on sense_antonyms sa  (cost=0.28..8.31 rows=2 width=8) (never executed)
+                                 Index Cond: (sense_id = s.id)
+                                 Heap Fetches: 0
+                                 Index Searches: 0
+           SubPlan 5
+             ->  Aggregate  (cost=13.14..13.15 rows=1 width=32) (never executed)
+                   ->  Sort  (cost=13.11..13.12 rows=3 width=1087) (never executed)
+                         Sort Key: wf.sort_order
+                         ->  Bitmap Heap Scan on word_forms wf  (cost=4.30..13.09 rows=3 width=1087) (never executed)
+                               Recheck Cond: (entry_id = e.id)
+                               ->  Bitmap Index Scan on idx_word_forms_type  (cost=0.00..4.30 rows=3 width=0) (never executed)
+                                     Index Cond: (entry_id = e.id)
+                                     Index Searches: 0
+           SubPlan 6
+             ->  Aggregate  (cost=5.49..5.50 rows=1 width=32) (never executed)
+                   ->  Seq Scan on phrasal_verbs pv  (cost=0.00..5.47 rows=2 width=178) (never executed)
+                         Filter: (entry_id = e.id)
+           SubPlan 7
+             ->  Aggregate  (cost=9.97..9.98 rows=1 width=32) (never executed)
+                   ->  Bitmap Heap Scan on entry_idioms idi  (cost=4.29..9.96 rows=2 width=274) (never executed)
+                         Recheck Cond: (entry_id = e.id)
+                         ->  Bitmap Index Scan on idx_idioms_entry  (cost=0.00..4.29 rows=2 width=0) (never executed)
+                               Index Cond: (entry_id = e.id)
+                               Index Searches: 0
+           SubPlan 8
+             ->  Aggregate  (cost=10.94..10.95 rows=1 width=32) (never executed)
+                   ->  Bitmap Heap Scan on collocations col  (cost=4.29..10.92 rows=2 width=142) (never executed)
+                         Recheck Cond: (entry_id = e.id)
+                         ->  Bitmap Index Scan on idx_collocations_entry  (cost=0.00..4.29 rows=2 width=0) (never executed)
+                               Index Cond: (entry_id = e.id)
+                               Index Searches: 0
+           SubPlan 9
+             ->  Aggregate  (cost=15.11..15.12 rows=1 width=32) (never executed)
+                   ->  Sort  (cost=15.10..15.10 rows=2 width=218) (never executed)
+                         Sort Key: t.name
+                         ->  Hash Join  (cost=1.29..15.09 rows=2 width=218) (never executed)
+                               Hash Cond: (t.id = et.tag_id)
+                               ->  Seq Scan on tags t  (cost=0.00..13.00 rows=300 width=234) (never executed)
+                               ->  Hash  (cost=1.26..1.26 rows=2 width=16) (never executed)
+                                     ->  Seq Scan on entry_tags et  (cost=0.00..1.26 rows=2 width=16) (never executed)
+                                           Filter: (entry_id = e.id)
+           SubPlan 10
+             ->  Aggregate  (cost=54.24..54.25 rows=1 width=32) (never executed)
+                   ->  Hash Join  (cost=14.44..54.21 rows=7 width=23) (never executed)
+                         Hash Cond: (d.id = es.synonym_id)
+                         ->  Seq Scan on dictionary_entries d  (cost=0.00..37.52 rows=852 width=23) (never executed)
+                         ->  Hash  (cost=14.35..14.35 rows=7 width=16) (never executed)
+                               ->  Bitmap Heap Scan on entry_synonyms es  (cost=4.21..14.35 rows=7 width=16) (never executed)
+                                     Recheck Cond: (entry_id = e.id)
+                                     ->  Bitmap Index Scan on idx_synonyms_entry  (cost=0.00..4.21 rows=7 width=0) (never executed)
+                                           Index Cond: (entry_id = e.id)
+                                           Index Searches: 0
+           SubPlan 11
+             ->  Aggregate  (cost=54.24..54.25 rows=1 width=32) (never executed)
+                   ->  Hash Join  (cost=14.44..54.21 rows=7 width=23) (never executed)
+                         Hash Cond: (d_1.id = ea.antonym_id)
+                         ->  Seq Scan on dictionary_entries d_1  (cost=0.00..37.52 rows=852 width=23) (never executed)
+                         ->  Hash  (cost=14.35..14.35 rows=7 width=16) (never executed)
+                               ->  Bitmap Heap Scan on entry_antonyms ea  (cost=4.21..14.35 rows=7 width=16) (never executed)
+                                     Recheck Cond: (entry_id = e.id)
+                                     ->  Bitmap Index Scan on idx_antonyms_entry  (cost=0.00..4.21 rows=7 width=0) (never executed)
+                                           Index Cond: (entry_id = e.id)
+                                           Index Searches: 0
+           SubPlan 13
+             ->  Limit  (cost=0.00..48.02 rows=1 width=32) (never executed)
+                   ->  Nested Loop  (cost=0.00..144.07 rows=3 width=32) (never executed)
+                         Join Filter: (wfm.family_id = wf_1.id)
+                         ->  Seq Scan on word_family_members wfm  (cost=0.00..17.38 rows=3 width=16) (never executed)
+                               Filter: (entry_id = e.id)
+                         ->  Materialize  (cost=0.00..12.10 rows=140 width=532) (never executed)
+                               ->  Seq Scan on word_families wf_1  (cost=0.00..11.40 rows=140 width=532) (never executed)
+                         SubPlan 12
+                           ->  Aggregate  (cost=36.20..36.21 rows=1 width=32) (never executed)
+                                 ->  Nested Loop  (cost=4.45..36.19 rows=3 width=101) (never executed)
+                                       ->  Bitmap Heap Scan on word_family_members m  (cost=4.17..11.29 rows=3 width=94) (never executed)
+                                             Recheck Cond: (family_id = wf_1.id)
+                                             Filter: (entry_id <> e.id)
+                                             ->  Bitmap Index Scan on idx_family_members_family  (cost=0.00..4.17 rows=3 width=0) (never executed)
+                                                   Index Cond: (family_id = wf_1.id)
+                                                   Index Searches: 0
+                                       ->  Index Scan using dictionary_entries_pkey on dictionary_entries de  (cost=0.28..8.29 rows=1 width=23) (never executed)
+                                             Index Cond: (id = m.entry_id)
+                                             Index Searches: 0
+   Planning Time: 0.716 ms
+   Execution Time: 0.435 ms
+   [with enable_seqscan = off] 0.439 ms, index: idx_dict_published, idx_word_forms_value_lower, idx_senses_pos, idx_sense_examples_sense, sense_synonyms_pkey, sense_antonyms_pkey, idx_word_forms_type, idx_phrasal_entry, idx_idioms_entry, idx_collocations_entry, entry_tags_pkey, tags_pkey, idx_synonyms_entry, dictionary_entries_pkey, idx_antonyms_entry, idx_family_members_entry, word_families_pkey, idx_family_members_family
+
+── F4b-probe · F4b: "is ref_wiktionary_en populated" probe (cached 5 min)
+   Result  (cost=0.12..0.13 rows=1 width=1) (actual time=0.014..0.014 rows=1.00 loops=1)
+     Buffers: shared hit=2
+     InitPlan 1
+       ->  Seq Scan on ref_wiktionary_en  (cost=0.00..22125.56 rows=189456 width=0) (actual time=0.012..0.012 rows=1.00 loops=1)
+             Buffers: shared hit=2
+   Planning Time: 0.077 ms
+   Execution Time: 0.034 ms
+   [with enable_seqscan = off] 0.087 ms, index: ref_wiktionary_en_pkey
+
+── F4b-form · F4b: inflection lookup ("children")
+   Limit  (cost=0.42..12.45 rows=1 width=807) (actual time=0.024..0.027 rows=1.00 loops=1)
+     Buffers: shared hit=5
+     ->  Index Scan using idx_ref_wikt_en_word on ref_wiktionary_en  (cost=0.42..12.45 rows=1 width=807) (actual time=0.023..0.026 rows=1.00 loops=1)
+           Index Cond: (word = 'children'::text)
+           Filter: (lemma_of IS NOT NULL)
+           Rows Removed by Filter: 1
+           Index Searches: 1
+           Buffers: shared hit=5
+   Planning Time: 0.091 ms
+   Execution Time: 0.050 ms
+
+── F4b-miss · F4b: unknown word ("qzqexplainmiss")
+   Limit  (cost=0.42..12.45 rows=1 width=807) (actual time=0.019..0.020 rows=0.00 loops=1)
+     Buffers: shared hit=3
+     ->  Index Scan using idx_ref_wikt_en_word on ref_wiktionary_en  (cost=0.42..12.45 rows=1 width=807) (actual time=0.018..0.018 rows=0.00 loops=1)
+           Index Cond: (word = 'qzqexplainmiss'::text)
+           Filter: (lemma_of IS NOT NULL)
+           Index Searches: 1
+           Buffers: shared hit=3
+   Planning Time: 0.091 ms
+   Execution Time: 0.042 ms
+
+── F11-known-wikt · F11 "trusted word": ref_wiktionary_en
+   Limit  (cost=0.42..4.44 rows=1 width=4) (actual time=0.024..0.024 rows=1.00 loops=1)
+     Buffers: shared hit=5
+     ->  Index Only Scan using idx_ref_wikt_en_word on ref_wiktionary_en  (cost=0.42..8.46 rows=2 width=4) (actual time=0.023..0.023 rows=1.00 loops=1)
+           Index Cond: (word = 'children'::text)
+           Heap Fetches: 0
+           Index Searches: 1
+           Buffers: shared hit=5
+   Planning Time: 0.084 ms
+   Execution Time: 0.046 ms
+
+── F11-known-freq · F11 "trusted word": ref_word_frequency
+   Limit  (cost=0.42..4.44 rows=1 width=4) (actual time=0.023..0.023 rows=1.00 loops=1)
+     Buffers: shared hit=5
+     ->  Index Only Scan using ref_word_frequency_pkey on ref_word_frequency  (cost=0.42..4.44 rows=1 width=4) (actual time=0.022..0.022 rows=1.00 loops=1)
+           Index Cond: (word = 'a'::text)
+           Heap Fetches: 0
+           Index Searches: 1
+           Buffers: shared hit=5
+   Planning Time: 0.071 ms
+   Execution Time: 0.044 ms
+
+── S0-hit · S0: existence check, entry exists ("a")
+   Limit  (cost=62.88..62.88 rows=1 width=75) (actual time=0.327..0.328 rows=1.00 loops=1)
+     Buffers: shared hit=31
+     ->  Sort  (cost=62.88..63.95 rows=427 width=75) (actual time=0.327..0.327 rows=1.00 loops=1)
+           Sort Key: (CASE WHEN (lower((e.headword)::text) = ANY ('{a}'::text[])) THEN 0 WHEN (lower((e.lemma)::text) = ANY ('{a}'::text[])) THEN 1 ELSE 2 END), e.created_at
+           Sort Method: quicksort  Memory: 25kB
+           Buffers: shared hit=31
+           ->  Seq Scan on dictionary_entries e  (cost=8.30..60.74 rows=427 width=75) (actual time=0.018..0.321 rows=1.00 loops=1)
+                 Filter: ((lower((headword)::text) = ANY ('{a}'::text[])) OR (lower((lemma)::text) = ANY ('{a}'::text[])) OR (ANY (id = (hashed SubPlan 1).col1)))
+                 Rows Removed by Filter: 851
+                 Buffers: shared hit=31
+                 SubPlan 1
+                   ->  Index Scan using idx_word_forms_value_lower on word_forms wf  (cost=0.28..8.29 rows=1 width=16) (actual time=0.014..0.014 rows=0.00 loops=1)
+                         Index Cond: (lower((form_value)::text) = ANY ('{a}'::text[]))
+                         Index Searches: 1
+                         Buffers: shared hit=2
+   Planning Time: 0.170 ms
+   Execution Time: 0.376 ms
+   [with enable_seqscan = off] 0.321 ms, index: idx_word_forms_value_lower
+
+── S0-form · S0: existence check through word_forms ("abandons")
+   Limit  (cost=62.88..62.88 rows=1 width=75) (actual time=0.346..0.347 rows=1.00 loops=1)
+     Buffers: shared hit=32
+     ->  Sort  (cost=62.88..63.95 rows=427 width=75) (actual time=0.346..0.346 rows=1.00 loops=1)
+           Sort Key: (CASE WHEN (lower((e.headword)::text) = ANY ('{abandons}'::text[])) THEN 0 WHEN (lower((e.lemma)::text) = ANY ('{abandons}'::text[])) THEN 1 ELSE 2 END), e.created_at
+           Sort Method: quicksort  Memory: 25kB
+           Buffers: shared hit=32
+           ->  Seq Scan on dictionary_entries e  (cost=8.30..60.74 rows=427 width=75) (actual time=0.043..0.340 rows=1.00 loops=1)
+                 Filter: ((lower((headword)::text) = ANY ('{abandons}'::text[])) OR (lower((lemma)::text) = ANY ('{abandons}'::text[])) OR (ANY (id = (hashed SubPlan 1).col1)))
+                 Rows Removed by Filter: 851
+                 Buffers: shared hit=32
+                 SubPlan 1
+                   ->  Index Scan using idx_word_forms_value_lower on word_forms wf  (cost=0.28..8.29 rows=1 width=16) (actual time=0.018..0.019 rows=1.00 loops=1)
+                         Index Cond: (lower((form_value)::text) = ANY ('{abandons}'::text[]))
+                         Index Searches: 1
+                         Buffers: shared hit=3
+   Planning Time: 0.167 ms
+   Execution Time: 0.385 ms
+   [with enable_seqscan = off] 0.384 ms, index: idx_word_forms_value_lower
+
+── S0-miss · S0: existence check, nothing ("qzqexplainmiss")
+   Limit  (cost=62.88..62.88 rows=1 width=75) (actual time=0.380..0.381 rows=0.00 loops=1)
+     Buffers: shared hit=31
+     ->  Sort  (cost=62.88..63.95 rows=427 width=75) (actual time=0.379..0.379 rows=0.00 loops=1)
+           Sort Key: (CASE WHEN (lower((e.headword)::text) = ANY ('{qzqexplainmiss}'::text[])) THEN 0 WHEN (lower((e.lemma)::text) = ANY ('{qzqexplainmiss}'::text[])) THEN 1 ELSE 2 END), e.created_at
+           Sort Method: quicksort  Memory: 25kB
+           Buffers: shared hit=31
+           ->  Seq Scan on dictionary_entries e  (cost=8.30..60.74 rows=427 width=75) (actual time=0.373..0.374 rows=0.00 loops=1)
+                 Filter: ((lower((headword)::text) = ANY ('{qzqexplainmiss}'::text[])) OR (lower((lemma)::text) = ANY ('{qzqexplainmiss}'::text[])) OR (ANY (id = (hashed SubPlan 1).col1)))
+                 Rows Removed by Filter: 852
+                 Buffers: shared hit=31
+                 SubPlan 1
+                   ->  Index Scan using idx_word_forms_value_lower on word_forms wf  (cost=0.28..8.29 rows=1 width=16) (actual time=0.015..0.015 rows=0.00 loops=1)
+                         Index Cond: (lower((form_value)::text) = ANY ('{qzqexplainmiss}'::text[]))
+                         Index Searches: 1
+                         Buffers: shared hit=2
+   Planning Time: 0.179 ms
+   Execution Time: 0.451 ms
+   [with enable_seqscan = off] 0.33 ms, index: idx_word_forms_value_lower
+
+── S1-wikt · S1: Wiktionary rows of a word ("children")
+   Limit  (cost=12.46..12.47 rows=2 width=830) (actual time=0.031..0.032 rows=2.00 loops=1)
+     Buffers: shared hit=5
+     ->  Sort  (cost=12.46..12.47 rows=2 width=830) (actual time=0.030..0.030 rows=2.00 loops=1)
+           Sort Key: id
+           Sort Method: quicksort  Memory: 27kB
+           Buffers: shared hit=5
+           ->  Index Scan using idx_ref_wikt_en_word on ref_wiktionary_en  (cost=0.42..12.45 rows=2 width=830) (actual time=0.021..0.024 rows=2.00 loops=1)
+                 Index Cond: (word = 'children'::text)
+                 Index Searches: 1
+                 Buffers: shared hit=5
+   Planning Time: 0.098 ms
+   Execution Time: 0.055 ms
+
+── S1-freq · S1: frequency
+   Limit  (cost=0.42..8.44 rows=1 width=8) (actual time=0.024..0.024 rows=1.00 loops=1)
+     Buffers: shared hit=4
+     ->  Index Scan using ref_word_frequency_pkey on ref_word_frequency  (cost=0.42..8.44 rows=1 width=8) (actual time=0.023..0.023 rows=1.00 loops=1)
+           Index Cond: (word = 'a'::text)
+           Index Searches: 1
+           Buffers: shared hit=4
+   Planning Time: 0.079 ms
+   Execution Time: 0.046 ms
+
+── enq-exists · enqueuer: entry already exists
+   Result  (cost=20.09..20.10 rows=1 width=1) (actual time=0.030..0.030 rows=1.00 loops=1)
+     Buffers: shared hit=6
+     InitPlan 1
+       ->  Bitmap Heap Scan on dictionary_entries  (cost=8.57..15.03 rows=2 width=0) (actual time=0.022..0.022 rows=0.00 loops=1)
+             Recheck Cond: ((lower((headword)::text) = 'qzqexplainmiss'::text) OR (lower((lemma)::text) = 'qzqexplainmiss'::text))
+             Buffers: shared hit=4
+             ->  BitmapOr  (cost=8.57..8.57 rows=2 width=0) (actual time=0.016..0.016 rows=0.00 loops=1)
+                   Buffers: shared hit=4
+                   ->  Bitmap Index Scan on idx_dict_headword_lower  (cost=0.00..4.28 rows=1 width=0) (actual time=0.013..0.013 rows=0.00 loops=1)
+                         Index Cond: (lower((headword)::text) = 'qzqexplainmiss'::text)
+                         Index Searches: 1
+                         Buffers: shared hit=2
+                   ->  Bitmap Index Scan on idx_dict_lemma_lower  (cost=0.00..4.28 rows=1 width=0) (actual time=0.003..0.003 rows=0.00 loops=1)
+                         Index Cond: (lower((lemma)::text) = 'qzqexplainmiss'::text)
+                         Index Searches: 1
+                         Buffers: shared hit=2
+     InitPlan 2
+       ->  Index Scan using idx_word_forms_value_lower on word_forms  (cost=0.28..8.29 rows=1 width=0) (actual time=0.006..0.006 rows=0.00 loops=1)
+             Index Cond: (lower((form_value)::text) = 'qzqexplainmiss'::text)
+             Index Searches: 1
+             Buffers: shared hit=2
+   Planning Time: 0.135 ms
+   Execution Time: 0.063 ms
+
+── enq-active · enqueuer: active row for the word
+   Limit  (cost=0.00..1.10 rows=1 width=4) (actual time=0.018..0.018 rows=0.00 loops=1)
+     Buffers: shared hit=1
+     ->  Seq Scan on word_enrichment_jobs  (cost=0.00..1.10 rows=1 width=4) (actual time=0.017..0.017 rows=0.00 loops=1)
+           Filter: (((status)::text = ANY ('{queued,running}'::text[])) AND (word = 'qzqexplainmiss'::text))
+           Rows Removed by Filter: 7
+           Buffers: shared hit=1
+   Planning Time: 0.111 ms
+   Execution Time: 0.037 ms
+   [with enable_seqscan = off] 0.039 ms, index: idx_word_enrichment_jobs_status_created
+
+SUMMARY (3rd run, warm)
+┌─────────┬──────────────────┬───────┬────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ (index) │ query            │ ms    │ plan                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       │
+├─────────┼──────────────────┼───────┼────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ 0       │ 'F4-headword'    │ 0.763 │ 'index: idx_word_forms_value_lower, idx_senses_pos, idx_sense_examples_sense, sense_synonyms_pkey, sense_antonyms_pkey, idx_word_forms_type, idx_idioms_entry, idx_collocations_entry, idx_synonyms_entry, idx_antonyms_entry, idx_family_members_family, dictionary_entries_pkey; seq scan on: dictionary_entries, phrasal_verbs, tags, entry_tags, word_family_members, word_families | forced: 0.726 ms via idx_dict_published, idx_word_forms_value_lower, idx_senses_pos, idx_sense_examples_sense, sense_synonyms_pkey, sense_antonyms_pkey, idx_word_forms_type, idx_phrasal_entry, idx_idioms_entry, idx_collocations_entry, entry_tags_pkey, tags_pkey, idx_synonyms_entry, dictionary_entries_pkey, idx_antonyms_entry, idx_family_members_entry, word_families_pkey, idx_family_members_family' │
+│ 1       │ 'F4-form'        │ 0.797 │ 'index: idx_word_forms_value_lower, idx_senses_pos, idx_sense_examples_sense, sense_synonyms_pkey, sense_antonyms_pkey, idx_word_forms_type, idx_idioms_entry, idx_collocations_entry, idx_synonyms_entry, idx_antonyms_entry, idx_family_members_family, dictionary_entries_pkey; seq scan on: dictionary_entries, phrasal_verbs, tags, entry_tags, word_family_members, word_families | forced: 0.885 ms via idx_dict_published, idx_word_forms_value_lower, idx_senses_pos, idx_sense_examples_sense, sense_synonyms_pkey, sense_antonyms_pkey, idx_word_forms_type, idx_phrasal_entry, idx_idioms_entry, idx_collocations_entry, entry_tags_pkey, tags_pkey, idx_synonyms_entry, dictionary_entries_pkey, idx_antonyms_entry, idx_family_members_entry, word_families_pkey, idx_family_members_family' │
+│ 2       │ 'F4-miss'        │ 0.435 │ 'index: idx_word_forms_value_lower, idx_senses_pos, idx_sense_examples_sense, sense_synonyms_pkey, sense_antonyms_pkey, idx_word_forms_type, idx_idioms_entry, idx_collocations_entry, idx_synonyms_entry, idx_antonyms_entry, idx_family_members_family, dictionary_entries_pkey; seq scan on: dictionary_entries, phrasal_verbs, tags, entry_tags, word_family_members, word_families | forced: 0.439 ms via idx_dict_published, idx_word_forms_value_lower, idx_senses_pos, idx_sense_examples_sense, sense_synonyms_pkey, sense_antonyms_pkey, idx_word_forms_type, idx_phrasal_entry, idx_idioms_entry, idx_collocations_entry, entry_tags_pkey, tags_pkey, idx_synonyms_entry, dictionary_entries_pkey, idx_antonyms_entry, idx_family_members_entry, word_families_pkey, idx_family_members_family' │
+│ 3       │ 'F4b-probe'      │ 0.034 │ 'no index; seq scan on: ref_wiktionary_en | forced: 0.087 ms via ref_wiktionary_en_pkey'                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   │
+│ 4       │ 'F4b-form'       │ 0.05  │ 'index: idx_ref_wikt_en_word'                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              │
+│ 5       │ 'F4b-miss'       │ 0.042 │ 'index: idx_ref_wikt_en_word'                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              │
+│ 6       │ 'F11-known-wikt' │ 0.046 │ 'index: idx_ref_wikt_en_word'                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              │
+│ 7       │ 'F11-known-freq' │ 0.044 │ 'index: ref_word_frequency_pkey'                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           │
+│ 8       │ 'S0-hit'         │ 0.376 │ 'index: idx_word_forms_value_lower; seq scan on: dictionary_entries | forced: 0.321 ms via idx_word_forms_value_lower'                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     │
+│ 9       │ 'S0-form'        │ 0.385 │ 'index: idx_word_forms_value_lower; seq scan on: dictionary_entries | forced: 0.384 ms via idx_word_forms_value_lower'                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     │
+│ 10      │ 'S0-miss'        │ 0.451 │ 'index: idx_word_forms_value_lower; seq scan on: dictionary_entries | forced: 0.33 ms via idx_word_forms_value_lower'                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      │
+│ 11      │ 'S1-wikt'        │ 0.055 │ 'index: idx_ref_wikt_en_word'                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              │
+│ 12      │ 'S1-freq'        │ 0.046 │ 'index: ref_word_frequency_pkey'                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           │
+│ 13      │ 'enq-exists'     │ 0.063 │ 'index: idx_dict_headword_lower, idx_dict_lemma_lower, idx_word_forms_value_lower'                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         │
+│ 14      │ 'enq-active'     │ 0.037 │ 'no index; seq scan on: word_enrichment_jobs | forced: 0.039 ms via idx_word_enrichment_jobs_status_created'                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               │
+└─────────┴──────────────────┴───────┴────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

@@ -3,6 +3,7 @@
 Cập nhật: 14/10/2026 · Phiên bản pg-boss đối chiếu: **12.37.1** (đúng bản trong `node_modules`) · Đặc tả gốc: `docs/lookup-spec.md` §7, §8, §11, §12.
 
 P5 làm **hạ tầng**: hàng đợi, sổ job `word_enrichment_jobs`, worker, thử lại, dừng gọn. Từ P6b, `services/enrichment/pipeline.ts` là đường ống thật (S0 đến S7, xem `docs/lookup-enrichment.md` mục 10); chỗ gắn rỗng luôn trả `skipped / pipeline_not_ready` của P5 không còn. Các mô tả bên dưới về hợp đồng worker ⇄ pipeline vẫn đúng.
+**P7 bổ sung:** bộ dọn `reconcileStaleJobs` chạy theo lịch mỗi 10 phút (mục 7); lệnh `npm run enrich:redrive` gửi lại job trong hàng chết (mục 5); worker chờ `Retry-After` của nhà cung cấp trước khi để pg-boss thử lại (mục 4); mọi kết nối bị DB cắt được ghi log thay vì làm sập tiến trình (mục 12). Quy trình vận hành: `docs/lookup-runbook.md`.
 
 ---
 
@@ -59,7 +60,7 @@ Nguồn đối chiếu: tệp kiểu `node_modules/pg-boss/dist/types.d.ts` và 
 | 4 | §11.8: "offWork với wait" | Dừng gọn đầy đủ là `stop({ graceful, timeout })`; nó gọi `offWork(wait:false)` cho mọi queue, chờ handler tới `timeout`, rồi **fail** job còn chạy (job về `retry`) và hủy `signal` | Dùng `stop({ graceful: true, close: true, timeout: 30000 })`, sau đó đặt các hàng còn `running` về `queued` (§6) |
 | 5 | Gửi: "ghi hàng, rồi `boss.send`" | `send` nhận được transaction | Cả đặt chỗ trần ngày, ghi hàng và gửi job nằm trong **một transaction** (§3): lỗi hay đụng độ thì rollback, không phải hoàn lại gì |
 | 6 | Không nói gì về đọc job | `getJobById` deprecated | Dùng `findJobs` |
-| 7 | Không nói gì về bảo trì | Bảo trì mặc định chạy ở mọi instance | Tiến trình chỉ gửi job: `supervise: false`. Cron (`schedule`) tắt ở mọi vai trò cho tới P7 |
+| 7 | Không nói gì về bảo trì | Bảo trì mặc định chạy ở mọi instance | Tiến trình chỉ gửi job: `supervise: false`. Cron (`schedule`) chỉ bật ở vai trò `worker` (từ P7: chạy bộ dọn mỗi 10 phút, mục 7) |
 | 8 | Dữ liệu job `{ word, requestedBy, ebookId }` | | Thêm `jobRowId` (id hàng sổ) để worker và hàng lỗi chết tìm đúng hàng. Vẫn không có email, tên, đoạn văn |
 
 ---
@@ -75,6 +76,9 @@ Nguồn đối chiếu: tệp kiểu `node_modules/pg-boss/dist/types.d.ts` và 
 | `services/queue/runtime.ts` | `startEnrichmentRuntime('api' \| 'worker')`, dừng gọn |
 | `services/queue/shutdown.ts` | Bắt SIGTERM / SIGINT, chạy các bước dừng theo thứ tự |
 | `services/queue/reconcile.ts` | `reconcileStaleJobs()` (§7) |
+| `services/queue/reconcileSchedule.ts` | lịch cron 10 phút, hàng `dictionary.enrich_word.reconcile`, khóa tư vấn (P7, §7) |
+| `services/queue/redrive.ts`, `scripts/enrichment/redrive.ts` | `npm run enrich:redrive` (P7, §5) |
+| `config/poolErrors.ts` | listener lỗi cho pool và cho từng client lấy từ pool (P7, §12) |
 | `services/queue/log.ts` | Log JSON một dòng và bộ đếm trong tiến trình |
 | `services/enrichment/pipeline.ts` | `runEnrichment` (đường ống thật từ P6b) và hợp đồng với worker; `EnrichmentOutcome` có thêm `stagesMs` |
 | `models/EnrichmentJob.ts` | Truy vấn `word_enrichment_jobs` |
@@ -175,7 +179,7 @@ Handler cho mỗi job:
 
 Trường hợp thường gặp là hàng đã `failed / upstream_error` (handler đã đóng nó ở lần cuối): worker này chỉ ghi log. Hàng còn hoạt động khi job vào DLQ xảy ra khi: job hết hạn `expireInSeconds` ở lần cuối (tiến trình chết, bảo trì phát hiện), hoặc dừng tiến trình mà job đã hết lần thử.
 
-Xem lại / chạy lại job trong DLQ: `boss.redrive('dictionary.enrich_word.dlq', …)` (P7 hoặc thao tác tay). Lưu ý hàng cũ đã `failed`; `redrive` tạo job mới nhưng handler sẽ tạo / hồi sinh hàng theo `jobRowId` (bước 1 và 2 ở §4).
+**Gửi lại (P7):** `npm run enrich:redrive` (chạy thử là mặc định; `--confirm` mới gửi; chỉ gửi những job đã chọn bằng `--word`, `--id`, `--reason`, `--limit`). Không dùng `boss.redrive()` của pg-boss vì nó chỉ chuyển job **còn chờ** (`state < active`), mà worker của hàng chết hoàn tất job trong vài giây; lệnh đọc dữ liệu job còn lưu (mặc định 7 ngày) và gửi lại qua đúng enqueuer của đường tra, nên giữ mọi chốt (đã có mục từ, đã có hàng hoạt động, trần ngày, `singletonKey`). Hàng `failed` cũ giữ làm lịch sử, hàng mới được tạo. Cách dùng đầy đủ: `docs/lookup-runbook.md` mục 4.
 
 ---
 
@@ -217,7 +221,7 @@ Lần chạy bị ngắt vẫn tính vào `retryLimit` (pg-boss tăng `retryCoun
 
 `services/queue/reconcile.ts`. Hàng `queued` / `running` có `updated_at` cũ hơn 30 phút, mà `boss.findJobs(queue, { data: { jobRowId } })` không thấy job nào ở trạng thái `created` / `retry` / `active`, được đặt `failed`, `reason = stale`. Tùy chọn: `olderThanMinutes`, `wordPrefix`.
 
-**P5 chưa gắn lịch.** P7 gọi định kỳ từ tiến trình worker. Chỉ chạy với **đúng schema pg-boss mà job được gửi vào** (`PGBOSS_SCHEMA`): chạy nhầm schema sẽ coi mọi hàng là mồ côi.
+**Đã gắn lịch từ P7** (`services/queue/reconcileSchedule.ts`): vai trò `worker` của pg-boss (`schedule: true`) đăng ký cron `*/10 * * * *` vào hàng `dictionary.enrich_word.reconcile` (chính sách `exclusive`, `retryLimit: 0`), mỗi lần tới giờ có một job chạy `reconcileStaleJobs` trong một giao dịch giữ `pg_try_advisory_xact_lock(hashtextextended('enrich:reconcile', 0))`. Mỗi lúc chỉ một nơi chạy: pg-boss giành quyền đánh giá cron trong DB, hàng `exclusive` không để các lần tới giờ chồng nhau, và khóa tư vấn chặn lần chạy thứ hai. Test: `tests/queue/reconcileSchedule*.test.ts`, `tests/chaos/schedule.chaos.test.ts`. Chỉ chạy với **đúng schema pg-boss mà job được gửi vào** (`PGBOSS_SCHEMA`): chạy nhầm schema sẽ coi mọi hàng là mồ côi.
 
 ---
 
@@ -229,9 +233,12 @@ npm run enrich:enqueue -- --word ubiquitous
 
 # 20 hàng gần nhất và số lượng theo trạng thái
 npm run enrich:status -- [--word ubiquitous] [--limit 20]
+
+# gửi lại job trong hàng chết (chạy thử là mặc định)
+npm run enrich:redrive -- [--word a,b] [--id <id>] [--reason upstream_error] [--limit 20] [--confirm]
 ```
 
-`enrich:enqueue` chỉ **gửi**; cần một worker đang chạy ở đâu đó để xử lý. Từ P6b còn `npm run enrich:run -- --word <w> [--dry-run]` (chạy đường ống trực tiếp, không qua hàng đợi) và `npm run enrich:review` (duyệt mục từ tự tạo); xem `docs/lookup-enrichment.md` mục 14. **Worker từ chối khởi động khi thiếu 30 chủ đề** (`topics_not_seeded`): job nằm yên trong hàng đợi. Công cụ nằm trong `scripts/` (thư mục này đang bị `.gitignore`, như các script khác của dự án).
+`enrich:enqueue` chỉ **gửi**; cần một worker đang chạy ở đâu đó để xử lý. Từ P6b còn `npm run enrich:run -- --word <w> [--dry-run]` (chạy đường ống trực tiếp, không qua hàng đợi) và `npm run enrich:review` (duyệt mục từ tự tạo); xem `docs/lookup-enrichment.md` mục 14. **Worker từ chối khởi động khi thiếu 30 chủ đề** (`topics_not_seeded`): job nằm yên trong hàng đợi. Công cụ nằm trong `scripts/`.
 
 ---
 
@@ -316,6 +323,7 @@ FROM pgboss.instance ORDER BY started_on DESC;
 - `tests/queue/enrichmentWorker.test.ts`: mọi nhánh của handler với pipeline giả, đọc `retryCount` / `retryLimit` từ metadata, hủy `signal`, hàng lỗi chết.
 - `tests/queue/boss.test.ts`, `reconcileShutdown.test.ts`: tùy chọn queue, thứ tự tạo queue, `updateQueue`, reconcile, thứ tự dừng.
 - `tests/queue/queue.integration.test.ts`: **Postgres thật + pg-boss thật**, schema riêng `pgboss_test_<mã>` và `pgboss_test_stop_<mã>` (xóa khi xong), từ fixture `qzq<mã>…`, bộ đếm riêng `enrichment_test_<mã>`: gửi → worker → `succeeded`; 10 lần gửi song song cùng một từ ra 1 hàng, 1 job, 1 lượt trần ngày; `UpstreamUnavailable` hai lần rồi thành công ra `attempts = 3`; luôn lỗi ra `failed` và job vào DLQ; dừng worker giữa chừng không mất job; `createQueue` / cài schema chạy lặp. Lần chạy hỏng giữa chừng có thể để lại schema `pgboss_test_*` hoặc hàng `qzq%`: xóa tay.
+- P7: `tests/queue/reconcileSchedule.test.ts`, `reconcileSchedule.integration.test.ts` (lịch, khóa tư vấn, hai thực thể cùng schema), `redrive.test.ts`, `redrive.integration.test.ts` (job thật vào hàng chết rồi được gửi lại), `enrichmentWorkerRetryAfter.test.ts`; các kịch bản chịu lỗi ở `tests/chaos/` (`docs/lookup-chaos.md`).
 
 Jest (CommonJS) không nạp được các gói ES module nên `jest.config.js` có `transformIgnorePatterns` cho `pg-boss`, `rrule-temporal`, `serialize-error`, `non-error`. Nâng pg-boss mà có thêm phụ thuộc ESM thì thêm vào danh sách đó.
 
@@ -325,8 +333,8 @@ Jest (CommonJS) không nạp được các gói ES module nên `jest.config.js` 
 
 1. **Transaction gộp d + e + f.** Đổi lấy: các lần gửi song song nối đuôi nhau trên một dòng bộ đếm. Bù lại không có "trần ngày bị trừ mà không có job".
 2. **`ENRICHMENT_ENABLED=false` ở tiến trình API = không có pg-boss.** Mặc định của dự án (`ENRICHMENT_WORKER_ENABLED=true`) nếu chạy worker ở mọi API sẽ cài schema pg-boss vào database ở mọi lần triển khai. Worker riêng thì chạy bất kể `ENRICHMENT_ENABLED`.
-3. **Không dùng `Retry-After` của nhà cung cấp** để đặt độ trễ thử lại: pg-boss chỉ nhận một lịch backoff cho cả queue khi handler ném lỗi. P6 nên tự giữ job (`startAfter`) nếu cần tôn trọng 429.
+3. **`Retry-After` của nhà cung cấp** không đặt được độ trễ thử lại của pg-boss (chỉ có một lịch backoff cho cả queue khi handler ném lỗi). Từ P7 worker **chờ** `Retry-After` của một 429 (tối đa `MAX_RETRY_AFTER_WAIT_MS` = 60 s, dừng sớm nếu tiến trình đang tắt) rồi mới đặt hàng về `queued` và ném lỗi, nên lần thử lại do pg-boss lên lịch không đập vào cùng bức tường (spec §11.4). Không chờ ở lần thử cuối. Phần vượt quá 60 s do backoff của pg-boss (30 s, gấp đôi) đảm nhận.
 4. **Lần chạy bị ngắt khi dừng tiến trình vẫn tốn một lượt `retryLimit`.**
-5. **Pool lỗi:** `config/db.ts` không có `pool.on('error')`. Neon cắt kết nối nhàn rỗi sẽ phát sự kiện `error` và làm sập tiến trình chạy lâu. `runtime.ts` gắn bộ ghi log cho tiến trình dùng hàng đợi; nên thêm cùng listener vào `config/db.ts` cho toàn dự án.
+5. **Pool lỗi (đã vá ở P7):** trước đây `config/db.ts` không có `pool.on('error')`, và một client đang được dùng (`pool.connect()`, ví dụ trong giao dịch ghi mục từ hay giao dịch của enqueuer) **không có listener lỗi nào cả** (pg-pool gỡ listener của nó khi giao client ra). Neon cắt kết nối ở một trong hai tình huống đó là một sự kiện `error` không ai nghe, tức ngoại lệ không bắt được làm sập API / worker. `config/poolErrors.ts` (`attachPoolErrorHandlers`) gắn `pool.on('error')` (client rảnh, log `pg_pool_error`) và, trên sự kiện `connect` của pool, `client.on('error')` cho mọi client mới (log `pg_client_error`); dùng cho pool chính và pool `REFDATA_DATABASE_URL`. Câu truy vấn đang chạy vẫn nhận lỗi như một lời từ chối bình thường. Test: `tests/db/poolError.test.ts` (giết kết nối thật bằng `pg_terminate_backend`), `tests/chaos/db.chaos.test.ts`.
 6. **pg-boss dùng `pg_advisory_xact_lock` (mức transaction)** nên chạy được qua PgBouncer chế độ transaction; `LISTEN/NOTIFY` không bật (`useListenNotify` mặc định tắt), chỉ thăm dò.
 7. **Mở rộng:** mỗi tiến trình worker chạy `ENRICHMENT_WORKER_CONCURRENCY` job song song; chạy nhiều tiến trình worker là an toàn (pg-boss dùng `SKIP LOCKED`).
