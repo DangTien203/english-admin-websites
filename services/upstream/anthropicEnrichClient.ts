@@ -134,6 +134,11 @@ function toResult(message: Anthropic.Message, requestId: string | null): EnrichC
 
 const USAGE_LIMIT_PREFIX = 'you have reached your specified api usage limits';
 
+const OUTPUT_CONFIG_REJECTED = /output_config|output_format|structured output|json_schema/i;
+
+/** True when an API error message says the model refuses output_config / a JSON schema (docs/lookup-spec.md §9.2 fallback). */
+export const isOutputConfigRejection = (message: string): boolean => OUTPUT_CONFIG_REJECTED.test(message);
+
 /** Maps SDK errors to the shared taxonomy (spec §11.3 / §11.4). Anything unknown is returned unchanged. */
 export function classifyAnthropicError(err: unknown): unknown {
   if (err instanceof Anthropic.APIUserAbortError) return err; // caller cancelled: not an upstream problem
@@ -168,7 +173,10 @@ export function classifyAnthropicError(err: unknown): unknown {
   }
   if (typeof status === 'number' && status >= 400) {
     // 400 / 401 / 403 / 404 (unknown model) / 413 / 422: fix the request or the configuration.
-    return new UpstreamConfigError(ANTHROPIC_PROVIDER, `HTTP ${status}: ${apiMessage.slice(0, 200)}${requestSuffix}`, status);
+    // A 400 that only says "this model does not take output_config / a JSON schema" is about the shape of ONE request,
+    // and the enrichment caller answers it with a forced-tool retry: it must not open the breaker that retry goes through.
+    const requestShapeOnly = status === 400 && isOutputConfigRejection(apiMessage);
+    return new UpstreamConfigError(ANTHROPIC_PROVIDER, `HTTP ${status}: ${apiMessage.slice(0, 200)}${requestSuffix}`, status, { affectsBreaker: !requestShapeOnly });
   }
   return err;
 }

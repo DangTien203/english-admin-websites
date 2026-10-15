@@ -1,5 +1,5 @@
 import type { FdEntry } from '../../upstream/freeDictionaryClient';
-import { describeFormOf, summarizeForPrompt } from '../sources/wiktionary';
+import { countSenses, describeFormOf, summarizeForPrompt } from '../sources/wiktionary';
 import type { SourceBundle } from '../types';
 
 /**
@@ -13,6 +13,14 @@ import type { SourceBundle } from '../types';
  */
 
 export const FREE_DICTIONARY_MAX_SENSES = 6;
+
+/** Wiktionary senses shown to Haiku: 6 normally, 12 (and a larger budget) when the word has more than 8 senses. */
+export const PROMPT_SENSES_DEFAULT = 6;
+export const PROMPT_SENSES_MANY = 12;
+export const MANY_SENSES_THRESHOLD = 8;
+/** Token budget (characters / 4) of the compact Wiktionary JSON. */
+export const PROMPT_TOKENS_DEFAULT = 2500;
+export const PROMPT_TOKENS_MANY = 4000;
 
 /**
  * JSON text safe to place between <data> and </data>.
@@ -41,7 +49,13 @@ export function buildDataObject(bundle: SourceBundle): Record<string, unknown> {
   const formOnly = bundle.flags.onlyFormRows && bundle.expectedLemma !== null && bundle.expectedLemma !== bundle.word;
   // A pure form (ran): the draft is about its lemma, so show the lemma's rows (the form itself is described by word_is_form_of).
   const rows = formOnly && bundle.lemmaRows.length > 0 ? bundle.lemmaRows : bundle.wiktionaryRows;
-  const wiktionary = summarizeForPrompt(rows, { maxTokens: 2500, maxSenses: 6 });
+  // A word with many senses (run 22, light 43, bank 42) would lose its important meanings to a 6-sense sample, so it gets
+  // a wider window and a bigger token budget (docs/lookup-enrichment-samples.md §4). Haiku still writes at most 6 senses.
+  const many = countSenses(rows) > MANY_SENSES_THRESHOLD;
+  const wiktionary = summarizeForPrompt(rows, {
+    maxTokens: many ? PROMPT_TOKENS_MANY : PROMPT_TOKENS_DEFAULT,
+    maxSenses: many ? PROMPT_SENSES_MANY : PROMPT_SENSES_DEFAULT,
+  });
 
   const data: Record<string, unknown> = {
     word: bundle.word,

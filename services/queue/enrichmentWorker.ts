@@ -170,6 +170,9 @@ export class EnrichmentWorker {
       reason: outcome.reason ?? null,
       attempt: row.attempts,
       duration_ms: durationMs,
+      entry_id: outcome.entryId ?? null,
+      model: outcome.model ?? null,
+      stages_ms: outcome.stagesMs ?? null,
       input_tokens: outcome.inputTokens ?? null,
       output_tokens: outcome.outputTokens ?? null,
     });

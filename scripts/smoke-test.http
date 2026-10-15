@@ -1,0 +1,517 @@
+### ═══════════════════════════════════════════════════════════════
+### English Learning App — API Smoke Test
+### Chạy bằng VS Code REST Client extension (humao.rest-client)
+### Docs đầy đủ: ../docs/API-CONTRACTS.md
+### ═══════════════════════════════════════════════════════════════
+
+@baseUrl = https://english-admin-websites-production.up.railway.app/api/v1
+@contentType = application/json
+
+### Variables — paste token sau khi chạy login/register
+@accessToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIzODQ2ZTVhZS02NDVmLTQxNjUtOTFjYi03NTIyYThjN2M5NmQiLCJlbWFpbCI6InNtb2tldGVzdCsxNzc2NzEyNjQyQGV4YW1wbGUuY29tIiwiaWF0IjoxNzc2NzEyNjQzLCJleHAiOjE3NzczMTc0NDN9.aX36QLuNz50NaZhZXYEZtnZipJ1CgJO77F--cfvaBcw"
+@refreshToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIzODQ2ZTVhZS02NDVmLTQxNjUtOTFjYi03NTIyYThjN2M5NmQiLCJ0b2tlbklkIjoiNTk1NDA2YzQtMGNiZC00ODE1LTg2MjAtODIzYTViZGJhYjMzIiwiaWF0IjoxNzc2NzEyNjQzLCJleHAiOjE3NzkzMDQ2NDN9.nw7FSTBzdowj1gVeTXnOit09zWq9Kw7T8IK6nZlmsG4"
+
+### ═══════════════════════════════════════════════════════════════
+### PHASE 1 — AUTH
+### ═══════════════════════════════════════════════════════════════
+
+### [1.a] POST /auth/register — happy path
+### Expected: 201 + data.accessToken / data.refreshToken / data.user
+POST {{baseUrl}}/auth/register
+Content-Type: {{contentType}}
+
+{
+  "email": "smoketest+{{$timestamp}}@example.com",
+  "password": "password123",
+  "full_name": "Smoke Test User",
+  "phone": "+84912345678",
+  "level": "beginner"
+}
+
+### [1.b] POST /auth/register — VALIDATION_ERROR (password too short)
+### Expected: 400 + error.code = "VALIDATION_ERROR"
+POST {{baseUrl}}/auth/register
+Content-Type: {{contentType}}
+
+{
+  "email": "invalid@example.com",
+  "password": "123",
+  "full_name": "X"
+}
+
+### [2.a] POST /auth/login — happy path
+### Expected: 200 + accessToken / refreshToken / user
+### → Copy accessToken và refreshToken từ response vào variables ở trên
+POST {{baseUrl}}/auth/login
+Content-Type: {{contentType}}
+
+{
+  "email": "smoketest+1776712818@example.com",
+  "password": "password123"
+}
+
+### [2.b] POST /auth/login — INVALID_CREDENTIALS (sai password)
+### Expected: 401 + error.code = "INVALID_CREDENTIALS"
+POST {{baseUrl}}/auth/login
+Content-Type: {{contentType}}
+
+{
+  "email": "nguyenvana@example.com",
+  "password": "wrong-password"
+}
+
+### [3.a] POST /auth/refresh — happy path (rotation)
+### Expected: 200 + cặp token MỚI. Refresh token cũ bị revoked.
+POST {{baseUrl}}/auth/refresh
+Content-Type: {{contentType}}
+
+{
+  "refreshToken": "{{refreshToken}}"
+}
+
+### [3.b] POST /auth/refresh — INVALID_REFRESH_TOKEN (token đã revoked/malformed)
+### Expected: 401 + error.code = "INVALID_REFRESH_TOKEN"
+POST {{baseUrl}}/auth/refresh
+Content-Type: {{contentType}}
+
+{
+  "refreshToken": "eyJhbGciOiJIUzI1NiJ9.revoked-or-fake.signature"
+}
+
+### [4] POST /auth/logout — revoke refresh token hiện tại
+### Expected: 200 + data = null
+POST {{baseUrl}}/auth/logout
+Authorization: Bearer {{accessToken}}
+Content-Type: {{contentType}}
+
+{
+  "refreshToken": "{{refreshToken}}"
+}
+
+### [5] POST /auth/logout-all — revoke mọi refresh token của user
+### Expected: 200 + data.revokedCount
+POST {{baseUrl}}/auth/logout-all
+Authorization: Bearer {{accessToken}}
+
+### [6.a] GET /auth/me — happy path
+### Expected: 200 + data.user (subset: 8 fields)
+GET {{baseUrl}}/auth/me
+Authorization: Bearer {{accessToken}}
+
+### [6.b] GET /auth/me — NO_TOKEN (thiếu header)
+### Expected: 401 + error.code = "NO_TOKEN"
+GET {{baseUrl}}/auth/me
+
+### ═══════════════════════════════════════════════════════════════
+### PHASE 2 — PROFILE
+### ═══════════════════════════════════════════════════════════════
+
+### [7.a] GET /profile/me — happy path
+### Expected: 200 + flat object (15 fields gồm total_words_saved, days_active)
+GET {{baseUrl}}/profile/me
+Authorization: Bearer {{accessToken}}
+
+### [7.b] GET /profile/me — TOKEN_EXPIRED hoặc INVALID_TOKEN
+### Expected: 401 + error.code = "INVALID_TOKEN"
+GET {{baseUrl}}/profile/me
+Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.fake.signature
+
+### [8.a] PATCH /profile/me — update 1 field
+### Expected: 200 + data.full_name cập nhật (lưu ý: KHÔNG có last_login_at ở response PATCH)
+PATCH {{baseUrl}}/profile/me
+Authorization: Bearer {{accessToken}}
+Content-Type: {{contentType}}
+
+{
+  "full_name": "Nguyễn Văn B"
+}
+
+### [8.b] PATCH /profile/me — NO_FIELDS_TO_UPDATE (body rỗng)
+### Expected: 400 + error.code = "NO_FIELDS_TO_UPDATE"
+PATCH {{baseUrl}}/profile/me
+Authorization: Bearer {{accessToken}}
+Content-Type: {{contentType}}
+
+{}
+
+### [8.c] PATCH /profile/me — VALIDATION_ERROR (phone sai format)
+### Expected: 400 + error.code = "VALIDATION_ERROR"
+PATCH {{baseUrl}}/profile/me
+Authorization: Bearer {{accessToken}}
+Content-Type: {{contentType}}
+
+{
+  "phone": "12345"
+}
+
+### [9.a] POST /profile/change-password — happy path
+### Expected: 200 + message = "Password changed successfully"
+### Side effect: tất cả refresh token bị revoked
+POST {{baseUrl}}/profile/change-password
+Authorization: Bearer {{accessToken}}
+Content-Type: {{contentType}}
+
+{
+  "currentPassword": "password123",
+  "newPassword": "newPassword456"
+}
+
+### [9.b] POST /profile/change-password — INVALID_CURRENT_PASSWORD
+### Expected: 401 + error.code = "INVALID_CURRENT_PASSWORD"
+POST {{baseUrl}}/profile/change-password
+Authorization: Bearer {{accessToken}}
+Content-Type: {{contentType}}
+
+{
+  "currentPassword": "wrong-current",
+  "newPassword": "newPassword456"
+}
+
+### [9.c] POST /profile/change-password — SAME_PASSWORD
+### Expected: 400 + error.code = "SAME_PASSWORD"
+POST {{baseUrl}}/profile/change-password
+Authorization: Bearer {{accessToken}}
+Content-Type: {{contentType}}
+
+{
+  "currentPassword": "password123",
+  "newPassword": "password123"
+}
+
+### [10.a] POST /profile/avatar — upload file (multipart/form-data)
+### Expected: 201/200 + data.avatar_url (full URL)
+### Đổi path file theo máy local. Field name PHẢI là "avatar".
+POST {{baseUrl}}/profile/avatar
+Authorization: Bearer {{accessToken}}
+Content-Type: multipart/form-data; boundary=----REST-CLIENT-BOUNDARY
+
+------REST-CLIENT-BOUNDARY
+Content-Disposition: form-data; name="avatar"; filename="test-avatar.jpg"
+Content-Type: image/jpeg
+
+< ./fixtures/test-avatar.jpg
+------REST-CLIENT-BOUNDARY--
+
+### [10.b] POST /profile/avatar — NO_FILE (missing field)
+### Expected: 400 + error.code = "NO_FILE"
+POST {{baseUrl}}/profile/avatar
+Authorization: Bearer {{accessToken}}
+Content-Type: multipart/form-data; boundary=----REST-CLIENT-BOUNDARY
+
+------REST-CLIENT-BOUNDARY
+Content-Disposition: form-data; name="wrong_field"
+
+some text
+------REST-CLIENT-BOUNDARY--
+
+### [11] DELETE /profile/avatar — xóa avatar
+### Expected: 200 + data = null + message = "Avatar đã xóa"
+DELETE {{baseUrl}}/profile/avatar
+Authorization: Bearer {{accessToken}}
+
+### [12] GET /profile/stats — happy path
+### Expected: 200 + 7 fields + last_30_days_activity array (30 items)
+GET {{baseUrl}}/profile/stats
+Authorization: Bearer {{accessToken}}
+
+### ═══════════════════════════════════════════════════════════════
+### PHASE 3 — DICTIONARY (FLAGSHIP)
+### ═══════════════════════════════════════════════════════════════
+
+### Variables — thay bằng id/headword có thật trong DB sau khi query /search
+@entryId = replace-with-real-uuid
+@tagId = replace-with-real-uuid
+
+### Phase 4 variables — paste sau khi tạo deck/card
+@deckId = 4781134f-2398-495a-97f6-aae2437c95d0
+@cardId = 188bbb0e-0b00-43ea-a80f-1eb263dc5501
+
+### [13.a] GET /dictionary/search — prefix search happy path
+### Expected: 200 + items[] + meta. Response có header Cache-Control: public, max-age=3600
+GET {{baseUrl}}/dictionary/search?q=org&limit=20
+
+### [13.b] GET /dictionary/search — filter pos + cefr
+### Expected: 200 + items[] đã filter
+GET {{baseUrl}}/dictionary/search?q=run&pos=verb,noun&cefr=B1&limit=10
+
+### [13.c] GET /dictionary/search — VALIDATION_ERROR (q rỗng)
+### Expected: 400 + error.code = "VALIDATION_ERROR"
+GET {{baseUrl}}/dictionary/search?q=
+
+### [14] GET /dictionary/trending — top 20 lookup 7 ngày qua
+### Expected: 200 + data = array (có thể rỗng nếu chưa có lookups)
+### Note: Backend cache in-memory 1h. /trending không bypass cache trừ khi NODE_ENV=test
+GET {{baseUrl}}/dictionary/trending
+
+### [15] GET /dictionary/categories — list tags + entry_count
+### Expected: 200 + data = array [{tag_id, name, entry_count}]. Copy 1 tag_id vào @tagId
+GET {{baseUrl}}/dictionary/categories
+
+### [16] GET /dictionary/categories/:tag_id/entries — entries theo tag
+### Expected: 200 + items[] + meta. total=0 nếu tag_id không tồn tại (KHÔNG 404)
+GET {{baseUrl}}/dictionary/categories/{{tagId}}/entries?page=1&limit=20
+
+### [17.a] GET /dictionary/entries/:id — public, guest mode
+### Expected: 200 + full nested data (senses, word_forms, phrasal_verbs, idioms, collocations, tags, legacy_*, word_family)
+### Note: Không log lookup vì guest.
+GET {{baseUrl}}/dictionary/entries/{{entryId}}
+
+### [17.b] GET /dictionary/entries/:id — authenticated, log lookup
+### Expected: 200 + full data. Side effect: INSERT vào word_lookups với source='manual_search'
+GET {{baseUrl}}/dictionary/entries/{{entryId}}
+Authorization: Bearer {{accessToken}}
+
+### [17.c] GET /dictionary/entries/:id — ebook source
+### Expected: 200. Side effect: word_lookups với source='ebook', ebook_id=<uuid>
+GET {{baseUrl}}/dictionary/entries/{{entryId}}?source=ebook&ebook_id=aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
+Authorization: Bearer {{accessToken}}
+
+### [17.d] GET /dictionary/entries/:id — ENTRY_NOT_FOUND
+### Expected: 404 + error.code = "ENTRY_NOT_FOUND"
+GET {{baseUrl}}/dictionary/entries/00000000-0000-0000-0000-000000000000
+
+### [18.a] GET /dictionary/entries/by-headword/:headword — ebook lookup shortcut
+### Expected: 200 + full data (LIMIT 1 — nếu có nhiều entries cùng headword sẽ trả 1)
+GET {{baseUrl}}/dictionary/entries/by-headword/run
+Authorization: Bearer {{accessToken}}
+
+### [18.b] GET by-headword — headword có ký tự đặc biệt (URL-encode)
+### Expected: 200 hoặc 404 tuỳ DB
+GET {{baseUrl}}/dictionary/entries/by-headword/I%27m
+
+### [19.a] POST /dictionary/entries/:id/bookmark — happy path với note
+### Expected: 201 + data.saved=true + saved_word_id
+POST {{baseUrl}}/dictionary/entries/{{entryId}}/bookmark
+Authorization: Bearer {{accessToken}}
+Content-Type: {{contentType}}
+
+{
+  "note": "Từ này hay dùng trong công việc"
+}
+
+### [19.b] POST /dictionary/entries/:id/bookmark — không có body (idempotent)
+### Expected: 201 (idempotent nếu đã bookmark — UPSERT note = null)
+POST {{baseUrl}}/dictionary/entries/{{entryId}}/bookmark
+Authorization: Bearer {{accessToken}}
+Content-Type: {{contentType}}
+
+{}
+
+### [19.c] POST /dictionary/entries/:id/bookmark — NO_TOKEN
+### Expected: 401 + error.code = "NO_TOKEN"
+POST {{baseUrl}}/dictionary/entries/{{entryId}}/bookmark
+Content-Type: {{contentType}}
+
+{}
+
+### [20.a] DELETE /dictionary/entries/:id/bookmark — happy path
+### Expected: 200 + data.saved=false
+DELETE {{baseUrl}}/dictionary/entries/{{entryId}}/bookmark
+Authorization: Bearer {{accessToken}}
+
+### [20.b] DELETE bookmark — BOOKMARK_NOT_FOUND (chưa bookmark trước)
+### Expected: 404 + error.code = "BOOKMARK_NOT_FOUND"
+DELETE {{baseUrl}}/dictionary/entries/{{entryId}}/bookmark
+Authorization: Bearer {{accessToken}}
+
+### [21.a] GET /dictionary/saved-words — list + stats
+### Expected: 200 + stats{total_saved, saved_this_week, level_progress{A1..C2}} + items[] + meta
+### ⚠ stats KHÔNG phụ thuộc filter (luôn là tổng của user)
+GET {{baseUrl}}/dictionary/saved-words?page=1&limit=20
+Authorization: Bearer {{accessToken}}
+
+### [21.b] GET /dictionary/saved-words — filter mastery_level + cefr + pos
+### Expected: 200. items đã filter; stats vẫn giữ tổng.
+GET {{baseUrl}}/dictionary/saved-words?mastery_level=new&cefr=B1&pos=verb,noun
+Authorization: Bearer {{accessToken}}
+
+### [22.a] GET /dictionary/lookup-history — group by day
+### Expected: 200 + items=[{date, items:[...]}] sorted DESC theo ngày UTC. meta.total = tổng rows (không phải groups)
+GET {{baseUrl}}/dictionary/lookup-history?page=1&limit=20
+Authorization: Bearer {{accessToken}}
+
+### [22.b] GET /dictionary/lookup-history — filter source=ebook
+### Expected: 200. Chỉ rows có source='ebook'.
+GET {{baseUrl}}/dictionary/lookup-history?source=ebook&page=1&limit=50
+Authorization: Bearer {{accessToken}}
+
+### ═══════════════════════════════════════════════════════════════
+### PHASE 4 — FLASHCARD & DECKS (SRS)
+### ═══════════════════════════════════════════════════════════════
+
+### [23] GET /decks — list all decks with stats
+### Expected: 200 + data.summary + data.items[] + data.meta
+GET {{baseUrl}}/decks?page=1&limit=20
+Authorization: Bearer {{accessToken}}
+
+### [24] GET /decks/:id — deck detail + card_preview (max 20 cards)
+### Expected: 200 + data.card_preview[] (array, có thể null nếu deck rỗng → ?? [])
+### → Copy id từ response [23] vào @deckId
+GET {{baseUrl}}/decks/{{deckId}}
+Authorization: Bearer {{accessToken}}
+
+### [25.a] POST /decks — tạo user deck
+### Expected: 201 + data.deck_type = "user_created"
+### → Copy data.id vào @deckId
+POST {{baseUrl}}/decks
+Authorization: Bearer {{accessToken}}
+Content-Type: {{contentType}}
+
+{
+  "title": "Smoke Test Deck",
+  "description": "Deck tạo từ smoke test",
+  "level": "intermediate"
+}
+
+### [25.b] POST /decks — VALIDATION_ERROR (title quá ngắn)
+### Expected: 400 + error.code = "VALIDATION_ERROR"
+POST {{baseUrl}}/decks
+Authorization: Bearer {{accessToken}}
+Content-Type: {{contentType}}
+
+{
+  "title": "AB"
+}
+
+### [26.a] PATCH /decks/:id — update title
+### Expected: 200 + data.title updated + data.updated_at
+PATCH {{baseUrl}}/decks/{{deckId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: {{contentType}}
+
+{
+  "title": "Smoke Test Deck (Updated)"
+}
+
+### [26.b] PATCH /decks/:id — DECK_ACCESS_DENIED (deck của user khác / premade)
+### Expected: 403 + error.code = "DECK_ACCESS_DENIED"
+### Thay bằng id của premade deck
+PATCH {{baseUrl}}/decks/00000000-0000-0000-0000-000000000000
+Authorization: Bearer {{accessToken}}
+Content-Type: {{contentType}}
+
+{
+  "title": "Hack attempt"
+}
+
+### [27] DELETE /decks/:id — xóa deck (cascade cards + UCP + reviews)
+### Expected: 200 + data = null + message = "Deck đã xóa"
+### ⚠ Chạy cuối cùng — sẽ xóa deck test
+# DELETE {{baseUrl}}/decks/{{deckId}}
+# Authorization: Bearer {{accessToken}}
+
+### [28] GET /decks/:deckId/cards — list cards trong deck + SRS state
+### Expected: 200 + data.items[] + data.total
+GET {{baseUrl}}/decks/{{deckId}}/cards
+Authorization: Bearer {{accessToken}}
+
+### [29.a] POST /decks/:deckId/cards — thêm 1 card
+### Expected: 201 + data.srs.due_at = null (new card)
+### → Copy data.id vào @cardId
+POST {{baseUrl}}/decks/{{deckId}}/cards
+Authorization: Bearer {{accessToken}}
+Content-Type: {{contentType}}
+
+{
+  "entry_id": "{{entryId}}"
+}
+
+### [29.b] POST /decks/:deckId/cards — CARD_ALREADY_EXISTS (thêm lại cùng entry)
+### Expected: 409 + error.code = "CARD_ALREADY_EXISTS"
+POST {{baseUrl}}/decks/{{deckId}}/cards
+Authorization: Bearer {{accessToken}}
+Content-Type: {{contentType}}
+
+{
+  "entry_id": "{{entryId}}"
+}
+
+### [30] POST /decks/:deckId/cards/batch — thêm nhiều cards
+### Expected: 201 + data.added + data.skipped + data.entry_ids_added
+POST {{baseUrl}}/decks/{{deckId}}/cards/batch
+Authorization: Bearer {{accessToken}}
+Content-Type: {{contentType}}
+
+{
+  "entry_ids": ["{{entryId}}"]
+}
+
+### [31] DELETE /decks/:deckId/cards/:cardId — xóa 1 card
+### Expected: 200 + data = null + message = "Card đã xóa"
+DELETE {{baseUrl}}/decks/{{deckId}}/cards/{{cardId}}
+Authorization: Bearer {{accessToken}}
+
+### [32] GET /study/queue — lấy queue ôn tập (due first, then new)
+### Expected: 200 + data.cards[] + data.total_due + data.cards_per_session
+### Note: cards[].is_new=true cho card chưa review; due cards sorted due_at ASC
+GET {{baseUrl}}/study/queue
+Authorization: Bearer {{accessToken}}
+
+### [33.a] POST /study/review — rating=3 (Good)
+### Expected: 200 + data.leitner_box=2, data.correct=true, data.due_at > now+1day
+POST {{baseUrl}}/study/review
+Authorization: Bearer {{accessToken}}
+Content-Type: {{contentType}}
+
+{
+  "card_id": "{{cardId}}",
+  "rating": 3,
+  "mode": "flashcard",
+  "time_ms": 4200
+}
+
+### [33.b] POST /study/review — rating=1 (Again — reset)
+### Expected: 200 + data.leitner_box=1, data.correct=false, data.lapses=1, data.due_at ≈ now+1min
+POST {{baseUrl}}/study/review
+Authorization: Bearer {{accessToken}}
+Content-Type: {{contentType}}
+
+{
+  "card_id": "{{cardId}}",
+  "rating": 1,
+  "mode": "swift_choice",
+  "time_ms": 1500
+}
+
+### [33.c] POST /study/review — VALIDATION_ERROR (invalid mode)
+### Expected: 400 + error.code = "VALIDATION_ERROR"
+POST {{baseUrl}}/study/review
+Authorization: Bearer {{accessToken}}
+Content-Type: {{contentType}}
+
+{
+  "card_id": "{{cardId}}",
+  "rating": 3,
+  "mode": "invalid_mode"
+}
+
+### [34] POST /study/session-complete — kết thúc session
+### Expected: 200 + data.xp_earned = correct_count × 10 + streak_current + streak_longest
+POST {{baseUrl}}/study/session-complete
+Authorization: Bearer {{accessToken}}
+Content-Type: {{contentType}}
+
+{
+  "reviews_count": 10,
+  "correct_count": 7,
+  "deck_id": "{{deckId}}"
+}
+
+### ═══════════════════════════════════════════════════════════════
+### EDGE CASES
+### ═══════════════════════════════════════════════════════════════
+
+### [E1] GET endpoint không tồn tại — NOT_FOUND
+### Expected: 404 + error.code = "NOT_FOUND"
+GET {{baseUrl}}/this-endpoint-does-not-exist
+
+### [E2] Rate limit login (sau 5 request sai trong 15 phút)
+### Expected: 429 + error.code = "TOO_MANY_REQUESTS"
+### Chạy block [2.b] nhiều lần liên tiếp để trigger
+POST {{baseUrl}}/auth/login
+Content-Type: {{contentType}}
+
+{
+  "email": "ratelimit@example.com",
+  "password": "wrong"
+}

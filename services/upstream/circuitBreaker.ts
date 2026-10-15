@@ -9,9 +9,11 @@ import { BudgetExceeded, UpstreamConfigError, UpstreamNotFound, UpstreamProvider
  *
  * What counts:
  *   failure  : UpstreamUnavailable (timeout, network, 5xx, 429, bad_response)
- *   trips at once : UpstreamConfigError (400/401/403 – retrying is pointless until someone fixes it)
- *   neutral  : UpstreamNotFound (healthy answer), BudgetExceeded, local_rate_limit, breaker_open,
- *              errors flagged affectsBreaker=false (per-word anomalies), and non-upstream errors (programming bugs must not hide a healthy provider)
+ *   trips at once : UpstreamConfigError (400/401/403 – retrying is pointless until someone fixes it), and a
+ *              BudgetExceeded of the provider (spend_limit, provider_quota): later calls would only hit the same wall
+ *   neutral  : UpstreamNotFound (healthy answer), BudgetExceeded('monthly_chars', our own counter), local_rate_limit,
+ *              breaker_open, errors flagged affectsBreaker=false (per-word anomalies, a request shape the model
+ *              rejects), and non-upstream errors (programming bugs must not hide a healthy provider)
  */
 
 export type BreakerState = 'closed' | 'open' | 'half_open';
@@ -35,8 +37,11 @@ export interface BreakerSnapshot {
 type Outcome = 'success' | 'failure' | 'trip' | 'neutral';
 
 export function classifyOutcome(err: unknown): Outcome {
-  if (err instanceof UpstreamConfigError) return 'trip';
-  if (err instanceof UpstreamNotFound || err instanceof BudgetExceeded) return 'neutral';
+  if (err instanceof UpstreamConfigError) return err.affectsBreaker ? 'trip' : 'neutral';
+  // A limit on the PROVIDER's side (spend limit, quota) stays hit until someone raises it: stop calling at once.
+  // Our own monthly counter ('monthly_chars') already blocks calls locally, so it says nothing about provider health.
+  if (err instanceof BudgetExceeded) return err.reason === 'spend_limit' || err.reason === 'provider_quota' ? 'trip' : 'neutral';
+  if (err instanceof UpstreamNotFound) return 'neutral';
   if (err instanceof UpstreamUnavailable) {
     if (!err.affectsBreaker) return 'neutral';
     return err.reason === 'local_rate_limit' || err.reason === 'breaker_open' ? 'neutral' : 'failure';

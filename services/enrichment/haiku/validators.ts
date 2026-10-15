@@ -61,6 +61,9 @@ export function stripClassifier(normalized: string): string {
 }
 
 const tidy = (s: string): string => s.normalize('NFC').replace(/\s+/g, ' ').trim();
+
+/** Escapes every regex metacharacter: the lemma comes from the model and must never be able to break (or alter) a pattern. */
+export const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\\-]/g, '\\$&');
 const tidyMeaning = (s: string): string => tidy(s).replace(/[.;,:]+$/, '').trim();
 
 // ── zod → issues ─────────────────────────────────────────────────────────────
@@ -85,6 +88,35 @@ export function validateDraft(input: Draft, ctx: ValidationContext): ValidationR
   const lemma = tidy(input.lemma).toLowerCase();
   const isReal = input.is_english_word && !input.is_proper_noun && variantOf === null;
   const lowerWord = ctx.word.toLowerCase();
+
+  // ── a word that gets no entry (not English, proper noun, variant): spec §9.5 says its content is EMPTY ──
+  // Whatever the model put there anyway is dropped, not validated or repaired: it would cost a retry for text that is never used.
+  if (!isReal) {
+    const hadContent =
+      input.senses.length + input.pos.length + input.topics.length + input.idioms.length + input.phrasal_verbs.length + input.collocations.length > 0 ||
+      input.cefr_level !== null ||
+      input.is_countable !== null ||
+      input.is_transitive !== null;
+    if (hadContent) note('bỏ nội dung của từ không lập mục (senses, pos, topics, cụm từ, cefr_level, is_countable, is_transitive)');
+    const draft: Draft = {
+      is_english_word: input.is_english_word,
+      is_proper_noun: input.is_proper_noun,
+      variant_of: variantOf,
+      headword,
+      lemma,
+      pos: [],
+      cefr_level: null,
+      is_countable: null,
+      is_transitive: null,
+      topics: [],
+      senses: [],
+      idioms: [],
+      phrasal_verbs: [],
+      collocations: [],
+      notes_for_review: [...input.notes_for_review.map(tidy).filter(Boolean).slice(0, LIMITS.notes), ...notes],
+    };
+    return { issues, draft };
+  }
 
   // ── identity ──
   if (isReal) {
@@ -138,7 +170,7 @@ export function validateDraft(input: Draft, ctx: ValidationContext): ValidationR
     else if (countWords(definition) > DEFINITION_MAX_WORDS) {
       issue(`${at}.definition_en`, 'too_long', `definition_en has ${countWords(definition)} words, the limit is ${DEFINITION_MAX_WORDS}`);
     }
-    if (definition && [...wordForms].some((w) => new RegExp(`\\b${w.replace(/[-']/g, '\\$&')}\\b`, 'i').test(definition))) {
+    if (definition && [...wordForms].some((w) => new RegExp(`\\b${escapeRegExp(w)}\\b`, 'i').test(definition))) {
       note(`senses[${i}].definition_en dùng lại chính từ đang định nghĩa`);
     }
 
@@ -256,7 +288,8 @@ export function validateDraft(input: Draft, ctx: ValidationContext): ValidationR
   const hasVerb = senses.some((s) => s.pos === 'verb' || s.pos === 'modal verb');
   const pos = senses.length > 0 ? [...new Set(senses.map((s) => s.pos))] : [...new Set(input.pos)];
 
-  const notesForReview = [...input.notes_for_review.map(tidy).filter(Boolean), ...notes].slice(0, LIMITS.notes + notes.length);
+  // The model's own notes are capped; the validator's "[kiểm tra]" audit lines always survive (they say what was dropped).
+  const notesForReview = [...input.notes_for_review.map(tidy).filter(Boolean).slice(0, LIMITS.notes), ...notes];
 
   const draft: Draft = {
     is_english_word: input.is_english_word,

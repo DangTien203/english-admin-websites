@@ -65,6 +65,11 @@ export interface DraftFailure {
 
 export type DraftResult = DraftSuccess | DraftFailure;
 
+// This project compiles with strictNullChecks off, which stops `if (result.ok)` from narrowing the union (the property of the
+// other member is "missing"). These guards narrow in every configuration.
+export const isDraftSuccess = (r: DraftResult): r is DraftSuccess => r.ok === true;
+export const isDraftFailure = (r: DraftResult): r is DraftFailure => r.ok === false;
+
 interface Evaluated {
   issues: ValidationIssue[];
   draft?: Draft;

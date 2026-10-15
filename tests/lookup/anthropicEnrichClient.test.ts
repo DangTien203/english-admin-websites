@@ -101,13 +101,37 @@ describe('AnthropicEnrichClient.call', () => {
     expect(create).toHaveBeenCalledTimes(2);
   });
 
-  it('a spent budget does not count towards opening the circuit', async () => {
-    const create: CreateMessageFn = async () => {
+  it('a spent budget opens the circuit at once: the next jobs do not call a provider that will refuse them (spec §11.2, §11.4)', async () => {
+    const create = jest.fn<ReturnType<CreateMessageFn>, Parameters<CreateMessageFn>>(async () => {
       throw apiError(429, { type: 'error', error: { type: 'rate_limit_error', message: 'limit', details: { error_code: 'enforced_spend_limit_reached' } } });
-    };
-    const { client, breaker } = setup(create, {}, 1);
-    for (let i = 0; i < 3; i++) await expect(client.call(PARAMS)).rejects.toBeInstanceOf(BudgetExceeded);
+    });
+    const { client, breaker } = setup(create, {}, 5);
+    await expect(client.call(PARAMS)).rejects.toBeInstanceOf(BudgetExceeded);
+    expect(breaker.currentState()).toBe('open');
+    await expect(client.call(PARAMS)).rejects.toMatchObject({ reason: 'breaker_open' });
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it('a 400 that rejects output_config does NOT open the circuit, so the forced-tool retry can still go through', async () => {
+    const create = jest.fn<ReturnType<CreateMessageFn>, Parameters<CreateMessageFn>>(async (p) => {
+      if (!(p as any).tools) throw apiError(400, { type: 'error', error: { type: 'invalid_request_error', message: 'output_config.format is not supported for this model' } });
+      return { data: message({ content: [{ type: 'tool_use', id: 't', name: 'submit_entry', input: { ok: true } } as any] }) };
+    });
+    const { client, breaker } = setup(create, {}, 5);
+    const e: any = await client.call(PARAMS).catch((x) => x);
+    expect(e).toBeInstanceOf(UpstreamConfigError);
+    expect(e.affectsBreaker).toBe(false);
     expect(breaker.currentState()).toBe('closed');
+    await expect(client.call({ ...PARAMS, tools: [{ name: 'submit_entry', input_schema: { type: 'object' } }] } as any)).resolves.toBeDefined();
+  });
+
+  it('any other 400 (a real configuration problem) still opens the circuit', async () => {
+    const create: CreateMessageFn = async () => {
+      throw apiError(400, { type: 'error', error: { type: 'invalid_request_error', message: 'max_tokens: must be positive' } });
+    };
+    const { client, breaker } = setup(create, {}, 5);
+    await client.call(PARAMS).catch(() => undefined);
+    expect(breaker.currentState()).toBe('open');
   });
 });
 

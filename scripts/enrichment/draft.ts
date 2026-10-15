@@ -15,7 +15,7 @@ import pool from '../../config/db';
 import { lookupConfig } from '../../config/lookup';
 import { createEnrichmentDeps, haikuSkipReason } from '../../services/enrichment';
 import { collectSources } from '../../services/enrichment/sources';
-import { generateDraft, type DraftResult } from '../../services/enrichment/draft';
+import { generateDraft, isDraftSuccess, type DraftResult } from '../../services/enrichment/draft';
 import { estimateCallCostUsd, PRICING_CHECKED_ON } from '../../services/enrichment/pricing';
 import { loadTopicIds } from '../../services/enrichment/topics';
 import type { Draft } from '../../services/enrichment/haiku/schema';
@@ -101,11 +101,11 @@ async function main(): Promise<number> {
 
   if (json) {
     console.log(JSON.stringify({ word, model: result.model, flags: bundle.flags, expectedLemma: bundle.expectedLemma, usage: u, costUsd: cost, ms: { total: Date.now() - started, sources: bundle.timingsMs, haiku: result.callMs }, result }, null, 2));
-    return result.ok ? 0 : 1;
+    return isDraftSuccess(result) ? 0 : 1;
   }
 
   log('', '── Haiku (S3) ──', usageLine, `thời gian: ${result.callMs.map((m) => `${m} ms`).join(' + ')}   tổng ${Date.now() - started} ms`);
-  if (result.ok) {
+  if (isDraftSuccess(result)) {
     log('', '── bản nháp ──', ...describeDraft(result.draft), '', '── kiểm tra (S4) ──', result.repaired ? `ĐÃ SỬA sau 1 lần thử lại. Lỗi lần đầu:\n${result.firstIssues.map((i) => `   - ${i.path}: ${i.message}`).join('\n')}` : 'đạt ngay lần đầu', 'kết quả: OK');
     return 0;
   }

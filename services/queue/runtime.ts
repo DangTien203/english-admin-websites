@@ -1,5 +1,6 @@
 import pool from '../../config/db';
 import { lookupConfig } from '../../config/lookup';
+import { EnrichmentConfigError } from '../enrichment/errors';
 import { runEnrichment } from '../enrichment/pipeline';
 import { loadTopicIds } from '../enrichment/topics';
 import { getBoss, stopBoss, type BossRole } from './boss';
@@ -42,12 +43,24 @@ export async function startEnrichmentRuntime(mode: 'api' | 'worker'): Promise<En
   logPoolErrors();
   const runWorker = flags.enrichmentWorkerEnabled;
   const role: BossRole = runWorker ? 'worker' : 'sender';
+
+  if (runWorker) {
+    // Fail loudly at start, BEFORE any job is taken: without the 30 topic tags every job would end failed / config_error
+    // for good (no retry), so a worker that started anyway would drain the whole queue into failed rows.
+    // Nothing is registered and pg-boss is not even started; the jobs stay queued until the tags are seeded.
+    // Only a missing seed is a configuration problem; a database error propagates as it is.
+    try {
+      await loadTopicIds(pool);
+    } catch (err) {
+      if (err instanceof EnrichmentConfigError) logEvent('error', 'topics_not_seeded', { code: err.code, error: errMessage(err) });
+      throw err;
+    }
+  }
+
   const boss = await getBoss(role);
 
   let worker: EnrichmentWorker | null = null;
   if (runWorker) {
-    // Fail loudly at start, not on the first job: without the 30 topic tags every job ends failed / config_error.
-    await loadTopicIds(pool).catch((err) => logEvent('error', 'topics_not_seeded', { error: errMessage(err) }));
     worker = new EnrichmentWorker({ db: pool, runEnrichment });
     await registerEnrichmentWorkers(boss, worker, { concurrency: lookupConfig.queue.workerConcurrency });
   }

@@ -88,8 +88,24 @@ describe('CircuitBreaker', () => {
   });
 
   it.each([
+    ['the provider spend limit', new BudgetExceeded('anthropic', 'spend_limit')],
+    ['the provider quota', new BudgetExceeded('google_translate', 'provider_quota')],
+  ])('%s trips the breaker at once (later calls would hit the same wall)', async (_name, error) => {
+    const { breaker } = make(5);
+    await expect(breaker.exec(() => Promise.reject(error))).rejects.toBe(error);
+    expect(breaker.currentState()).toBe('open');
+  });
+
+  it('a config error flagged affectsBreaker=false (one rejected request shape) is ignored', async () => {
+    const { breaker } = make(1);
+    const shape = new UpstreamConfigError('anthropic', 'HTTP 400: output_config is not supported', 400, { affectsBreaker: false });
+    for (let i = 0; i < 3; i++) await expect(breaker.exec(() => Promise.reject(shape))).rejects.toBe(shape);
+    expect(breaker.currentState()).toBe('closed');
+  });
+
+  it.each([
     ['a 404 not-found', new UpstreamNotFound('free_dictionary')],
-    ['budget exceeded', new BudgetExceeded('google_translate', 'monthly_chars')],
+    ['our own monthly counter', new BudgetExceeded('google_translate', 'monthly_chars')],
     ['our own rate limit', new UpstreamUnavailable('free_dictionary', 'local_rate_limit')],
     ['a programming error', new TypeError('bug')],
   ])('%s never counts as a failure', async (_name, error) => {

@@ -73,7 +73,7 @@ describe('lifecycle: row → running → result', () => {
   it.each([
     ['succeeded', 'form_linked'],
     ['rejected', 'proper_noun'],
-    ['skipped', 'pipeline_not_ready'],
+    ['skipped', 'variant_form'],
     ['failed', 'invalid_output'],
   ] as const)('a returned %s outcome (%s) is recorded and the job completes: no retry', async (status, reason) => {
     const { worker } = setup(async () => ({ status, reason }));
@@ -83,11 +83,16 @@ describe('lifecycle: row → running → result', () => {
     expect(M.failIfActive).not.toHaveBeenCalled();
   });
 
-  it('the P5 placeholder pipeline ends as skipped / pipeline_not_ready', async () => {
-    const { createPipeline } = await import('../../services/enrichment/pipeline');
-    const worker = new EnrichmentWorker({ db, runEnrichment: createPipeline({ ensureTopics: async () => undefined }) });
+  it('the enrich log line (spec §12.1) carries the stage times, the entry id and the tokens of the outcome', async () => {
+    const { worker } = setup(async () => ({
+      status: 'succeeded', entryId: 'entry-9', model: 'haiku', inputTokens: 8400, outputTokens: 400, stagesMs: { s0_exists: 12, s3_haiku: 5000 },
+    }));
     await worker.handle([job()]);
-    expect(M.finish).toHaveBeenCalledWith(db, ROW, expect.objectContaining({ status: 'skipped', reason: 'pipeline_not_ready' }));
+    const line = (console.info as jest.Mock).mock.calls.map((c) => JSON.parse(c[0])).find((l) => l.evt === 'enrich');
+    expect(line).toMatchObject({
+      word: 'ubiquitous', job_id: ROW, status: 'succeeded', entry_id: 'entry-9', model: 'haiku',
+      stages_ms: { s0_exists: 12, s3_haiku: 5000 }, input_tokens: 8400, output_tokens: 400,
+    });
   });
 
   it('only the job data fields reach the pipeline (no personal data)', async () => {

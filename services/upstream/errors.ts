@@ -64,9 +64,17 @@ export class UpstreamUnavailable extends UpstreamError {
 }
 
 export class UpstreamConfigError extends UpstreamError {
-  constructor(provider: UpstreamProvider, message: string, status?: number) {
+  /**
+   * false = this one REQUEST was rejected (e.g. the model does not accept output_config), not the provider's
+   * configuration (key, permissions), so the circuit breaker must not open: a caller that handles the rejection
+   * (the forced-tool fallback of the enrichment call) still needs the next call to go through. Default true.
+   */
+  readonly affectsBreaker: boolean;
+
+  constructor(provider: UpstreamProvider, message: string, status?: number, opts: { affectsBreaker?: boolean } = {}) {
     super(provider, message, status);
     this.name = 'UpstreamConfigError';
+    this.affectsBreaker = opts.affectsBreaker ?? true;
   }
 }
 

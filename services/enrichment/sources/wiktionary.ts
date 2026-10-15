@@ -39,7 +39,10 @@ export async function fetchWiktionaryRows(db: Db, word: string): Promise<Wiktion
 
 // ── row classification ───────────────────────────────────────────────────────
 
-const sensesOf = (row: WiktionaryRow): any[] => (Array.isArray(row.data?.senses) ? row.data.senses : []);
+export const sensesOf = (row: WiktionaryRow): any[] => (Array.isArray(row.data?.senses) ? row.data.senses : []);
+
+/** Total number of senses across rows (the loader keeps at most 8 per row). */
+export const countSenses = (rows: readonly WiktionaryRow[]): number => rows.reduce((n, r) => n + sensesOf(r).length, 0);
 const senseTags = (sense: any): string[] => [...(Array.isArray(sense?.tags) ? sense.tags : []), ...(Array.isArray(sense?.raw_tags) ? sense.raw_tags : [])].filter((t) => typeof t === 'string').map((t) => t.toLowerCase());
 
 /** The row describes exactly this word in this letter case ("ran", not "RAN" or "Ran"). */

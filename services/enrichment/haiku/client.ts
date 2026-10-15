@@ -1,5 +1,5 @@
 import type Anthropic from '@anthropic-ai/sdk';
-import type { AnthropicEnrichClient, EnrichUsage } from '../../upstream/anthropicEnrichClient';
+import { isOutputConfigRejection, type AnthropicEnrichClient, type EnrichUsage } from '../../upstream/anthropicEnrichClient';
 import { UpstreamConfigError } from '../../upstream/errors';
 import { DRAFT_JSON_SCHEMA } from './schema';
 import { SYSTEM_PROMPT } from './system-prompt';
@@ -46,8 +46,6 @@ export interface HaikuCallerOptions {
   temperature?: number;
 }
 
-const OUTPUT_CONFIG_REJECTED = /output_config|output_format|structured output|json_schema/i;
-
 export function createHaikuCaller(client: Pick<AnthropicEnrichClient, 'call'>, options: HaikuCallerOptions = {}): HaikuCaller {
   const system: Anthropic.TextBlockParam[] = [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }];
   const temperature = options.temperature !== undefined ? { temperature: options.temperature } : {};
@@ -75,7 +73,7 @@ export function createHaikuCaller(client: Pick<AnthropicEnrichClient, 'call'>, o
       );
       return toResponse(r, r.text);
     } catch (err) {
-      if (!(err instanceof UpstreamConfigError) || !OUTPUT_CONFIG_REJECTED.test(err.message)) throw err;
+      if (!(err instanceof UpstreamConfigError) || !isOutputConfigRejection(err.message)) throw err;
     }
 
     // Fallback: forced tool use with the same schema.

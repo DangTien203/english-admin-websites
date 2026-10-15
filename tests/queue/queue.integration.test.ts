@@ -134,13 +134,24 @@ describe('queue on real PostgreSQL + pg-boss', () => {
     expect(job.data).toEqual({ word, requestedBy: null, ebookId: null, jobRowId: row.id }); // exactly the four fields
   });
 
-  it('the P5 placeholder pipeline result reaches the row: skipped / pipeline_not_ready', async () => {
+  it('the result of the real pipeline code (with fake sources) reaches the row: rejected / unknown_word', async () => {
     const word = fx('stub');
-    const { runEnrichment } = await import('../../services/enrichment/pipeline');
-    behaviors.set(word, (job) => runEnrichment(job));
+    const { createPipeline } = await import('../../services/enrichment/pipeline');
+    const pipeline = createPipeline({
+      ensureTopics: async () => new Map(),
+      publishPolicy: () => 'review',
+      findExisting: async () => null,
+      collectSources: async (w) =>
+        ({ word: w, expectedLemma: null, formLemmas: [], variantTargets: [], wiktionaryRows: [], lemmaRows: [], freeDictionary: { status: 'not_found' }, frequency: null, datamuse: null,
+          flags: { onlyFormRows: false, onlyVariantRows: false, onlyProperNounRows: false, noSourceRecognizesWord: true }, strayRows: 0, sourceErrors: {}, timingsMs: {} }) as any,
+      generateDraft: async () => { throw new Error('Haiku must not be called for an unknown word'); },
+      persist: async () => { throw new Error('nothing to write'); },
+      linkForm: async () => { throw new Error('nothing to link'); },
+    });
+    behaviors.set(word, (job) => pipeline(job));
     await enqueuer.enqueue({ word, requestedBy: null, ebookId: null });
-    const row = await waitFor(async () => ((await rowOf(word))?.status === 'skipped' ? await rowOf(word) : false), 'row skipped');
-    expect(row!.reason).toBe('pipeline_not_ready');
+    const row = await waitFor(async () => ((await rowOf(word))?.status === 'rejected' ? await rowOf(word) : false), 'row rejected');
+    expect(row!.reason).toBe('unknown_word');
   });
 
   it('10 parallel enqueues of the same word produce ONE row, ONE pg-boss job and ONE daily slot', async () => {
