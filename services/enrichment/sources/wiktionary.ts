@@ -43,6 +43,33 @@ export const sensesOf = (row: WiktionaryRow): any[] => (Array.isArray(row.data?.
 
 /** Total number of senses across rows (the loader keeps at most 8 per row). */
 export const countSenses = (rows: readonly WiktionaryRow[]): number => rows.reduce((n, r) => n + sensesOf(r).length, 0);
+
+/**
+ * A synonym / antonym worth looking up in the frequency list: ONE word, with no apostrophe or quotation mark.
+ * Wiktionary lists phrases and proverbs next to words ("murphy's law", "perfect storm", "chance-medley").
+ */
+export const isPlainRelatedWord = (word: string): boolean => word.length > 0 && !/[\s'’"`]/.test(word);
+
+/**
+ * Every plain single-word synonym / antonym that the senses of these rows list, lowercase, without duplicates (at most
+ * `limit`). The caller looks them up in ref_word_frequency; only the ones found there are used for new entries.
+ */
+export function collectRelatedWords(rows: readonly WiktionaryRow[], limit = 600): string[] {
+  const out = new Set<string>();
+  for (const row of rows) {
+    for (const sense of sensesOf(row)) {
+      for (const key of ['synonyms', 'antonyms']) {
+        for (const item of Array.isArray(sense?.[key]) ? sense[key] : []) {
+          const raw = typeof item === 'string' ? item : typeof item?.word === 'string' ? item.word : '';
+          const w = raw.normalize('NFC').trim().toLowerCase();
+          if (isPlainRelatedWord(w)) out.add(w);
+          if (out.size >= limit) return [...out];
+        }
+      }
+    }
+  }
+  return [...out];
+}
 const senseTags = (sense: any): string[] => [...(Array.isArray(sense?.tags) ? sense.tags : []), ...(Array.isArray(sense?.raw_tags) ? sense.raw_tags : [])].filter((t) => typeof t === 'string').map((t) => t.toLowerCase());
 
 /** The row describes exactly this word in this letter case ("ran", not "RAN" or "Ran"). */

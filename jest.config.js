@@ -2,6 +2,8 @@
 module.exports = {
   testEnvironment: 'node',
   testMatch: ['**/tests/**/*.test.ts'],
+  // Chaos scenarios (breaker timing, killed connections, child processes) are slow and run on demand: npm run test:chaos
+  testPathIgnorePatterns: ['/node_modules/', '<rootDir>/tests/chaos/'],
   testTimeout: 20000,
   setupFiles: ['<rootDir>/tests/setup.ts'],
   // DB pool shared across tests — run sequentially for deterministic state.

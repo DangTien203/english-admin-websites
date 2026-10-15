@@ -5,6 +5,8 @@
 export const ENRICH_QUEUE = 'dictionary.enrich_word';
 /** Dead letter queue: must exist BEFORE ENRICH_QUEUE references it. */
 export const ENRICH_DLQ = 'dictionary.enrich_word.dlq';
+/** Cron-driven housekeeping queue: one job every 10 minutes runs reconcileStaleJobs() (services/queue/reconcileSchedule.ts). */
+export const RECONCILE_QUEUE = 'dictionary.enrich_word.reconcile';
 
 /** api_usage_counters key of the daily job cap (spec §11.7). */
 export const ENRICHMENT_USAGE_PROVIDER = 'enrichment';

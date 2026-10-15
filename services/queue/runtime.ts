@@ -6,6 +6,7 @@ import { loadTopicIds } from '../enrichment/topics';
 import { getBoss, stopBoss, type BossRole } from './boss';
 import { SHUTDOWN_GRACE_MS } from './constants';
 import { EnrichmentWorker, registerEnrichmentWorkers } from './enrichmentWorker';
+import { registerReconcileSchedule } from './reconcileSchedule';
 import { errMessage, logEvent } from './log';
 
 /**
@@ -23,24 +24,12 @@ export interface EnrichmentRuntime {
   stop(): Promise<void>;
 }
 
-let poolErrorLoggerAttached = false;
-
-/**
- * A pg.Pool emits 'error' when an IDLE connection is dropped by the server (Neon does this when a compute
- * suspends). Without a listener that event is an uncaught exception and kills a long-running process.
- */
-function logPoolErrors(): void {
-  if (poolErrorLoggerAttached) return;
-  poolErrorLoggerAttached = true;
-  pool.on('error', (err) => logEvent('error', 'pg_pool_error', { error: errMessage(err) }));
-}
-
 export async function startEnrichmentRuntime(mode: 'api' | 'worker'): Promise<EnrichmentRuntime | null> {
   const flags = lookupConfig.flags;
   if (mode === 'api' && !flags.enrichmentEnabled) return null;
   if (mode === 'worker' && !flags.enrichmentWorkerEnabled) return null;
 
-  logPoolErrors();
+  // The pool's 'error' listener (idle connections dropped by Neon) lives in config/db.ts, for every process.
   const runWorker = flags.enrichmentWorkerEnabled;
   const role: BossRole = runWorker ? 'worker' : 'sender';
 
@@ -63,6 +52,8 @@ export async function startEnrichmentRuntime(mode: 'api' | 'worker'): Promise<En
   if (runWorker) {
     worker = new EnrichmentWorker({ db: pool, runEnrichment });
     await registerEnrichmentWorkers(boss, worker, { concurrency: lookupConfig.queue.workerConcurrency });
+    // Every 10 minutes: rows stuck in queued / running with no pg-boss job behind them become failed / stale.
+    await registerReconcileSchedule(boss, { pool: pool as any });
   }
   logEvent('info', 'enrichment_runtime_started', {
     mode,

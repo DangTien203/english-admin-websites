@@ -13,7 +13,9 @@
     "enrich:enqueue": "tsx scripts/enrichment/enqueue.ts",
     "enrich:status": "tsx scripts/enrichment/status.ts",
     "enrich:draft": "tsx scripts/enrichment/draft.ts",
+    "enrich:backfill-ipa": "tsx scripts/enrichment/backfill-ipa.ts",
     "enrich:run": "tsx scripts/enrichment/run.ts",
+    "enrich:redrive": "tsx scripts/enrichment/redrive.ts",
     "enrich:review": "tsx scripts/enrichment/review.ts",
     "db:migrate": "tsx database/migrate.ts",
     "db:migrate-refdata": "tsx database/migrate-refdata.ts",
@@ -31,7 +33,11 @@
     "precompute-audio": "tsx scripts/precompute-dictionary-audio.ts",
     "re-segment": "tsx scripts/re-segment-paragraphs.ts",
     "test": "jest",
-    "test:watch": "jest --watch"
+    "test:watch": "jest --watch",
+    "test:chaos": "jest --config jest.chaos.config.js",
+    "mock:upstream": "tsx scripts/mock-upstream/server.ts",
+    "loadtest:lookup": "tsx --expose-gc scripts/loadtest/lookup-burst.ts",
+    "health:snapshot": "tsx scripts/health-snapshot.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",

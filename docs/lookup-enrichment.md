@@ -133,7 +133,7 @@ Model, `max_tokens` và timeout lấy từ `AnthropicEnrichClient` (`ANTHROPIC_M
 | `system` | một khối `text` có `cache_control: { type: 'ephemeral' }` | prompt caching; phần tĩnh |
 | dự phòng | nếu model từ chối `output_config` (lỗi 400 nhắc `output_config` / `json_schema`), gọi lại **một lần** với tool bắt buộc `submit_entry` có cùng schema | spec §9.2; chưa từng xảy ra ngoài test. **Đã vá ở P6b:** trước đó lỗi 400 này làm mở circuit breaker nên lần gọi dự phòng bị chặn (`breaker_open`) và dự phòng không bao giờ chạy. Giờ lỗi 400 mang `output_config` được đánh dấu `affectsBreaker=false` (`UpstreamConfigError`), breaker bỏ qua nó; mọi lỗi 400 / 401 / 403 khác vẫn mở breaker. Có test với breaker THẬT (`tests/enrichment/p6aFixes.test.ts`) |
 
-**Kích thước thực đo:** system prompt khoảng 10,3K ký tự tiếng Việt; API tính **khoảng 7,7K đến 7,9K token** cho khối được cache (gồm cả JSON Schema, và tiếng Việt chia token dày hơn ước lượng ký tự / 4 nhiều). Tin nhắn người dùng 140 đến 1500 token. Token ra 170 đến 1840 mỗi từ. Chi phí: xem `docs/lookup-enrichment-samples.md` (trung bình khoảng $0.0008 cho mục từ đầy đủ, $0.0002 cho từ bị loại, khi cache còn ấm). Bảng giá nhập tay ở `services/enrichment/pricing.ts` (đã đối chiếu trang giá chính thức ngày 14/10/2026: Haiku 5.5 $0.10 vào / $0.50 ra mỗi triệu token cho prompt đến 100K; ghi cache 5 phút $0.125; đọc cache $0.01), **phải xác minh lại** trước khi dựa vào.
+**Kích thước thực đo:** system prompt khoảng 10,3K ký tự tiếng Việt; API tính **khoảng 7,7K đến 7,9K token** cho khối được cache (gồm cả JSON Schema, và tiếng Việt chia token dày hơn ước lượng ký tự / 4 nhiều). Tin nhắn người dùng 140 đến 1500 token. Token ra 170 đến 1840 mỗi từ. Chi phí: xem `docs/lookup-enrichment-samples.md` (trung bình khoảng $0.0008 cho mục từ đầy đủ, $0.0002 cho từ bị loại, khi cache còn ấm). Bảng giá nhập tay ở `services/enrichment/pricing.ts` (đối chiếu lại trang giá chính thức ngày 15/10/2026: Haiku 5.5 $0.10 vào / $0.50 ra mỗi triệu token cho prompt đến 100K; ghi cache 5 phút $0.125; đọc cache $0.01; **không lệch**), **phải xác minh lại** trước khi dựa vào. Chi phí một bản nháp là tổng chi phí của **từng lần gọi** (mục 18.4).
 
 `stop_reason` `max_tokens` hoặc `refusal` là lỗi (spec §9.3). Lỗi hạ tầng (`UpstreamUnavailable`, `UpstreamConfigError`, `BudgetExceeded`) **được ném lên nguyên vẹn** qua lớp lỗi của P2 để worker xử lý như P5 đã định. Không có dự phòng server-side cho refusal ở Haiku 5.5.
 
@@ -352,7 +352,7 @@ Test (không gọi mạng): `tests/enrichment/*` (schema, prompt, summarize, val
 | `lemma` | Bản nháp (đã kiểm tra: chữ thường, một từ, bằng `expectedLemma` nếu nguồn nêu) |
 | `headword` | Dạng chữ của Wiktionary: chữ thường nếu có dòng không phải tên riêng viết thường; nếu không thì `data.word` (`April`, `AIDS`); không có Wiktionary thì của Haiku. Chỉ khác `lemma` ở chữ hoa chữ thường |
 | `pos[]` | Loại từ của các sense đã ghi, theo thứ tự xuất hiện, bỏ trùng, đúng 12 giá trị của DB (`normalizePos` đổi mã Wiktionary / Free Dictionary: `adj` → `adjective`, `intj` → `exclamation`...; `name`, `phrase`, `prefix`... → bỏ). Khác loại từ của Wiktionary thì ghi vào `admin_note` |
-| `ipa_us`, `ipa_uk` | Wiktionary `sounds` có thẻ giọng: Mỹ = `US`, `General-American`; Anh = `UK`, `Received-Pronunciation`, `Southern-England`. Giữ dấu gạch chéo `/…/` (như 838 / 840 dòng hiện có); bỏ giá trị trong ngoặc vuông và IPA cụt (`/-ˌkæst/`). Rồi Free Dictionary (`us`, `uk`; nếu cả hai thiếu thì IPA không rõ giọng vào `ipa_us`, ghi vào `admin_note`). Rồi NULL. **Không bao giờ lấy IPA từ Haiku.** IPA không có thẻ giọng của Wiktionary KHÔNG được dùng (xem mục 16) |
+| `ipa_us`, `ipa_uk` | Wiktionary `sounds` có thẻ giọng: Mỹ = `US`, `General-American`; Anh = `UK`, `Received-Pronunciation`, `Southern-England`. Giữ dấu gạch chéo `/…/` (như 838 / 840 dòng hiện có); bỏ giá trị trong ngoặc vuông và IPA cụt (`/-ˌkæst/`). Rồi Free Dictionary (`us`, `uk`; nếu cả hai thiếu thì IPA không rõ giọng vào `ipa_us`, ghi vào `admin_note`). **Cuối cùng** (chỉ khi `ipa_us` vẫn trống): IPA hợp lệ ĐẦU TIÊN của Wiktionary **không có thẻ nào** làm `ipa_us`, và `admin_note` có thêm `[ipa-untagged]` để lọc được; **không bao giờ** điền `ipa_uk` từ IPA không thẻ. Rồi NULL. **Không bao giờ lấy IPA từ Haiku.** Chi tiết và số đo: mục 18.2 |
 | `audio_us_url`, `audio_uk_url` | `mp3_url` (rồi `ogg_url`) của Wiktionary; giọng theo thẻ, nếu không có thì theo tên tệp (`en-us-*`, `En-uk-*`); tệp Lingua Libre lấy giọng của thẻ vùng. **URL tuyệt đối**, giữ nguyên hoặc bỏ (dài hơn 500 ký tự thì bỏ, không cắt). Rồi Free Dictionary. Rồi NULL |
 | `meaning_vi` | Vòng tròn (spec §9.8): nghĩa thứ nhất của từng sense theo thứ tự sense, rồi nghĩa thứ hai... bỏ nghĩa trùng (chuẩn hóa bằng `normalizeVietnameseAnswer`); dừng khi đủ 6 nghĩa hoặc khi thêm một nghĩa nữa vượt 200 ký tự; nối bằng `'; '`. Rỗng thì lấy nghĩa đầu của sense đầu; vẫn rỗng thì `failed / invalid_output` (không bao giờ ghi chuỗi rỗng) |
 | `meaning_en`, `example_en`, `example_vi` | Của sense đầu (ví dụ đầu); sense đầu không có ví dụ thì ví dụ đầu tiên tìm được |
@@ -363,7 +363,7 @@ Test (không gọi mạng): `tests/enrichment/*` (schema, prompt, summarize, val
 | `etymology` | `etymology_text` của dòng Wiktionary không phải tên riêng, bỏ phần "Etymology tree" (cây tổ tiên, mỗi dòng 2 đến 4 từ) rồi lấy từ dòng văn xuôi đầu tiên; cây không có văn xuôi (bị loader cắt ở 1000 ký tự) thì NULL; tối đa 1000 ký tự |
 | `register` (mục từ) | `register` của sense đầu |
 | `word_forms` | `forms` của Wiktionary, theo loại từ của DÒNG (bảng chia động từ liệt kê cả "ran" với thẻ quá khứ + ngôi 3 số ít: ô của bảng không phải dạng riêng). Bỏ dạng không ánh xạ được vào 9 `form_type`, mang thẻ misspelling / obsolete / archaic / nonstandard / dialectal / rare / proscribed, nhiều từ, bằng headword / lemma; tối đa 20 |
-| `sense_synonyms`, `sense_antonyms` | Danh sách của sense Wiktionary khớp nhất (cùng loại từ, trùng nội dung định nghĩa tiếng Anh ≥ 0,25 theo hệ số Dice; không khớp thì không mượn) ĐỨNG TRƯỚC, rồi lựa chọn của Haiku; chữ thường, bỏ trùng, khác headword và lemma, tối đa 8. Datamuse chỉ là ứng viên Haiku đã thấy, không ghi trực tiếp. `synonym_entry_id` trỏ tới entry ĐÃ CÓ và published (khớp lemma), không thì NULL |
+| `sense_synonyms`, `sense_antonyms` | Danh sách của sense Wiktionary khớp nhất (cùng loại từ, trùng nội dung định nghĩa tiếng Anh ≥ 0,25 theo hệ số Dice; không khớp thì không mượn), **đã lọc**: chỉ từ đơn không có dấu nháy, có trong `ref_word_frequency`, xếp theo tần suất giảm dần, tối đa 5 mỗi loại (mục 18.3); ĐỨNG TRƯỚC, rồi lựa chọn của Haiku (không lọc); chữ thường, bỏ trùng, khác headword và lemma, tổng tối đa 8. Datamuse chỉ là ứng viên Haiku đã thấy, không ghi trực tiếp. `synonym_entry_id` trỏ tới entry ĐÃ CÓ và published (khớp lemma), không thì NULL |
 | `entry_synonyms`, `entry_antonyms` | Chỉ nối tới entry ĐÃ CÓ và published (khớp `lemma`); không tạo entry mới để nối |
 | `entry_tags` | Haiku, 30 tên chủ đề, tối đa 3 (id lấy từ bộ nhớ `loadTopicIds`) |
 | `entry_answer_aliases` | Các nghĩa của mọi sense còn lại sau khi trừ những nghĩa đã nằm trong `meaning_vi`; `normalized_answer` = `normalizeVietnameseAnswer`; `source = 'ai_accepted'`, `status = 'active'`. Chỉ mục duy nhất là chỉ mục MỘT PHẦN nên dùng `INSERT ... WHERE NOT EXISTS` |
@@ -392,7 +392,7 @@ Test (không gọi mạng): `tests/enrichment/*` (schema, prompt, summarize, val
 ```bash
 npm run enrich:run -- --word <w> [--dry-run] [--allow-auto]
 ```
-In từng giai đoạn kèm thời gian, token, chi phí ước tính (bảng giá nhập tay, phải xác minh lại) và kết quả. `--dry-run`: S0 đến S5 (CÓ gọi Haiku), in mục từ đã gộp và bảng sẽ ghi (bảng, số dòng), KHÔNG ghi. Không dùng hàng đợi, không tạo hàng `word_enrichment_jobs`; mã job trong `admin_note` có dạng `cli-<uuid>`. Từ chối ghi khi `ENRICHMENT_PUBLISH_POLICY=auto` (mục từ đủ tầng A sẽ được xuất bản ngay) trừ khi có `--allow-auto`.
+In từng giai đoạn kèm thời gian, token, chi phí ước tính (bảng giá nhập tay, phải xác minh lại; tính từng lần gọi Haiku rồi cộng, mục 18.4) và kết quả. `--dry-run`: S0 đến S5 (CÓ gọi Haiku), in mục từ đã gộp và bảng sẽ ghi (bảng, số dòng), KHÔNG ghi. Không dùng hàng đợi, không tạo hàng `word_enrichment_jobs`; mã job trong `admin_note` có dạng `cli-<uuid>`. Từ chối ghi khi `ENRICHMENT_PUBLISH_POLICY=auto` (mục từ đủ tầng A sẽ được xuất bản ngay) trừ khi có `--allow-auto`. Lệnh bổ sung ipa_us cho mục từ cũ: `npm run enrich:backfill-ipa` (mục 18.2).
 
 ```bash
 npm run enrich:review -- [--limit 20] [--unpublished] [--word serendipity]
@@ -412,7 +412,7 @@ Test (không gọi mạng): `tests/enrichment/{pos,assemble,pipeline,p6aFixes}.t
 | `skipped / exists` nhưng không thấy mục từ trên app | Entry có sẵn nhưng `published = false` (chính sách `review`) | `npm run enrich:review -- --unpublished`; duyệt rồi đặt `published = true` |
 | `skipped / lemma_mismatch` | Haiku trả lemma khác từ tra (ví dụ `geese` → `goose` khi Wiktionary không có dòng) | Không có entry nào bị tạo. Admin tạo tay, hoặc gửi job cho chính lemma |
 | `failed / invalid_output` | Bản nháp vẫn sai sau một lần sửa (xem lỗi bằng `enrich:run --dry-run`) | Chạy lại (Haiku không tất định); nếu lặp lại, xem validator ở mục 7 |
-| Mục từ thiếu IPA (`thiếu tầng B: ipa`) | Khoảng 47% dòng Wiktionary có IPA không kèm thẻ giọng; ví dụ `ephemeral` chỉ có file audio gắn thẻ US | Xem mục 16; điền tay hoặc đổi quy tắc `pickWiktionaryIpa` |
+| Mục từ thiếu IPA (`thiếu tầng B: ipa`) | Wiktionary không có IPA hợp lệ nào (kể cả IPA không thẻ), hoặc mục từ tạo trước bản vá 15/10/2026 (khi IPA không thẻ chưa được dùng) | Mục từ cũ: `npm run enrich:backfill-ipa` (dry-run mặc định; mục 18.2). Không có IPA nào thì điền tay |
 | Cần chạy lại một từ đã tạo sai | Mục từ tự tạo có sai sót | Xóa mục từ: `DELETE FROM dictionary_entries WHERE id = '<id>' AND admin_note LIKE '[auto]%'` (mọi bảng con, kể cả `word_family_members` và `entry_edit_history`, xóa theo; `word_enrichment_jobs.entry_id` thành NULL); rồi `enrich:run` hoặc `enrich:enqueue` |
 | Hai job cùng lemma chờ nhau lâu | Một transaction S6 giữ khóa advisory (database chậm) | Bình thường, mỗi giao dịch cỡ 1 giây; xem `pg_stat_activity` nếu quá vài chục giây |
 | `23505` trong log | Job khác vừa ghi cùng lemma | Không cần làm gì: được xử lý như `exists` |
@@ -422,7 +422,7 @@ Test (không gọi mạng): `tests/enrichment/{pos,assemble,pipeline,p6aFixes}.t
 **Quyết định**
 1. **`sense_order` là một số chạy cho cả mục từ** (0, 1, 2...), theo thứ tự của Haiku (phổ biến nhất trước). Mục từ cũ đánh số theo từng loại từ (`noun 0, verb 0, noun 1, verb 1`); app chỉ `ORDER BY sense_order`, nên số chạy chung giữ đúng thứ tự phổ biến và vẫn thỏa `UNIQUE (entry_id, pos, sense_order)`.
 2. **Sense lấy từ Haiku, không ghép với sense Wiktionary**, trừ đồng / trái nghĩa (ghép theo độ trùng định nghĩa, ngưỡng 0,25). Lý do ở mục 12.
-3. **IPA không có thẻ giọng không được dùng.** Đúng thứ tự spec (Wiktionary có thẻ → Free Dictionary → NULL) và "không đoán giọng". Hệ quả đo được: trong `ref_wiktionary_en`, 38.619 / 81.794 dòng (47%) có IPA `/…/` nhưng không có IPA nào gắn US hoặc UK; và Free Dictionary không được hỏi khi Wiktionary có dòng. Các mục từ này được tạo với `thiếu tầng B: ipa`. Phương án nếu muốn: lấy IPA đầu tiên không thẻ làm `ipa_us` (ghi chú rõ giọng), hoặc hỏi Free Dictionary khi thiếu IPA.
+3. **IPA không có thẻ giọng chỉ là bước CUỐI** (đổi ngày 15/10/2026; trước đó không được dùng). Thứ tự: Wiktionary có thẻ US → Free Dictionary (như spec) → IPA hợp lệ đầu tiên không có thẻ nào, làm `ipa_us`, kèm `[ipa-untagged]` trong `admin_note`; `ipa_uk` không bao giờ lấy từ IPA không thẻ. Lý do: trong `ref_wiktionary_en`, 38.610 / 81.763 dòng có IPA hợp lệ (47%) không có IPA gắn US hoặc UK, và 38.089 trong số đó (99%) có IPA không thẻ. Xem mục 18.2.
 4. **Audio ghi URL tuyệt đối** (mục 1.2). Dài quá 500 ký tự thì bỏ, không cắt (cắt làm hỏng URL).
 5. **Token ghi vào `word_enrichment_jobs` và `api_usage_counters` là mọi token đầu vào đã tính tiền**: đầu vào mới + ghi cache + đọc cache. System prompt (khoảng 7,9K token) gần như luôn là "đọc cache", nên chỉ đếm đầu vào mới sẽ giấu phần lớn khối lượng. `api_usage_counters`: `provider = 'anthropic'`, đơn vị `input_tokens` / `output_tokens`, kỳ `YYYY-MM` (UTC). Đường nhanh vẫn ghi `anthropic_fast` theo ngày.
 6. **Dòng log `enrich` do worker ghi** (một dòng mỗi job, có `stages_ms`, `entry_id`, `model`, token), không ghi thêm ở pipeline để tránh log đôi. Lệnh `enrich:run` tự in.
@@ -441,13 +441,13 @@ Test (không gọi mạng): `tests/enrichment/{pos,assemble,pipeline,p6aFixes}.t
 
 **Giới hạn đã biết**
 - Nghĩa tiếng Việt sinh ra vẫn cần người duyệt (mục 4 của `docs/lookup-enrichment-samples.md`): nghĩa độn về ý, nghĩa trùng giữa các sense, chủ đề lệch sau khi bỏ `academic_formal`. Với chính sách `review`, mục từ luôn `published = false`.
-- Đồng / trái nghĩa của Wiktionary được xếp trước và có thể nhiều hơn Haiku chọn (ví dụ `serendipity`: "casualty", "hap", "chance-medley").
+- Đồng / trái nghĩa của Wiktionary được lọc theo tần suất từ 15/10/2026 (mục 18.3); bộ lọc ưu tiên từ thông dụng nên với từ hiếm có thể giữ từ chung chung hơn từ chính xác (ví dụ `ephemeral`: giữ `short`, `volatile`; bỏ `transitory`, `evanescent`, vì chúng nằm ngoài top 5 theo tần suất). Từ lạ nhưng có trong `ref_word_frequency` (như `hap`) vẫn qua bộ lọc khi sense có ít hơn 5 ứng viên phổ biến hơn.
 - `word_families` và `entry_synonyms` chỉ nối tới entry đã có tại thời điểm tạo; entry tạo sau không quay lại nối (việc cho P7 nếu cần).
 - Neon (Singapore) từ máy dev: S6 cỡ 0,8 đến 1,8 giây, S1 cỡ 0,5 đến 2 giây.
 - Một job lỗi ở S6 rồi thử lại sẽ gọi Haiku lần nữa (không lưu bản nháp). Hiếm; mỗi lần cỡ $0,001.
 
 **Việc còn tồn**
-- P7: gắn lịch `reconcileStaleJobs`; nối lại `entry_synonyms` / `word_families` cho entry cũ; quyết định IPA không thẻ (mục 16.3).
+- P7: gắn lịch `reconcileStaleJobs`; nối lại `entry_synonyms` / `word_families` cho entry cũ. (Đã làm ở 15/10/2026: IPA không thẻ, mục 18.2.)
 - P8: trang quản trị duyệt mục từ (`published`, sửa nghĩa, xem `admin_note`), lọc `[auto]`; phân quyền theo `admin_accounts.role`.
 
 
@@ -585,3 +585,104 @@ Các từ này nằm trong DB dev để bạn duyệt (`npm run enrich:review`).
 ```
 
 `karaoke` chỉ có `ipa_uk`: Wiktionary chỉ gắn thẻ UK cho IPA của nó (dòng US chỉ có phiên âm `enpr`). `is_transitive: false` đến từ thẻ `intransitive` của Wiktionary, không phải từ Haiku. `meaning_vi` ghép vòng tròn nghĩa thứ nhất của 3 sense rồi nghĩa thứ hai, bỏ `hát karaoke` trùng.
+
+
+## 18. Bản vá sau P6b (15/10/2026)
+
+Bốn việc nhỏ, không đổi hành vi nghiệp vụ khác. Không xóa dữ liệu, không sửa mục từ `published = true`, không thêm biến môi trường hay bảng.
+
+### 18.1 Dòng sai `ran` trong mục từ `run` (CHƯA sửa, chờ xác nhận)
+
+Chỉ SELECT. Mục từ `run` (id `2482567c-2724-4cca-9e64-255da45ec515`, published = false) có **hai** dòng `ran` trong `word_forms`:
+
+| id | form_type | sort_order | Ghi chú |
+|---|---|---|---|
+| `4e30d917-9d86-4030-86dc-f0d960f03a85` | `past_simple` | 2 | đúng |
+| `9af0825c-4730-46c6-b1c7-54096c6d59df` | `third_person_singular` | 3 | **sai**: ô bảng chia động từ có thẻ `["past","singular","third-person"]` (quá khứ, ngôi 3 số ít), tức là `past_simple`; đọc sai trước khi vá `inferFormType` |
+
+Bộ gộp hiện tại đã đúng: với dữ liệu Wiktionary thật của `run` nó chỉ tạo `runs:third_person_singular`, `running:present_participle`, `ran:past_simple`, `runs:plural`. Dòng sai là tồn dư từ trước bản vá, và là dòng duy nhất như vậy.
+
+**Vì sao không UPDATE về `past_simple` được:** ràng buộc `word_forms_entry_id_form_type_form_value_key UNIQUE (entry_id, form_type, form_value)` đã có dòng `(run, past_simple, ran)`, nên UPDATE sẽ lỗi `23505`. Theo thẻ, giá trị đúng của dòng này chính là `past_simple` (dữ liệu Wiktionary chỉ có một ô `participle past` và nó mang thẻ `colloquial`, `nonstandard`, bộ gộp cố ý bỏ). Hai cách xử lý, chưa chạy cách nào:
+
+```sql
+-- A (khuyến nghị): xóa đúng dòng trùng sai. CẦN BẠN CHO PHÉP, vì prompt cấm xóa.
+BEGIN;
+DELETE FROM word_forms
+ WHERE id = '9af0825c-4730-46c6-b1c7-54096c6d59df'
+   AND entry_id = '2482567c-2724-4cca-9e64-255da45ec515'
+   AND form_value = 'ran' AND form_type = 'third_person_singular'
+   AND EXISTS (SELECT 1 FROM word_forms ok
+                WHERE ok.entry_id = word_forms.entry_id AND ok.form_value = 'ran' AND ok.form_type = 'past_simple')
+RETURNING id, entry_id, form_type, form_value;
+-- phải ra ĐÚNG 1 dòng, nếu không thì ROLLBACK;
+COMMIT;
+
+-- B (chỉ UPDATE, không xóa): chuyển sang past_participle, giá trị DUY NHẤT còn lại không vi phạm UNIQUE.
+-- Nhưng "ran" làm quá khứ phân từ là cách dùng phi chuẩn (thẻ nonstandard), nên dòng này sẽ nói sai với người học.
+BEGIN;
+UPDATE word_forms
+   SET form_type = 'past_participle'
+ WHERE id = '9af0825c-4730-46c6-b1c7-54096c6d59df'
+   AND entry_id = '2482567c-2724-4cca-9e64-255da45ec515'
+   AND form_value = 'ran' AND form_type = 'third_person_singular'
+RETURNING id, entry_id, form_type, form_value;
+-- phải ra ĐÚNG 1 dòng, nếu không thì ROLLBACK;
+COMMIT;
+```
+
+### 18.2 IPA: IPA không thẻ là bước cuối
+
+**Thứ tự cho `ipa_us`:** (1) IPA Wiktionary gắn `US` hoặc `General-American`; (2) như trước: Free Dictionary (`us`, rồi `any` khi cả `us` và `uk` đều thiếu); (3) **cuối cùng**: IPA hợp lệ đầu tiên của Wiktionary **không có thẻ nào** (không `tags`, không `raw_tags`), và `admin_note` có thêm `[ipa-untagged] ipa_us lấy từ IPA đầu tiên không gắn thẻ giọng của Wiktionary, không rõ giọng`. `ipa_uk` **không bao giờ** lấy từ IPA không thẻ. IPA gắn thẻ giọng khác (Australia, Scotland...) hay thẻ `rare` không phải "không thẻ": không dùng. Có IPA không thẻ thì `ipa` không còn nằm trong "thiếu tầng B". Lọc các mục từ này: `WHERE admin_note LIKE '%[ipa-untagged]%'`.
+
+**Số đo trên `ref_wiktionary_en` (15/10/2026):** 81.763 dòng có IPA hợp lệ; 38.093 có IPA gắn US; 43.670 không. Trong 43.670 dòng đó: 38.997 có IPA không thẻ; 38.610 không có IPA gắn US lẫn UK, và 38.089 trong số này có IPA không thẻ (99%). Ví dụ `ephemeral`: `{"ipa":"/ɛˈfɛ.mə.ɹəl/"}`, `{"ipa":"/əˈfɛ.mə.ɹəl/"}` không có thẻ; thẻ `US` nằm ở phần tử audio.
+
+**Lệnh bổ sung cho mục từ cũ** (không gọi AI, không gọi mạng):
+
+```bash
+npm run enrich:backfill-ipa                      # dry-run (mặc định)
+npm run enrich:backfill-ipa -- --dry-run         # như trên, nói rõ
+npm run enrich:backfill-ipa -- --confirm         # ghi, trong MỘT transaction
+npm run enrich:backfill-ipa -- --word ephemeral  # chỉ một lemma
+```
+
+Chỉ mục từ tự tạo (`[auto]` trong `admin_note`) còn thiếu `ipa_us` **và** `published = false` (mục từ đã published không bao giờ bị sửa, chỉ được liệt kê). Dùng đúng các dòng Wiktionary mà bộ gộp dùng (`selectEntryRows`), cùng thứ tự: IPA US trước, rồi IPA không thẻ; `ipa_uk` không bao giờ bị đụng. Mỗi mục từ đổi: UPDATE có các điều kiện canh (còn `ipa_us IS NULL`, `published = FALSE`, `[auto]`), bỏ `ipa` khỏi phần "thiếu tầng B", thêm `[ipa-untagged]` khi là IPA không thẻ, và hai dòng `entry_edit_history` (`ipa_us` cũ NULL / mới; `admin_note` cũ / mới), `admin_id` NULL. Không xóa gì. Chạy hai lần: lần hai không làm gì.
+
+**Kết quả dry-run trên DB dev (15/10/2026, chưa chạy `--confirm`):**
+
+```text
+automatic entries without ipa_us : 5
+  would get an IPA              : 5  (tagged US: 0, untagged: 5)
+  no usable IPA in Wiktionary   : 0
+  published, left alone         : 0
+ephemeral  /ɛˈfɛ.mə.ɹəl/      karaoke    /ˌkæ.ɹiˈoʊ.ki/     table      /ˈteɪbl̩/
+reap       /ˈɹiːp/            electrify  /ɪˈlɛktɹɪfaɪ/
+```
+
+### 18.3 Đồng nghĩa và trái nghĩa lấy từ Wiktionary
+
+Cho **mục từ mới** (không sửa mục đã có). Khi `collectSources` đọc dòng Wiktionary, nó gom mọi từ đồng / trái nghĩa dạng từ đơn không có dấu nháy (`collectRelatedWords`) và tra `ref_word_frequency` bằng MỘT câu truy vấn thêm (`SourceBundle.relatedRanks`; lỗi truy vấn thì bỏ qua, mục từ chỉ không có từ của Wiktionary). `assembleEntry` rồi lọc danh sách của sense Wiktionary khớp nhất (`filterWiktionaryRelated`):
+
+1. chỉ giữ từ **có trong `ref_word_frequency`**;
+2. bỏ cụm từ nhiều từ và từ có dấu nháy hay ngoặc kép (`murphy's law`, `perfect storm`, `ne’er`);
+3. xếp **tần suất giảm dần** (rank nhỏ trước; bằng nhau giữ thứ tự của Wiktionary);
+4. **tối đa 5** mỗi loại; bỏ headword, lemma và trùng.
+
+Lựa chọn của Haiku vẫn đứng sau và **không bị lọc**; tổng mỗi loại vẫn tối đa 8. Prompt gửi cho Haiku không đổi. Dữ liệu thật:
+
+| Từ | Wiktionary liệt kê | Giữ lại |
+|---|---|---|
+| serendipity (đồng nghĩa) | chance, luck, adventure, accident, casualty, chance-medley, fortune, hap | chance, luck, accident, adventure, fortune (hạng tần suất 548, 1.312, 1.979, 3.205, 4.303). `casualty` (12.739) và `hap` (27.486) CÓ trong danh sách tần suất nhưng rơi vì giới hạn 5; `chance-medley` bị bỏ vì không có trong danh sách |
+| serendipity (trái nghĩa) | Murphy's law, perfect storm | (rỗng, cả hai là cụm từ) |
+| ephemeral (đồng nghĩa) | temporary, transitory, fleeting, evanescent, momentary, short-lived, short, volatile | short (472), temporary (3.143), volatile (10.968), fleeting (19.087), momentary (26.170); `transitory` (42.959) và `evanescent` (79.500) rơi vì giới hạn 5, `short-lived` không có trong danh sách |
+
+Hai lưu ý, đều là hệ quả của quy tắc được yêu cầu chứ không phải lỗi: (1) `ephemeral`: ưu tiên tần suất giữ `short`, `volatile` (thông dụng nhưng chung chung) và bỏ `transitory`, `evanescent` (đúng nghĩa hơn). (2) Bộ lọc chỉ loại từ **không có** trong `ref_word_frequency`; từ lạ nhưng có trong danh sách (`hap` hạng 27.486, `casualty` hạng 12.739) vẫn qua và chỉ rơi khi đã đủ 5 từ phổ biến hơn. Với một sense chỉ có 1 đến 4 ứng viên, `hap` sẽ được giữ. Nếu muốn chặt hơn thì thêm ngưỡng hạng tối đa (ví dụ 20.000); chưa làm vì ngoài phạm vi yêu cầu.
+
+### 18.4 Ước tính chi phí: tính từng lần gọi
+
+`generateDraft` giờ trả thêm `callUsage` (token của TỪNG lần gọi Haiku, cùng thứ tự với `callMs`). `estimateDraftCostUsd(model, calls)` (`services/enrichment/pricing.ts`) tính từng lần rồi cộng; `enrich:draft` và `enrich:run` in "(2 lần gọi: $a + $b)". Trước đây token của hai lần gọi được cộng dồn rồi mới tính giá; trang giá nói "mỗi request được tính giá riêng" và mức giá prompt trên 100K token áp dụng cho từng request, nên cộng trước có thể tính sai mức giá. Với prompt thực tế (khoảng 8K đến 12K token mỗi lần gọi) hai cách ra cùng số, nên đây là sửa cho đúng chứ không đổi số liệu trong các mẫu đã chạy.
+
+**Đối chiếu bảng giá** (trang https://platform.claude.com/docs/en/about-claude/pricing, 15/10/2026) với `MODEL_PRICES`: Claude Haiku 5.5, prompt đến 100K token: vào $0.10, ra $0.50, ghi cache 5 phút $0.125, đọc cache $0.01 mỗi triệu token. Prompt trên 100K: $0.50 / $2.50 / $0.625 / $0.05. **Không lệch.** Ngày kiểm tra ghi trong code: `PRICING_CHECKED_ON = 2026-10-15`.
+
+### 18.5 Test
+
+`tests/enrichment/ipaAndRelated.test.ts` (thứ tự IPA, dấu `[ipa-untagged]`, không điền `ipa_uk`, bộ lọc đồng / trái nghĩa), `relatedRanks.test.ts` (tra tần suất khi thu thập nguồn), `backfillIpa.test.ts` (kế hoạch, dry-run không ghi, transaction, lịch sử, lỗi), `backfillIpa.integration.test.ts` (Postgres thật, fixture `qzq<mã>…` tự xóa), `pricing.test.ts` (từng lần gọi, ví dụ `podcast` 2 lần gọi, ngưỡng 100K, bảng giá).

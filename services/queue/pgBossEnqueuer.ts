@@ -58,7 +58,7 @@ export interface PgBossEnqueuerDeps {
 }
 
 /** Entry in dictionary_entries (published or not) matching headword, lemma or any word form. */
-const ENTRY_EXISTS_SQL = `
+export const ENTRY_EXISTS_SQL = `
   SELECT (
     EXISTS (SELECT 1 FROM dictionary_entries WHERE LOWER(headword) = $1 OR LOWER(lemma) = $1)
     OR EXISTS (SELECT 1 FROM word_forms WHERE LOWER(form_value) = $1)

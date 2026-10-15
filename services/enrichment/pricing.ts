@@ -3,7 +3,7 @@
  * It is not billing data: the invoice is the source of truth.
  *
  * VERIFY BEFORE RELYING ON IT. Prices change and this table does not update itself.
- *   Last checked: 2026-10-14 against https://platform.claude.com/docs/en/about-claude/pricing
+ *   Last checked: 2026-10-15 against https://platform.claude.com/docs/en/about-claude/pricing
  *   (Claude Haiku 5.5: $0.10 input / $0.50 output per MTok for prompts up to 100K tokens;
  *    $0.50 / $2.50 above; 5-minute cache write $0.125, cache read $0.01).
  */
@@ -18,7 +18,7 @@ export interface ModelPrice {
   long?: { inputPerMTok: number; outputPerMTok: number; cacheWrite5mPerMTok: number; cacheReadPerMTok: number };
 }
 
-export const PRICING_CHECKED_ON = '2026-10-14';
+export const PRICING_CHECKED_ON = '2026-10-15';
 
 /** Keyed by model id. Unknown models get no estimate (never a guess). */
 export const MODEL_PRICES: Record<string, ModelPrice> = {
@@ -37,6 +37,28 @@ export interface UsageForPricing {
   outputTokens: number;
   cacheCreationInputTokens?: number;
   cacheReadInputTokens?: number;
+}
+
+/**
+ * Estimated USD for a whole draft: the cost of EACH request, added up. The long-prompt rate depends on the length of one
+ * request ("each request is priced on its own"), so the tokens of a draft with a repair must not be summed first.
+ * Null when the model is not in the table.
+ */
+export function estimateDraftCostUsd(model: string, calls: readonly UsageForPricing[]): number | null {
+  let total = 0;
+  for (const call of calls) {
+    const cost = estimateCallCostUsd(model, call);
+    if (cost === null) return null;
+    total += cost;
+  }
+  return total;
+}
+
+/** Cost of a draft result: each request priced on its own, plus the per-request figures for display. */
+export function describeDraftCost(model: string | null, result: { usage: UsageForPricing; callUsage?: readonly UsageForPricing[] }): { total: number | null; perCall: Array<number | null> } {
+  if (!model) return { total: null, perCall: [] };
+  const calls = result.callUsage && result.callUsage.length > 0 ? result.callUsage : [result.usage];
+  return { total: estimateDraftCostUsd(model, calls), perCall: calls.map((c) => estimateCallCostUsd(model, c)) };
 }
 
 /**

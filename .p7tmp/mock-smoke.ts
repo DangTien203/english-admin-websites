@@ -1,0 +1,22 @@
+import { startMockUpstream } from '../scripts/mock-upstream/server';
+(async () => {
+  const m = await startMockUpstream();
+  const j = async (r: Response) => ({ status: r.status, ct: r.headers.get('content-type'), ra: r.headers.get('retry-after'), body: (await r.text()).slice(0, 160) });
+  const g = (q: string[], key = true) => fetch(m.env.GOOGLE_TRANSLATE_BASE_URL, { method: 'POST', headers: { 'content-type': 'application/json', ...(key ? { 'x-goog-api-key': 'k' } : {}) }, body: JSON.stringify({ q, source: 'en', target: 'vi', format: 'text' }) });
+  console.log('google headline run', await j(await g(['run'])));
+  console.log('google prefixed', await j(await g(['run: To move swiftly on foot so that both feet leave the ground in each stride.', 'zorp: A thing.'])));
+  console.log('google nokey', await j(await g(['run'], false)));
+  console.log('fd hello', await j(await fetch(m.env.FREE_DICTIONARY_BASE_URL + '/hello')));
+  console.log('fd zorp(synth)', await j(await fetch(m.env.FREE_DICTIONARY_BASE_URL + '/zorp')));
+  m.setControl({ unknownWord: 'not_found' });
+  console.log('fd zorp(404)', await j(await fetch(m.env.FREE_DICTIONARY_BASE_URL + '/zorp')));
+  m.setControl({ fd: { mode: 'html' }, google: { mode: 'status', status: 429, retryAfter: 2 }, rules: [{ provider: 'datamuse', words: ['bad*'], behavior: { mode: 'status', status: 503 } }] });
+  console.log('fd html', await j(await fetch(m.env.FREE_DICTIONARY_BASE_URL + '/hello')));
+  console.log('google 429', await j(await g(['run'])));
+  console.log('datamuse ok', await j(await fetch(m.env.DATAMUSE_BASE_URL + '/words?rel_syn=happy&max=2')));
+  console.log('datamuse bad', await j(await fetch(m.env.DATAMUSE_BASE_URL + '/words?rel_syn=badword&max=2')));
+  m.setControl({ google: { mode: 'short_array' } });
+  console.log('short', await j(await g(['a', 'b'])));
+  console.log(JSON.stringify(m.stats().google));
+  await m.close();
+})();

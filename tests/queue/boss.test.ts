@@ -35,9 +35,14 @@ describe('computeJobExpireSeconds', () => {
 });
 
 describe('buildBossOptions', () => {
-  it('uses PGBOSS_SCHEMA and PGBOSS_POOL_MAX and never schedules cron jobs', () => {
+  it('uses PGBOSS_SCHEMA and PGBOSS_POOL_MAX', () => {
     const o = buildBossOptions({ ...settings, schema: 'pgboss_x', poolMax: 7 }, 'worker', { connectionString: 'postgres://u:p@h/db' });
-    expect(o).toMatchObject({ schema: 'pgboss_x', max: 7, schedule: false, connectionString: 'postgres://u:p@h/db' });
+    expect(o).toMatchObject({ schema: 'pgboss_x', max: 7, connectionString: 'postgres://u:p@h/db' });
+  });
+
+  it('only the worker role evaluates the cron schedule (the 10-minute reconcile pass); a sender never does', () => {
+    expect(buildBossOptions(settings, 'worker', {}).schedule).toBe(true);
+    expect(buildBossOptions(settings, 'sender', {}).schedule).toBe(false);
   });
 
   it('worker role keeps pg-boss maintenance on; sender role switches it off', () => {

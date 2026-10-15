@@ -17,7 +17,7 @@ import { lookupConfig } from '../../config/lookup';
 import { countRows, type AssembledEntry } from '../../services/enrichment/assemble';
 import { isDraftSuccess } from '../../services/enrichment/draft';
 import { runPipeline, type PipelineReport, type StageEvent } from '../../services/enrichment/pipeline';
-import { estimateCallCostUsd, PRICING_CHECKED_ON } from '../../services/enrichment/pricing';
+import { describeDraftCost, PRICING_CHECKED_ON } from '../../services/enrichment/pricing';
 import { createProductionDeps } from '../../services/enrichment/wiring';
 import { normalizeWord } from '../../services/wordTranslationService';
 import { readArg } from './args';
@@ -63,10 +63,11 @@ function printReport(report: PipelineReport, dryRun: boolean): void {
   const usage = report.draft?.usage;
   if (usage) {
     const model = report.draft!.model;
-    const cost = model ? estimateCallCostUsd(model, usage) : null;
+    const { total: cost, perCall } = describeDraftCost(model, report.draft!);
+    const perCallText = perCall.length > 1 ? ` (${perCall.length} lần gọi: ${perCall.map((c) => (c === null ? 'n/a' : `${c.toFixed(5)}`)).join(' + ')})` : '';
     console.log(
       `\ntoken: input ${usage.inputTokens} (cache ghi ${usage.cacheCreationInputTokens}, cache đọc ${usage.cacheReadInputTokens}), output ${usage.outputTokens}, ${usage.calls} lần gọi` +
-        `   chi phí ước tính: ${cost === null ? 'n/a' : `$${cost.toFixed(5)}`} (bảng giá nhập tay ngày ${PRICING_CHECKED_ON})`
+        `   chi phí ước tính: ${cost === null ? 'n/a' : `${cost.toFixed(5)}`}${perCallText} (bảng giá nhập tay ngày ${PRICING_CHECKED_ON})`
     );
   } else {
     console.log('\ntoken: 0 (Haiku không được gọi)');

@@ -3,7 +3,7 @@ import type { FormType } from '../lookup/localLookup';
 import { NON_STANDARD_TAGS } from '../lookup/wiktionaryTags';
 import { REGISTER_VALUES, type Draft, type PosValue } from './haiku/schema';
 import { normalizePos, normalizePosList } from './pos';
-import { isFormRow, isNameRow, isVariantRow, sensesOf } from './sources/wiktionary';
+import { isFormRow, isNameRow, isPlainRelatedWord, isVariantRow, sensesOf } from './sources/wiktionary';
 import type { FrequencyInfo, SourceBundle, WiktionaryRow } from './types';
 
 /**
@@ -56,6 +56,10 @@ export const MEANING_VI_MAX_CHARS = 200;
 export const SENSE_MEANINGS_MAX = 4;
 export const ETYMOLOGY_MAX_CHARS = 1000;
 export const RELATED_MAX = 8;
+/** Synonyms / antonyms taken from Wiktionary per sense and per kind; Haiku's own choice is added after them (up to RELATED_MAX in all). */
+export const WIKTIONARY_RELATED_MAX = 5;
+/** admin_note marker of an ipa_us taken from a Wiktionary IPA that has no accent tag, so such entries can be listed. */
+export const IPA_UNTAGGED_MARK = '[ipa-untagged]';
 export const PHRASES_MAX = 5;
 export const TOPICS_MAX = 3;
 export const FORMS_MAX = 20;
@@ -258,7 +262,11 @@ export function buildMeaningVi(senseMeanings: ReadonlyArray<readonly string[]>):
  * an inflected form of another word. Falls back to every row of the word when that leaves nothing.
  */
 export function entryRows(bundle: SourceBundle, lemma: string): WiktionaryRow[] {
-  const base = bundle.flags.onlyFormRows && bundle.lemmaRows.length > 0 ? bundle.lemmaRows : bundle.wiktionaryRows;
+  return selectEntryRows(bundle.flags.onlyFormRows && bundle.lemmaRows.length > 0 ? bundle.lemmaRows : bundle.wiktionaryRows, lemma);
+}
+
+/** The rows of `base` that describe the lemma itself (see entryRows); the IPA backfill uses it with the rows of one lemma. */
+export function selectEntryRows(base: readonly WiktionaryRow[], lemma: string): WiktionaryRow[] {
   const same = base.filter((r) => lower(String(r.data?.word ?? r.word)) === lemma);
   const standard = same.filter((r) => !isVariantRow(r) && !isFormRow(lemma, r));
   return standard.length > 0 ? standard : same;
@@ -286,6 +294,9 @@ export function cleanIpa(raw: unknown): string | null {
   if (t.startsWith('/-') || t.endsWith('-/')) return null;
   return t.length <= COLUMN_LIMITS.ipa ? t : null;
 }
+
+/** admin_note part for an ipa_us taken from an untagged Wiktionary IPA (the marker comes first so a LIKE can find it). */
+export const untaggedIpaNote = (): string => `${IPA_UNTAGGED_MARK} ipa_us lấy từ IPA đầu tiên không gắn thẻ giọng của Wiktionary, không rõ giọng`;
 
 /** Free Dictionary writes IPA with or without slashes; square brackets (narrow transcription) are not used. */
 export function cleanFreeDictionaryIpa(raw: unknown): string | null {
@@ -317,6 +328,20 @@ export function pickWiktionaryIpa(rows: readonly WiktionaryRow[], accent: 'us' |
   const wanted = accent === 'us' ? US_TAGS : UK_TAGS;
   for (const sound of soundsOf(rows)) {
     if (!tagsOf(sound).some((t) => wanted.has(t))) continue;
+    const ipa = cleanIpa(sound?.ipa);
+    if (ipa) return ipa;
+  }
+  return null;
+}
+
+/**
+ * The first valid IPA of a sound that carries NO tag at all (no accent, no "rare"...): Wiktionary lists many
+ * pronunciations as a bare { ipa } (ephemeral: the US tag is only on the audio element). Its accent is unknown.
+ * Last resort for ipa_us; never used for ipa_uk.
+ */
+export function pickWiktionaryUntaggedIpa(rows: readonly WiktionaryRow[]): string | null {
+  for (const sound of soundsOf(rows)) {
+    if (tagsOf(sound).length > 0) continue;
     const ipa = cleanIpa(sound?.ipa);
     if (ipa) return ipa;
   }
@@ -515,6 +540,26 @@ export function alignSense(definitionEn: string, pos: PosValue, candidates: read
   return bestScore >= SENSE_ALIGN_THRESHOLD ? best : null;
 }
 
+/**
+ * The synonyms / antonyms Wiktionary lists for a sense, reduced to the ones worth showing a learner: ONE word with no
+ * apostrophe or quotation mark, that is in ref_word_frequency (`ranks`), most frequent first, at most WIKTIONARY_RELATED_MAX.
+ * "casualty" stays when it is common; "hap" goes when the list does not know it; "murphy's law" and "perfect storm" always go.
+ */
+export function filterWiktionaryRelated(words: readonly string[], ranks: Readonly<Record<string, number>>, exclude: ReadonlySet<string>): string[] {
+  const kept: Array<{ word: string; rank: number; index: number }> = [];
+  words.forEach((raw, index) => {
+    const word = lower(tidy(raw));
+    const rank = ranks[word];
+    if (!isPlainRelatedWord(word) || word.length > SYNONYM_MAX_CHARS || exclude.has(word) || !Number.isFinite(rank)) return;
+    if (kept.some((k) => k.word === word)) return;
+    kept.push({ word, rank, index });
+  });
+  return kept
+    .sort((a, b) => a.rank - b.rank || a.index - b.index)
+    .slice(0, WIKTIONARY_RELATED_MAX)
+    .map((k) => k.word);
+}
+
 /** Wiktionary's list first, then Haiku's choice; lowercase, no duplicates, never the headword or the lemma, at most 8. */
 export function mergeRelated(wiktionary: readonly string[], haiku: readonly string[], exclude: ReadonlySet<string>): string[] {
   const out: string[] = [];
@@ -560,6 +605,7 @@ export function assembleEntry(bundle: SourceBundle, draft: Draft, ctx: AssembleC
   const headword = cut(chooseHeadword(rows, lemma, tidy(draft.headword)), COLUMN_LIMITS.headword);
   const exclude = new Set([lemma, lower(headword)]);
   const wiktSenses = wiktionarySenses(rows);
+  const ranks = bundle.relatedRanks ?? {};
 
   // ── senses ──
   const senses: AssembledSense[] = [];
@@ -592,8 +638,8 @@ export function assembleEntry(bundle: SourceBundle, draft: Draft, ctx: AssembleC
       grammarNote: orNull(tidy(s.grammar_note)),
       usageNote: orNull(tidy(s.usage_note)),
       examples,
-      synonyms: mergeRelated(aligned?.synonyms ?? [], s.synonyms, exclude).map((w) => cut(w, COLUMN_LIMITS.synonymText)),
-      antonyms: mergeRelated(aligned?.antonyms ?? [], s.antonyms, exclude).map((w) => cut(w, COLUMN_LIMITS.synonymText)),
+      synonyms: mergeRelated(filterWiktionaryRelated(aligned?.synonyms ?? [], ranks, exclude), s.synonyms, exclude).map((w) => cut(w, COLUMN_LIMITS.synonymText)),
+      antonyms: mergeRelated(filterWiktionaryRelated(aligned?.antonyms ?? [], ranks, exclude), s.antonyms, exclude).map((w) => cut(w, COLUMN_LIMITS.synonymText)),
     });
     senseMeanings.push(meanings);
   }
@@ -633,6 +679,12 @@ export function assembleEntry(bundle: SourceBundle, draft: Draft, ctx: AssembleC
     // Free Dictionary often cannot tell the accent: better an IPA of unknown accent in ipa_us than none (noted in admin_note).
     ipaUs = cleanFreeDictionaryIpa(fd?.ipa.any);
     ipaFromUnknownAccent = ipaUs !== null;
+  }
+  // LAST resort for ipa_us: the first Wiktionary IPA that has no tag. Never for ipa_uk (its accent is unknown).
+  let ipaFromUntagged = false;
+  if (!ipaUs) {
+    ipaUs = pickWiktionaryUntaggedIpa(rows);
+    ipaFromUntagged = ipaUs !== null;
   }
   const audioUsUrl = pickWiktionaryAudio(rows, 'us') ?? freeDictionaryAudio(fd?.audio.us);
   const audioUkUrl = pickWiktionaryAudio(rows, 'uk') ?? freeDictionaryAudio(fd?.audio.uk);
@@ -738,6 +790,7 @@ export function assembleEntry(bundle: SourceBundle, draft: Draft, ctx: AssembleC
   if (tierBMissing.length > 0) noteParts.push(`thiếu tầng B: ${tierBMissing.join(', ')}`);
   if (report.estimated.length > 0) noteParts.push(`ước tính: ${report.estimated.join(', ')}`);
   if (ipaFromUnknownAccent) noteParts.push('ipa_us lấy từ Free Dictionary, không rõ giọng');
+  if (ipaFromUntagged) noteParts.push(untaggedIpaNote());
   if (missingPos.length > 0) noteParts.push(`loại từ của Wiktionary không có trong mục: ${missingPos.join(', ')}`);
   const reviewNotes = draft.notes_for_review.map(tidy).filter(Boolean);
   if (reviewNotes.length > 0) noteParts.push(`ghi chú của Haiku: ${reviewNotes.join(' | ')}`);

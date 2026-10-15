@@ -27,6 +27,14 @@ export interface DraftUsage {
   calls: number;
 }
 
+/** Tokens of ONE Haiku request. A draft that needed a repair has two of them, and each is priced on its own. */
+export interface CallUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheCreationInputTokens: number;
+  cacheReadInputTokens: number;
+}
+
 export const emptyUsage = (): DraftUsage => ({ inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0, calls: 0 });
 
 export function addUsage(total: DraftUsage, u: EnrichUsage): void {
@@ -49,6 +57,8 @@ export interface DraftSuccess {
   requestIds: string[];
   /** Milliseconds per Haiku request. */
   callMs: number[];
+  /** Tokens per Haiku request (same order as callMs). Absent only on results built by hand in tests. */
+  callUsage?: CallUsage[];
 }
 
 export interface DraftFailure {
@@ -61,6 +71,7 @@ export interface DraftFailure {
   model: string | null;
   requestIds: string[];
   callMs: number[];
+  callUsage?: CallUsage[];
 }
 
 export type DraftResult = DraftSuccess | DraftFailure;
@@ -115,6 +126,7 @@ export async function generateDraft(bundle: SourceBundle, deps: { haiku: HaikuCa
   const usage = emptyUsage();
   const requestIds: string[] = [];
   const callMs: number[] = [];
+  const callUsage: CallUsage[] = [];
   let model: string | null = null;
 
   const messages: Anthropic.MessageParam[] = [{ role: 'user', content: buildUserMessage(bundle) }];
@@ -124,6 +136,7 @@ export async function generateDraft(bundle: SourceBundle, deps: { haiku: HaikuCa
     const response = await deps.haiku({ messages, signal: deps.signal });
     callMs.push(Date.now() - t);
     addUsage(usage, response.usage);
+    callUsage.push({ inputTokens: response.usage.inputTokens, outputTokens: response.usage.outputTokens, cacheCreationInputTokens: response.usage.cacheCreationInputTokens, cacheReadInputTokens: response.usage.cacheReadInputTokens });
     if (response.requestId) requestIds.push(response.requestId);
     model = response.model;
     return { response, evaluated: evaluate(response.text, response.stopReason, response.refusalCategory, bundle) };
@@ -131,10 +144,10 @@ export async function generateDraft(bundle: SourceBundle, deps: { haiku: HaikuCa
 
   const first = await attempt();
   if (first.evaluated.issues.length === 0) {
-    return { ok: true, draft: first.evaluated.draft!, usage, repaired: false, firstIssues: [], model: model!, requestIds, callMs };
+    return { ok: true, draft: first.evaluated.draft!, usage, repaired: false, firstIssues: [], model: model!, requestIds, callMs, callUsage };
   }
   if (first.evaluated.refused) {
-    return { ok: false, reason: 'invalid_output', details: first.evaluated.issues, firstIssues: first.evaluated.issues, usage, model, requestIds, callMs };
+    return { ok: false, reason: 'invalid_output', details: first.evaluated.issues, firstIssues: first.evaluated.issues, usage, model, requestIds, callMs, callUsage };
   }
 
   // One repair: the conversation so far, the previous JSON, the list of errors.
@@ -143,7 +156,7 @@ export async function generateDraft(bundle: SourceBundle, deps: { haiku: HaikuCa
 
   const second = await attempt();
   if (second.evaluated.issues.length === 0) {
-    return { ok: true, draft: second.evaluated.draft!, usage, repaired: true, firstIssues: first.evaluated.issues, model: model!, requestIds, callMs };
+    return { ok: true, draft: second.evaluated.draft!, usage, repaired: true, firstIssues: first.evaluated.issues, model: model!, requestIds, callMs, callUsage };
   }
-  return { ok: false, reason: 'invalid_output', details: second.evaluated.issues, firstIssues: first.evaluated.issues, usage, model, requestIds, callMs };
+  return { ok: false, reason: 'invalid_output', details: second.evaluated.issues, firstIssues: first.evaluated.issues, usage, model, requestIds, callMs, callUsage };
 }

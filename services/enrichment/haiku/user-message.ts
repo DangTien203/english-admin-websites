@@ -27,7 +27,9 @@ export const PROMPT_TOKENS_MANY = 4000;
  * The replacement is the six characters backslash, u, 0, 0, 3, c: the JSON escape of "<".
  */
 export function escapeForDataBlock(jsonText: string): string {
-  return jsonText.replace(/<(\/?)(data)/gi, '\\u003c$1$2');
+  // "<data", "</data", and the forms a model might still read as a tag: whitespace, slashes or zero-width characters between "<" and
+  // "data". ONE character class (no two adjacent quantifiers), so a long run after a "<" costs linear time.
+  return jsonText.replace(/<([\s\u200b-\u200f\u2028\u2029\ufeff/]*)(data)/gi, '\\u003c$1$2');
 }
 
 function summarizeFreeDictionary(entry: FdEntry) {

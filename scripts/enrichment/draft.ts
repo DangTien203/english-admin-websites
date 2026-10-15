@@ -16,7 +16,7 @@ import { lookupConfig } from '../../config/lookup';
 import { createEnrichmentDeps, haikuSkipReason } from '../../services/enrichment';
 import { collectSources } from '../../services/enrichment/sources';
 import { generateDraft, isDraftSuccess, type DraftResult } from '../../services/enrichment/draft';
-import { estimateCallCostUsd, PRICING_CHECKED_ON } from '../../services/enrichment/pricing';
+import { describeDraftCost, PRICING_CHECKED_ON } from '../../services/enrichment/pricing';
 import { loadTopicIds } from '../../services/enrichment/topics';
 import type { Draft } from '../../services/enrichment/haiku/schema';
 import type { SourceBundle } from '../../services/enrichment/types';
@@ -95,12 +95,13 @@ async function main(): Promise<number> {
 
   const result: DraftResult = await generateDraft(bundle, { haiku: deps.haiku });
   const u = result.usage;
-  const cost = result.model ? estimateCallCostUsd(result.model, u) : null;
+  const { total: cost, perCall } = describeDraftCost(result.model, result);
+  const perCallText = perCall.length > 1 ? ` (${perCall.length} lần gọi: ${perCall.map((c) => (c === null ? 'n/a' : `${c.toFixed(5)}`)).join(' + ')})` : '';
   const usageLine = `token: input ${u.inputTokens} (cache ghi ${u.cacheCreationInputTokens}, cache đọc ${u.cacheReadInputTokens}), output ${u.outputTokens}, ${u.calls} lần gọi` +
-    `   chi phí ước tính: ${cost === null ? 'n/a' : `$${cost.toFixed(5)}`} (bảng giá nhập tay ngày ${PRICING_CHECKED_ON}, phải xác minh lại)`;
+    `   chi phí ước tính: ${cost === null ? 'n/a' : `${cost.toFixed(5)}`}${perCallText} (bảng giá nhập tay ngày ${PRICING_CHECKED_ON}, phải xác minh lại)`;
 
   if (json) {
-    console.log(JSON.stringify({ word, model: result.model, flags: bundle.flags, expectedLemma: bundle.expectedLemma, usage: u, costUsd: cost, ms: { total: Date.now() - started, sources: bundle.timingsMs, haiku: result.callMs }, result }, null, 2));
+    console.log(JSON.stringify({ word, model: result.model, flags: bundle.flags, expectedLemma: bundle.expectedLemma, usage: u, costUsd: cost, costPerCallUsd: perCall, ms: { total: Date.now() - started, sources: bundle.timingsMs, haiku: result.callMs }, result }, null, 2));
     return isDraftSuccess(result) ? 0 : 1;
   }
 

@@ -1,5 +1,6 @@
 import pool from '../../config/db';
 import { lookupConfig } from '../../config/lookup';
+import { redactSecrets } from '../../utils/redact';
 import { createPgBossEnqueuer } from '../queue';
 import { currentPeriod } from '../upstream/apiUsage';
 import { getUpstreamClients, UpstreamClients } from '../upstream';
@@ -53,7 +54,7 @@ export function buildFastTranslator(clients: UpstreamClients): FastTranslator {
     },
   });
   return new FallbackFastTranslator(haiku, google, (reason, err) =>
-    console.warn(JSON.stringify({ evt: 'fast_translator_fallback', from: 'haiku', to: 'google', reason, error: String((err as Error)?.message ?? err).slice(0, 160) }))
+    console.warn(JSON.stringify({ evt: 'fast_translator_fallback', from: 'haiku', to: 'google', reason, error: redactSecrets(String((err as Error)?.message ?? err)).slice(0, 160) }))
   );
 }
 

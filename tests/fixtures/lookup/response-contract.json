@@ -1,0 +1,60 @@
+{
+  "_comment": "Fields the mobile app already reads from POST /api/v1/ebooks/:id/lookup (docs/lookup-spec.md §0.3, docs/lookup-api.md). A response may GAIN fields; it may not lose or rename one, nor change its type. Types are the allowed values of typeof, with 'null' and 'array' spelled out.",
+  "translation": {
+    "source": "string",
+    "word": "string",
+    "translation_vi": "string|null",
+    "phonetic": "string|null",
+    "audio_url": "string|null",
+    "pos": "string|null",
+    "definitions_en": "array",
+    "examples": "array",
+    "providers": "array",
+    "cached": "boolean",
+    "lookup_context": "object"
+  },
+  "dictionary": {
+    "id": "string",
+    "headword": "string",
+    "lemma": "string",
+    "ipa_us": "string|null",
+    "ipa_uk": "string|null",
+    "audio_us_url": "string|null",
+    "audio_uk_url": "string|null",
+    "pos": "array",
+    "meaning_vi": "string",
+    "meaning_en": "string|null",
+    "example_en": "string|null",
+    "example_vi": "string|null",
+    "cefr_level": "string|null",
+    "frequency_rank": "number|null",
+    "source": "string",
+    "admin_note": "string|null",
+    "published": "boolean",
+    "created_at": "string",
+    "updated_at": "string",
+    "etymology": "string|null",
+    "register": "string|null",
+    "is_countable": "boolean|null",
+    "is_transitive": "boolean|null",
+    "senses": "array|null",
+    "word_forms": "array|null",
+    "phrasal_verbs": "array|null",
+    "idioms": "array|null",
+    "collocations": "array|null",
+    "tags": "array|null",
+    "legacy_synonyms": "array|null",
+    "legacy_antonyms": "array|null",
+    "word_family": "object|null",
+    "lookup_context": "object"
+  },
+  "lookup_context": {
+    "source": "string",
+    "ebook_id": "string",
+    "paragraph_id": "string|null"
+  },
+  "error": {
+    "success": "boolean",
+    "error": "object"
+  }
+}

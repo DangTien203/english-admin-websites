@@ -1,5 +1,6 @@
 import { Pool } from 'pg';
 import dotenv from 'dotenv';
+import { attachPoolErrorHandlers } from './poolErrors';
 
 dotenv.config();
 
@@ -25,5 +26,10 @@ if (dbUrl && (dbUrl.startsWith('postgresql://') || dbUrl.startsWith('postgres://
     password: process.env.DB_PASSWORD || '',
   });
 }
+
+// A server can drop a connection at any time (Neon suspends an idle compute, a failover, a restart). pg reports it as an 'error'
+// EVENT, and an event without a listener is an uncaught exception that kills a long-running process (the API, the worker):
+// for an idle client on the pool, and for a client checked out in the middle of a transaction. See config/poolErrors.ts.
+attachPoolErrorHandlers(pool);
 
 export = pool;

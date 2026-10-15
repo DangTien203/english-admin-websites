@@ -8,8 +8,10 @@ import { errMessage, logEvent } from './log';
  * (docs/lookup-queue.md has the API cross-check this code is written against).
  *
  *   - 'worker' role: runs pg-boss maintenance (expiring stuck jobs, deleting old ones).
- *   - 'sender' role: only inserts jobs, maintenance is switched off (`supervise: false`).
- *   - Cron scheduling (`schedule`) stays off: nothing uses it before P7.
+ *   - 'sender' role: only inserts jobs, maintenance and cron are switched off (`supervise: false`, `schedule: false`).
+ *   - Cron scheduling (`schedule: true`) belongs to the 'worker' role: it fires the 10-minute reconcile pass
+ *     (services/queue/reconcileSchedule.ts). pg-boss claims each cron pass in the database, so several processes with
+ *     `schedule: true` never create the same tick twice.
  */
 
 export type BossRole = 'sender' | 'worker';
@@ -51,7 +53,7 @@ export function buildBossOptions(settings: QueueSettings, role: BossRole, connec
     application_name: role === 'worker' ? 'wordygo-enrichment-worker' : 'wordygo-enrichment-sender',
     instanceName: role === 'worker' ? 'enrichment-worker' : 'enrichment-sender',
     supervise: role === 'worker',
-    schedule: false,
+    schedule: role === 'worker',
   };
 }
 

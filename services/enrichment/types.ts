@@ -69,6 +69,12 @@ export interface SourceBundle {
   frequency: FrequencyInfo | null;
   /** Candidates only: Haiku chooses, nothing here is written to the database as is. */
   datamuse: DatamuseCandidates | null;
+  /**
+   * rank in ref_word_frequency (1 = most common) of the single-word synonyms / antonyms listed by the Wiktionary rows
+   * (rows and lemmaRows). A word that is not here is not in the frequency list. assembleEntry keeps only listed words.
+   * Optional so a bundle built without it simply has no usable Wiktionary synonyms.
+   */
+  relatedRanks?: Record<string, number>;
   flags: SourceFlags;
   /** Rows kept out of onlyFormRows because they are a lone stray sense (see wiktionary.ts STRAY_SENSE_LIMIT). */
   strayRows: number;

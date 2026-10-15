@@ -1,5 +1,6 @@
 import { Pool } from 'pg';
 import pool from '../../config/db';
+import { attachPoolErrorHandlers } from '../../config/poolErrors';
 import { lookupConfig } from '../../config/lookup';
 import type { Db } from './types';
 
@@ -17,5 +18,7 @@ export function getRefDb(): Db {
     max: 3,
     ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
   });
+  // Same reason as config/db.ts: a dropped connection must not be an uncaught exception.
+  attachPoolErrorHandlers(refPool, 'refdata');
   return refPool;
 }

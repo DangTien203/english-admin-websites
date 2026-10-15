@@ -1,8 +1,8 @@
 import type { DatamuseClient } from '../../upstream/datamuseClient';
 import type { FreeDictionaryClient } from '../../upstream/freeDictionaryClient';
 import type { Db, FreeDictionaryOutcome, FrequencyInfo, SourceBundle, WiktionaryRow } from '../types';
-import { fetchFrequency } from './frequency';
-import { analyzeRows, fetchWiktionaryRows, isNameRow } from './wiktionary';
+import { fetchFrequency, fetchRanks } from './frequency';
+import { analyzeRows, collectRelatedWords, fetchWiktionaryRows, isNameRow } from './wiktionary';
 
 /**
  * S1 — collect the sources for one word (docs/lookup-spec.md §8).
@@ -92,6 +92,17 @@ export async function collectSources(word: string, deps: SourceDeps): Promise<So
   }
   if (!expectedLemma && !onlyFormRows && analysis.independentRows.length > 0) expectedLemma = word;
 
+  // ── how common are the synonyms / antonyms Wiktionary lists? (one query; only words in the frequency list are kept later) ──
+  let relatedRanks: Record<string, number> = {};
+  const related = collectRelatedWords([...wiktionaryRows, ...lemmaRows]);
+  if (related.length > 0) {
+    try {
+      relatedRanks = await timed('related_ranks', () => withTimeout(fetchRanks(deps.refDb, related), timeoutMs, 'related ranks'));
+    } catch (err) {
+      sourceErrors.related_ranks = reason(err); // no ranks: the entry simply gets no Wiktionary synonyms
+    }
+  }
+
   // ── Free Dictionary: only when Wiktionary has nothing ──
   let freeDictionary: FreeDictionaryOutcome = { status: 'skipped' };
   if (wiktionaryRows.length === 0) {
@@ -121,6 +132,7 @@ export async function collectSources(word: string, deps: SourceDeps): Promise<So
     freeDictionary,
     frequency,
     datamuse,
+    relatedRanks,
     flags: {
       onlyFormRows,
       onlyVariantRows: analysis.onlyVariantRows,

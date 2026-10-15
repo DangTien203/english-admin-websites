@@ -3,10 +3,12 @@
  * Same convention as the rest of the lookup code: console.* with JSON.stringify({ evt, ... }).
  */
 
+import { redactSecrets } from '../../utils/redact';
+
 type Level = 'info' | 'warn' | 'error';
 
 export function logEvent(level: Level, evt: string, fields: Record<string, unknown> = {}): void {
-  const line = JSON.stringify({ evt, ...fields });
+  const line = redactSecrets(JSON.stringify({ evt, ...fields }));
   if (level === 'error') console.error(line);
   else if (level === 'warn') console.warn(line);
   else console.info(line);
@@ -14,7 +16,7 @@ export function logEvent(level: Level, evt: string, fields: Record<string, unkno
 
 /** Message of anything thrown, capped so a provider body can never flood the log. */
 export function errMessage(err: unknown): string {
-  return String((err as Error)?.message ?? err).slice(0, 300);
+  return redactSecrets(String((err as Error)?.message ?? err)).slice(0, 300);
 }
 
 const counters = new Map<string, number>();

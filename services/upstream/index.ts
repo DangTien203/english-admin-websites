@@ -1,5 +1,6 @@
 import pool from '../../config/db';
 import { lookupConfig } from '../../config/lookup';
+import { redactSecrets } from '../../utils/redact';
 import { AnthropicEnrichClient } from './anthropicEnrichClient';
 import { ApiUsage } from './apiUsage';
 import { BreakerState, CircuitBreaker } from './circuitBreaker';
@@ -30,26 +31,29 @@ export interface UpstreamClients {
   anthropicFast: AnthropicEnrichClient;
   usage: ApiUsage;
   breakers: Record<UpstreamProvider, CircuitBreaker>;
+  /** The separate breaker of `anthropicFast` (reported next to `breakers.anthropic`, which belongs to the enrichment job). */
+  fastBreaker: CircuitBreaker;
 }
 
 let instance: UpstreamClients | undefined;
 
-function logBreakerChange(provider: UpstreamProvider, from: BreakerState, to: BreakerState): void {
+function logBreakerChange(provider: UpstreamProvider, from: BreakerState, to: BreakerState, scope?: string): void {
   // Opening is worth attention; the other transitions are routine.
   const log = to === 'open' ? console.warn : console.info;
-  log(JSON.stringify({ evt: 'breaker', provider, from, to }));
+  log(JSON.stringify({ evt: 'breaker', provider, ...(scope ? { scope } : {}), from, to }));
 }
 
 export function getUpstreamClients(): UpstreamClients {
   if (instance) return instance;
 
   const cfg = lookupConfig;
-  const makeBreaker = (provider: UpstreamProvider) =>
+  const makeBreaker = (provider: UpstreamProvider, scope?: string) =>
     new CircuitBreaker(provider, {
       failureThreshold: cfg.breaker.failureThreshold,
       resetMs: cfg.breaker.resetMs,
-      onStateChange: logBreakerChange,
+      onStateChange: (p, from, to) => logBreakerChange(p, from, to, scope),
     });
+  const fastBreaker = makeBreaker('anthropic', 'fast_path');
 
   const breakers: Record<UpstreamProvider, CircuitBreaker> = {
     google_translate: makeBreaker('google_translate'),
@@ -62,6 +66,7 @@ export function getUpstreamClients(): UpstreamClients {
   instance = {
     usage,
     breakers,
+    fastBreaker,
     anthropicFast: new AnthropicEnrichClient(
       {
         apiKey: cfg.anthropic.apiKey,
@@ -69,7 +74,7 @@ export function getUpstreamClients(): UpstreamClients {
         maxOutputTokens: ANTHROPIC_FAST_MAX_TOKENS,
         timeoutMs: cfg.lookup.upstreamTimeoutMs,
       },
-      { breaker: makeBreaker('anthropic') }
+      { breaker: fastBreaker }
     ),
     google: new GoogleTranslateClient(
       {
@@ -89,7 +94,7 @@ export function getUpstreamClients(): UpstreamClients {
     ),
     datamuse: new DatamuseClient(
       { enabled: cfg.datamuse.enabled, baseUrl: cfg.datamuse.baseUrl, apiKey: cfg.datamuse.apiKey, timeoutMs: cfg.lookup.upstreamTimeoutMs },
-      { breaker: breakers.datamuse, onDegraded: (word, err) => console.warn(JSON.stringify({ evt: 'datamuse_degraded', word, error: String((err as Error)?.message ?? err).slice(0, 200) })) }
+      { breaker: breakers.datamuse, onDegraded: (word, err) => console.warn(JSON.stringify({ evt: 'datamuse_degraded', word, error: redactSecrets(String((err as Error)?.message ?? err)).slice(0, 200) })) }
     ),
     anthropic: new AnthropicEnrichClient(
       {

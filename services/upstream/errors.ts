@@ -8,6 +8,8 @@
  *   BudgetExceeded       – a spend / quota limit (local counter or provider side): never retry
  */
 
+import { redactSecrets } from '../../utils/redact';
+
 export type UpstreamProvider = 'google_translate' | 'free_dictionary' | 'datamuse' | 'anthropic';
 
 export type UnavailableReason =
@@ -27,7 +29,8 @@ export abstract class UpstreamError extends Error {
   readonly status?: number;
 
   protected constructor(provider: UpstreamProvider, message: string, status?: number, cause?: unknown) {
-    super(`[${provider}] ${message}`, cause === undefined ? undefined : { cause });
+    // A provider's own text may echo a key or a URL with one: nothing that reaches a log or a response keeps it (spec §12.5).
+    super(redactSecrets(`[${provider}] ${message}`), cause === undefined ? undefined : { cause });
     this.provider = provider;
     this.status = status;
   }

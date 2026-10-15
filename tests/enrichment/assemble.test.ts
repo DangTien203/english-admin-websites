@@ -279,7 +279,7 @@ describe('synonyms and antonyms (spec §8.1)', () => {
 
   it('the list of the aligned Wiktionary sense comes first, then Haiku\'s choice; lowercase, no duplicates, not the headword', () => {
     const e = entryOf(
-      makeBundle({ wiktionaryRows: rows }),
+      makeBundle({ wiktionaryRows: rows, relatedRanks: { lender: 14000, depository: 60000, shore: 9000, borrower: 12000 } }),
       makeDraft({
         senses: [
           sense(['ngân hàng'], { definition_en: 'a financial institution that keeps money and lends it', synonyms: ['Savings Bank', 'lender', 'bank'], antonyms: [] }),
@@ -293,7 +293,7 @@ describe('synonyms and antonyms (spec §8.1)', () => {
   });
 
   it('a sense that matches no Wiktionary gloss gets only what Haiku chose (no wrong sense is borrowed)', () => {
-    const e = entryOf(makeBundle({ wiktionaryRows: rows }), makeDraft({ senses: [sense(['nghiêng'], { definition_en: 'to tilt an aircraft sideways to turn', synonyms: ['tilt'] })] }));
+    const e = entryOf(makeBundle({ wiktionaryRows: rows, relatedRanks: { lender: 14000, shore: 9000 } }), makeDraft({ senses: [sense(['nghiêng'], { definition_en: 'to tilt an aircraft sideways to turn', synonyms: ['tilt'] })] }));
     expect(e.senses[0].synonyms).toEqual(['tilt']);
   });
 
