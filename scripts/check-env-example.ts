@@ -7,7 +7,9 @@
  *   - the lookup section of .env.example holds a variable that the schema does not know (a typo, or one that was removed),
  *   - a variable appears twice,
  *   - a schema variable is written ABOVE the lookup section (it would not be checked there),
- *   - the example values do not load: loadLookupConfig() rejects them (wrong type, out of range, a key missing for a feature that is on).
+ *   - the example values do not load: loadLookupConfig() rejects them (wrong type, out of range, a key missing for a feature that is on),
+ *   - an example value is not the default of the schema. Copying .env.example to .env must behave like setting nothing; the day a default
+ *     changes (ENRICHMENT_PUBLISH_POLICY went from auto to review, spec 1.5) the example has to be changed with it.
  *
  * The lookup section is everything after the line that names "docs/lookup-spec.md §1". Variables above it (PORT, DB_*, SESSION_SECRET…)
  * belong to the rest of the application and are not compared. Only names are printed, never values.
@@ -27,6 +29,8 @@ export interface EnvExampleReport {
   misplaced: string[];
   /** problems from loadLookupConfig (names and messages, no values) */
   invalid: string[];
+  /** schema variables whose example value is not the schema default (names only) */
+  notDefault: string[];
   /** the marker line was not found */
   markerMissing: boolean;
 }
@@ -59,7 +63,15 @@ export function parseEnvExample(text: string): ParsedExample {
   return { entries, markerMissing: !markerSeen };
 }
 
-export function checkEnvExample(text: string, schemaKeys: readonly string[], load: (env: Record<string, string>) => unknown = loadLookupConfig as any): EnvExampleReport {
+/** Parses variables the way the schema does, so that defaults and example values can be compared one by one. */
+type ParseEnv = (env: Record<string, string>) => Record<string, unknown>;
+
+export function checkEnvExample(
+  text: string,
+  schemaKeys: readonly string[],
+  load: (env: Record<string, string>) => unknown = loadLookupConfig as any,
+  parse: ParseEnv = (env) => lookupEnvSchema.parse(env) as Record<string, unknown>
+): EnvExampleReport {
   const parsed = parseEnvExample(text);
   const schema = new Set(schemaKeys);
   const inSection = parsed.entries.filter((e) => e.lookup);
@@ -83,8 +95,22 @@ export function checkEnvExample(text: string, schemaKeys: readonly string[], loa
     else invalid.push(String((err as Error)?.message ?? err));
   }
 
-  const ok = !parsed.markerMissing && missing.length === 0 && extra.length === 0 && duplicates.length === 0 && misplaced.length === 0 && invalid.length === 0;
-  return { ok, missing, extra, duplicates, misplaced, invalid, markerMissing: parsed.markerMissing };
+  // Is every example value the default? (Compared after parsing, so "" / "5" / "true" equal the typed default. Values the schema rejects were
+  // reported above; they are not reported twice.)
+  let notDefault: string[] = [];
+  if (invalid.length === 0) {
+    try {
+      const defaults = parse({});
+      const example = parse(env);
+      notDefault = [...schemaKeys].filter((k) => JSON.stringify(example[k]) !== JSON.stringify(defaults[k])).sort();
+    } catch {
+      /* the schema cannot parse one of the two: already visible as "invalid" */
+    }
+  }
+
+  const ok =
+    !parsed.markerMissing && missing.length === 0 && extra.length === 0 && duplicates.length === 0 && misplaced.length === 0 && invalid.length === 0 && notDefault.length === 0;
+  return { ok, missing, extra, duplicates, misplaced, invalid, notDefault, markerMissing: parsed.markerMissing };
 }
 
 export function describeReport(r: EnvExampleReport): string[] {
@@ -95,6 +121,7 @@ export function describeReport(r: EnvExampleReport): string[] {
   for (const k of r.duplicates) lines.push(`  - TRÙNG: ${k}`);
   for (const k of r.misplaced) lines.push(`  - ${k} thuộc schema nhưng nằm TRÊN phần tra từ`);
   for (const i of r.invalid) lines.push(`  - giá trị ví dụ không hợp lệ: ${i}`);
+  for (const k of r.notDefault) lines.push(`  - ${k}: giá trị trong .env.example khác mặc định của schema (chép .env.example thành .env phải cho cùng hành vi với không đặt gì)`);
   return lines;
 }
 

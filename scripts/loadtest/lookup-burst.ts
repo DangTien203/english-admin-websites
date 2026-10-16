@@ -6,6 +6,8 @@
  *   npm run loadtest:lookup -- --same 200 --distinct 50 --window 10 --latency 300 --rounds 2
  *   npm run loadtest:lookup -- --deadline 60000  # LOOKUP_TOTAL_DEADLINE_MS of the app in scenario A (default 3000, the production default)
  *   npm run loadtest:lookup -- --skip-slow       # without the single-flight scenario (it waits ~15 s)
+ *   npm run loadtest:lookup -- --send 30         # words of scenario D (default 30; --skip-send leaves the scenario out)
+ *   npm run loadtest:lookup -- --only-send       # only scenario D (about a minute)
  *   npm run loadtest:lookup -- --json out.json   # also write the figures as JSON
  *
  * Scenarios (each prints PASS / FAIL lines; the exit code is 1 if any check fails):
@@ -16,6 +18,10 @@
  *                 the mock must see exactly 1 Free Dictionary request and 1 Google request for that word (spec §5 F7).
  *   C  F6         one user asks for LOOKUP_MISS_RATE_LIMIT_PER_MIN + 5 new words at once: the first 20 are answered, the rest are 429
  *                 with Retry-After.
+ *   D  ANSWER AND JOB SEND   --send new words one after the other with ENRICHMENT_ENABLED=true and the REAL pg-boss sender, in a private
+ *                 schema (lt_<run>) with no worker, so no job is ever processed. Since spec 1.5 the job is sent after the answer:
+ *                 the figures show the answer time and, next to it, what the visitor would have waited with the send in front of it.
+ *                 Cleans up what it made: the ledger rows, the daily job counter it moved, the private schema.
  *
  * Every fixture (users, ebook) is named "lt<run>…" and removed at the end; the real Google character counter is restored.
  * Nothing real is called: the child's GOOGLE_TRANSLATE_BASE_URL / FREE_DICTIONARY_BASE_URL / DATAMUSE_BASE_URL point at the mock
@@ -27,6 +33,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import jwt from 'jsonwebtoken';
 import pool from '../../config/db';
+import { currentPeriod } from '../../services/upstream/apiUsage';
 import { startMockUpstream, type MockUpstream } from '../mock-upstream/server';
 
 if (process.env.NODE_ENV === 'production') {
@@ -50,6 +57,10 @@ const WINDOW_S = num('window', 10);
 const LATENCY_MS = num('latency', 300);
 const ROUNDS = Math.max(1, num('rounds', 2));
 const SKIP_SLOW = argv.includes('--skip-slow');
+/** Scenario D: how many new words are looked up one after the other with the real job sender (0 = leave the scenario out). */
+const SEND = argv.includes('--skip-send') ? 0 : num('send', 30);
+/** Only scenario D (the others take minutes and are not affected by where the job send happens). */
+const ONLY_SEND = argv.includes('--only-send');
 /** LOOKUP_TOTAL_DEADLINE_MS of the app in scenario A (default 3000 = the production default). */
 const DEADLINE_MS = num('deadline', 3000);
 const JSON_OUT = argv.includes('--json') ? argv[argv.indexOf('--json') + 1] : undefined;
@@ -111,6 +122,8 @@ interface AppProcess {
   /** Waits until the app's pool has nothing queued and every connection is idle (the fire-and-forget inserts of the last burst are done). */
   drained(): Promise<number>;
   lookupLogs: Array<Record<string, any>>;
+  /** The `lookup_enrich` lines (the real answer of each background job send, spec 1.5). */
+  enrichLogs: Array<Record<string, any>>;
   heap(): Promise<Heap>;
   stop(): Promise<void>;
 }
@@ -136,15 +149,17 @@ async function startApp(mock: MockUpstream, env: Record<string, string> = {}): P
   });
 
   const lookupLogs: Array<Record<string, any>> = [];
+  const enrichLogs: Array<Record<string, any>> = [];
   let buffer = '';
   child.stdout!.on('data', (chunk) => {
     buffer += String(chunk);
     const lines = buffer.split('\n');
     buffer = lines.pop() ?? '';
     for (const line of lines) {
-      if (!line.startsWith('{"evt":"lookup"')) continue;
+      const target = line.startsWith('{"evt":"lookup"') ? lookupLogs : line.startsWith('{"evt":"lookup_enrich"') ? enrichLogs : null;
+      if (!target) continue;
       try {
-        lookupLogs.push(JSON.parse(line));
+        target.push(JSON.parse(line));
       } catch {
         /* partial line */
       }
@@ -179,6 +194,7 @@ async function startApp(mock: MockUpstream, env: Record<string, string> = {}): P
   return {
     base: `http://127.0.0.1:${port}`,
     lookupLogs,
+    enrichLogs,
     warm: (n) =>
       new Promise<void>((resolve) => {
         const onMessage = (m: any) => {
@@ -243,6 +259,8 @@ interface Result {
   status: number;
   ms: number;
   partial: boolean | null;
+  /** data.enrichment.status of the answer */
+  enrichment: string | null;
   retryAfter: string | null;
   error?: string;
 }
@@ -256,9 +274,9 @@ async function lookup(app: AppProcess, ebookId: string, token: string, w: string
       body: JSON.stringify({ word: w }),
     });
     const body: any = await res.json().catch(() => null);
-    return { group, word: w, status: res.status, ms: Math.round(performance.now() - t0), partial: body?.data?.partial ?? null, retryAfter: res.headers.get('retry-after') };
+    return { group, word: w, status: res.status, ms: Math.round(performance.now() - t0), partial: body?.data?.partial ?? null, enrichment: body?.data?.enrichment?.status ?? null, retryAfter: res.headers.get('retry-after') };
   } catch (err) {
-    return { group, word: w, status: 0, ms: Math.round(performance.now() - t0), partial: null, retryAfter: null, error: String((err as Error).message) };
+    return { group, word: w, status: 0, ms: Math.round(performance.now() - t0), partial: null, enrichment: null, retryAfter: null, error: String((err as Error).message) };
   }
 }
 
@@ -434,6 +452,73 @@ async function scenarioSingleFlight(mock: MockUpstream, ebookId: string, tokens:
   }
 }
 
+/**
+ * D · what the visitor waits for, with the job send AFTER the answer (docs/lookup-spec.md §5, version 1.5). The real sender (pg-boss, role
+ * "sender": it only inserts) works in a private schema nobody processes. Sequential on purpose: one request at a time, so the figures are
+ * the cost of the code and of the database round trips, not of a queue of requests for a connection.
+ */
+async function scenarioJobSend(mock: MockUpstream, ebookId: string, tokens: string[]): Promise<void> {
+  console.log(`\nD · ANSWER AND JOB SEND   ${SEND} new words one after the other, real pg-boss sender in schema lt_${RUN} (no worker), upstream latency ${LATENCY_MS} ms`);
+  const schema = `lt_${RUN}`;
+  const period = currentPeriod('day');
+  const prefix = word('send');
+  const counter = async () => (await pool.query(`SELECT used FROM api_usage_counters WHERE provider = 'enrichment' AND unit = 'jobs' AND period = $1`, [period])).rows[0];
+  const counterBefore = await counter();
+  const ledger = async () => Number((await pool.query(`SELECT COUNT(*)::int AS n FROM word_enrichment_jobs WHERE word LIKE $1`, [`${prefix}%`])).rows[0].n);
+  const untilLedger = async (n: number, limitMs: number) => {
+    const t0 = Date.now();
+    while ((await ledger()) < n && Date.now() - t0 < limitMs) await sleep(400);
+  };
+
+  const app = await startApp(mock, { ENRICHMENT_ENABLED: 'true', ENRICHMENT_WORKER_ENABLED: 'false', PGBOSS_SCHEMA: schema });
+  try {
+    mock.reset();
+    mock.setControl({ google: { latencyMs: LATENCY_MS }, fd: { latencyMs: LATENCY_MS } });
+    await app.warm(10);
+    // The first send starts pg-boss and creates its private schema (migrations over a far-away database): not measured.
+    const warmWords = [0, 1, 2].map((i) => `${prefix}w${alpha(i)}`);
+    for (const w of warmWords) await lookup(app, ebookId, tokens[0], w, 'warm');
+    await untilLedger(warmWords.length, 180_000);
+    app.enrichLogs.length = 0;
+
+    const results: Result[] = [];
+    // eight users take turns: the per-user limit (20 new words a minute) is not what is being measured
+    for (let i = 0; i < SEND; i++) results.push(await lookup(app, ebookId, tokens[1 + (i % 8)], `${prefix}m${alpha(i)}`, 'send'));
+    await untilLedger(warmWords.length + SEND, 120_000);
+    await sleep(800); // the last log lines
+
+    const sendLog = new Map(app.enrichLogs.map((l) => [l.word as string, l]));
+    const sendMs = results.map((r) => sendLog.get(r.word)?.enqueue_ms).filter((v): v is number => typeof v === 'number');
+    const answer = summarize(results.map((r) => r.ms));
+    console.log(`  ${results.length} lookups; statuses ${JSON.stringify(countStatuses(results))}; the app logged ${app.enrichLogs.length} job sends (${sendMs.length} with a timing)`);
+    const rows: Array<Record<string, unknown>> = [{ what: 'answer (the send runs after it)', n: answer.n, p50: answer.p50, p95: answer.p95, max: answer.max }];
+    if (sendMs.length === results.length) {
+      const withSend = summarize(results.map((r) => r.ms + (sendLog.get(r.word)!.enqueue_ms as number)));
+      const alone = summarize(sendMs);
+      rows.push({ what: 'answer + send (the visitor waited for the send, as before spec 1.5)', n: withSend.n, p50: withSend.p50, p95: withSend.p95, max: withSend.max });
+      rows.push({ what: 'the job send alone (enqueue_ms)', n: alone.n, p50: alone.p50, p95: alone.p95, max: alone.max });
+      report.jobSend = { latencyMs: LATENCY_MS, words: SEND, answer, answerPlusSend: withSend, sendAlone: alone, statuses: countStatuses(results) };
+      check(withSend.p95 > answer.p95, `the answer is faster than answer + send (p95 ${answer.p95} ms against ${withSend.p95} ms)`);
+    } else {
+      report.jobSend = { latencyMs: LATENCY_MS, words: SEND, answer, statuses: countStatuses(results), note: 'no lookup_enrich lines: the app did not send in the background' };
+    }
+    console.table(rows);
+
+    check(results.every((r) => r.status === 200 && r.partial === false), 'every answer is 200 and complete');
+    check(results.every((r) => r.enrichment === 'queued'), `every answer says enrichment.status = "queued" (${JSON.stringify([...new Set(results.map((r) => r.enrichment))])})`);
+    check((await ledger()) >= warmWords.length + SEND, `every word reached the job ledger (${await ledger()} rows for ${warmWords.length + SEND} words): the send really ran`);
+    check(app.enrichLogs.every((l) => l.status === 'queued'), 'every background send was queued (none already_queued / skipped / failed)');
+  } finally {
+    await app.stop();
+    // what scenario D made: ledger rows, the daily slot each of them took, the private pg-boss schema
+    const made = await ledger();
+    await pool.query(`DELETE FROM word_enrichment_jobs WHERE word LIKE $1`, [`${prefix}%`]);
+    if (made > 0) await pool.query(`UPDATE api_usage_counters SET used = GREATEST(0, used - $1) WHERE provider = 'enrichment' AND unit = 'jobs' AND period = $2`, [made, period]);
+    if (!counterBefore) await pool.query(`DELETE FROM api_usage_counters WHERE provider = 'enrichment' AND unit = 'jobs' AND period = $1 AND used = 0`, [period]);
+    await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
+  }
+}
+
 // ── main ─────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<number> {
@@ -458,8 +543,9 @@ async function main(): Promise<number> {
     ebookId = ebook.id;
     console.log(`fixtures : ${users.length} users, 1 ebook (run ${RUN})`);
 
-    await scenarioBaseline(mock, ebookId, tokens);
-    if (!SKIP_SLOW) await scenarioSingleFlight(mock, ebookId, tokens);
+    if (!ONLY_SEND) await scenarioBaseline(mock, ebookId, tokens);
+    if (!ONLY_SEND && !SKIP_SLOW) await scenarioSingleFlight(mock, ebookId, tokens);
+    if (SEND > 0) await scenarioJobSend(mock, ebookId, tokens);
   } finally {
     await sleep(500);
     await pool.query(`DELETE FROM users WHERE email LIKE $1`, [`lt-${RUN}-%`]);

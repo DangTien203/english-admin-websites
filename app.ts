@@ -11,6 +11,7 @@ import { injectAdmin } from './middlewares/auth';
 import { requireSameOrigin } from './middlewares/sameOrigin';
 import { errorHandler } from './middlewares/errorHandler';
 import pool from './config/db';
+import { drainLookupBackground } from './services/lookup';
 import { startEnrichmentRuntime } from './services/queue';
 import { errMessage, logEvent } from './services/queue/log';
 import { installShutdownHandlers } from './services/queue/shutdown';
@@ -207,6 +208,8 @@ if (require.main === module) {
                 server.closeIdleConnections();
               }),
           },
+          // job sends and word_lookups inserts that follow answers already given (they run after the response, spec 1.5)
+          { name: 'lookup_background', run: () => drainLookupBackground() },
           { name: 'stop_queue', run: async () => void (await runtime?.stop()) },
           { name: 'close_pool', run: () => pool.end() },
         ]);

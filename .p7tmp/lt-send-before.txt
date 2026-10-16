@@ -1,0 +1,22 @@
+
+> english-admin-websites@1.0.0 loadtest:lookup
+> tsx --expose-gc scripts/loadtest/lookup-burst.ts --only-send --send 30 --json .p7tmp/lt-send-before.json
+
+database : ep-divine-field-aoljwkwq.c-2.ap-southeast-1.aws.neon.tech/neondb
+node v24.14.0 · win32 · same=200 distinct=50 window=10s latency=300ms rounds=2
+fixtures : 264 users, 1 ebook (run zuuquz)
+
+D · ANSWER AND JOB SEND   30 new words one after the other, real pg-boss sender in schema lt_zuuquz (no worker), upstream latency 300 ms
+  30 lookups; statuses {"200":30}; the app logged 0 job sends (0 with a timing)
+┌─────────┬───────────────────────────────────┬────┬──────┬──────┬──────┐
+│ (index) │ what                              │ n  │ p50  │ p95  │ max  │
+├─────────┼───────────────────────────────────┼────┼──────┼──────┼──────┤
+│ 0       │ 'answer (the send runs after it)' │ 30 │ 1275 │ 1426 │ 1601 │
+└─────────┴───────────────────────────────────┴────┴──────┴──────┴──────┘
+  PASS  every answer is 200 and complete
+  PASS  every answer says enrichment.status = "queued" (["queued"])
+  PASS  every word reached the job ledger (33 rows for 33 words): the send really ran
+  PASS  every background send was queued (none already_queued / skipped / failed)
+
+4/4 checks passed
+exit=0

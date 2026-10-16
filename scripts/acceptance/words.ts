@@ -11,6 +11,14 @@ export type Group = 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'H';
 
 export const GROUP_ORDER: readonly Group[] = ['A', 'B', 'C', 'D', 'E', 'F', 'H'];
 
+/**
+ * The order the groups are RUN in (GROUP_ORDER stays the order of the brief and of the tables). H goes before E and F: H is the group
+ * that most needs Free Dictionary to be answering (several senses come from it), while E and F are the ones that can make it fail
+ * (a proper noun or a garbage word has no Google translation, so each of them waits for Free Dictionary and, when it hangs, ends in a
+ * 503 after the full timeout; a few of those in a row open its circuit breaker and spoil whatever runs next).
+ */
+export const RUN_ORDER: readonly Group[] = ['A', 'B', 'C', 'D', 'H', 'E', 'F'];
+
 export const GROUP_TITLES: Record<Group, string> = {
   A: 'đã có trong từ điển',
   B: 'dạng biến của từ đã có',
@@ -31,10 +39,14 @@ export const GROUP_WORDS: Record<Group, readonly string[]> = {
   H: ['batter', 'mole', 'sage', 'tick', 'bass', 'fawn'],
 };
 
-/** Used in order, one for each word of the group whose precondition is wrong. Only groups C and H have stand-ins. */
+/**
+ * Used in order, one for each word of the group whose precondition is wrong. Only groups C and H have stand-ins.
+ * H has more of them than C: a group H run that could not be judged because Free Dictionary was down still leaves an entry behind for
+ * every word (the job does not need Free Dictionary), so those words are "used up", and re-running the group needs fresh ones.
+ */
 export const FALLBACK_WORDS: Partial<Record<Group, readonly string[]>> = {
   C: ['nostalgia', 'gregarious', 'lucid'],
-  H: ['trunk', 'rack', 'pawn'],
+  H: ['trunk', 'rack', 'pawn', 'bark', 'crane', 'pitch', 'seal', 'bolt', 'stalk', 'jam', 'ring', 'spring', 'bat', 'mint', 'pound', 'row', 'wave', 'well', 'yard', 'fan', 'tap', 'rock', 'bear', 'pool'],
 };
 
 /** The inflected forms of group B and the lemma whose entry must be there (and published) for the form to be found. */
@@ -147,7 +159,7 @@ export function planWords(
 ): { run: PlannedWord[]; skipped: SkippedWord[] } {
   const run: PlannedWord[] = [];
   const skipped: SkippedWord[] = [];
-  for (const group of GROUP_ORDER.filter((g) => groups.includes(g))) {
+  for (const group of RUN_ORDER.filter((g) => groups.includes(g))) {
     const standIns = [...(FALLBACK_WORDS[group] ?? [])];
     for (const word of GROUP_WORDS[group]) {
       const pre = preconditions(group, word);

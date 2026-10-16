@@ -35,6 +35,8 @@ export interface FakeDbOptions {
   refPopulated?: boolean;
   refProbeThrows?: boolean;
   failInserts?: boolean;
+  /** word_lookups inserts wait for this before they finish (a slow database). */
+  insertGate?: Promise<unknown>;
 }
 
 export function makeDb(opts: FakeDbOptions = {}) {
@@ -64,6 +66,7 @@ export function makeDb(opts: FakeDbOptions = {}) {
       if (sql.includes('FROM ref_word_frequency')) return { rows: [] };
       if (sql.includes('INSERT INTO word_lookups')) {
         if (opts.failInserts) throw new Error('insert failed');
+        if (opts.insertGate) await opts.insertGate;
         lookups.push(params);
         return { rows: [] };
       }
@@ -96,6 +99,8 @@ export interface HarnessOptions {
   now?: () => number;
   enqueueResult?: Awaited<ReturnType<EnrichmentEnqueuer['enqueue']>>;
   enqueueThrows?: boolean;
+  /** The job send waits for this before it answers (a slow queue). */
+  enqueueGate?: Promise<unknown>;
   limiter?: LookupServiceDeps['rateLimiter'];
   /** Builds the step-1 translator from the Google mock; default is the Google engine (LOOKUP_FAST_TRANSLATOR=google). */
   translator?: (google: HarnessGoogle) => FastTranslator;
@@ -113,6 +118,7 @@ export function makeHarness(opts: HarnessOptions = {}): Harness {
   const fd = jest.fn(opts.fd ?? (async () => fdFound(realFdEntry('hello'))));
   const enqueue = jest.fn(async () => {
     if (opts.enqueueThrows) throw new Error('queue down');
+    if (opts.enqueueGate) await opts.enqueueGate;
     return opts.enqueueResult ?? { status: 'queued' as const };
   });
   const logs: Record<string, unknown>[] = [];

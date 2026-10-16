@@ -47,6 +47,8 @@ export interface LookupApp {
   upstream(): UpstreamClients;
   /** POST /api/v1/ebooks/:id/lookup */
   lookup(word: string, opts?: { token?: string; paragraphId?: string }): Promise<import('supertest').Response>;
+  /** Waits for what the service does AFTER an answer (the job send, the word_lookups insert; spec 1.5). */
+  settle(): Promise<void>;
   /** Waits until `fn` returns something truthy. */
   waitFor<T>(fn: () => Promise<T | false | null | undefined>, what: string, timeoutMs?: number): Promise<T>;
   close(): Promise<void>;
@@ -210,6 +212,7 @@ export async function bootLookupApp(opts: BootOptions = {}): Promise<LookupApp> 
         .set('Authorization', `Bearer ${o.token ?? user.token}`)
         .send({ word, ...(o.paragraphId ? { paragraph_id: o.paragraphId } : {}) }),
     waitFor,
+    settle: () => lookupModule.getWordLookupService().idle(),
     async close() {
       await new Promise((r) => setTimeout(r, 300)); // let the fire-and-forget inserts of the last lookup finish
       try {

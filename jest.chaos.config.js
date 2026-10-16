@@ -9,6 +9,6 @@ const base = require('./jest.config');
 module.exports = {
   ...base,
   testMatch: ['**/tests/chaos/**/*.chaos.test.ts'],
-  testPathIgnorePatterns: ['/node_modules/'],
+  testPathIgnorePatterns: ['/node_modules/', '<rootDir>/.claude/'],
   testTimeout: 180000,
 };

@@ -10,7 +10,7 @@ Các test nằm ở `tests/chaos/*.chaos.test.ts`, **không** chạy trong `npm 
 | | Free Dictionary 429 (có và không có `Retry-After`) | trả 200 `partial` (G và FDerr), ghi `fd: error:rate_limited`; ba lỗi liên tiếp mở **mạch của nó** còn mạch Google đóng |
 | | Hết token bucket nội bộ (`FREE_DICTIONARY_MAX_REQUESTS_PER_5MIN=3`) | request thứ tư trở đi **không ra ngoài**, kết quả `partial`, `fd: error:local_rate_limit`, mạch không bị đụng tới |
 | | Hết ngân sách ký tự Google (999 / 1000) | bản tạm thiếu nghĩa tiếng Việt, **Google không được gọi**, bộ đếm không bị trừ, mạch không mở; từ Free Dictionary cũng không biết thì 404 |
-| | Vượt trần job ngày (`ENRICHMENT_MAX_JOBS_PER_DAY=2`) qua enqueuer thật | từ thứ ba: `enrichment: { status: "skipped", reason: "daily_cap" }`, không có job; câu trả lời tra từ vẫn đầy đủ |
+| | Vượt trần job ngày (`ENRICHMENT_MAX_JOBS_PER_DAY=2`) qua enqueuer thật | từ thứ ba: response vẫn `enrichment: { status: "queued" }` (quyết định trước khi gửi, từ spec 1.5), không có job, log `lookup_enrich` ghi `skipped / daily_cap`; câu trả lời tra từ vẫn đầy đủ |
 | | Datamuse trả 503, 429, treo (hết thời gian), HTML | job **vẫn `succeeded`**, bản nháp chỉ thiếu ứng viên đồng/trái nghĩa; Datamuse bình thường thì có ứng viên |
 | `anthropic.chaos.test.ts` | 429 có `retry-after: 2` | worker **chờ** đủ thời gian đó (rồi backoff của pg-boss) trước khi thử lại; ngay lần thử hai thành công; khoảng cách hai lần gọi ≥ 2 s |
 | | 429 không `retry-after`; 529 hai lần | thử lại bằng backoff; lần thứ ba thành công |

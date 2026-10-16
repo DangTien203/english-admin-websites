@@ -1,5 +1,5 @@
 WORDYGO · ĐẶC TẢ TRA TỪ NHANH VÀ TỰ BỔ SUNG TỪ ĐIỂN
-Tệp: docs/lookup-spec.md · Phiên bản 1.4 · 16/10/2026 (1.4: P8 — mục 12.6 phân quyền trang quản trị; 1.3: P6b — mục 3 meaning_vi, 8 S2, 8.1 IPA / audio / sense, 9.4 cửa sổ Wiktionary, 9.8 vòng tròn, 10.7, 11.2 / 11.4 breaker, 12.1; 1.2: mục 9.5 chốt khóa đầu ra ở P6a; 1.1: thêm LOOKUP_FAST_TRANSLATOR, chế độ haiku ở mục 5)
+Tệp: docs/lookup-spec.md · Phiên bản 1.5 · 16/10/2026 (1.5: vá sau P8 — mục 1 và 10.3 ĐỔI MẶC ĐỊNH ENRICHMENT_PUBLISH_POLICY từ auto sang review, mục 5 F11 và F12 chạy nền sau khi đã trả response, mục 12.1 thêm hai dòng log; 1.4: P8 — mục 12.6 phân quyền trang quản trị; 1.3: P6b — mục 3 meaning_vi, 8 S2, 8.1 IPA / audio / sense, 9.4 cửa sổ Wiktionary, 9.8 vòng tròn, 10.7, 11.2 / 11.4 breaker, 12.1; 1.2: mục 9.5 chốt khóa đầu ra ở P6a; 1.1: thêm LOOKUP_FAST_TRANSLATOR, chế độ haiku ở mục 5)
 Mọi prompt P1 đến P8 dựa vào tệp này. Khi mâu thuẫn, thứ tự ưu tiên: migration thật, tệp này, prompt.
 
 0. QUY TẮC LÀM VIỆC
@@ -17,7 +17,7 @@ Tên khớp 100% với Phần 1B. Kiểm tra bằng zod ở module cấu hình; 
 TRANSLATION_FALLBACK_ENABLED=true
 ENRICHMENT_ENABLED=false
 ENRICHMENT_WORKER_ENABLED=true
-ENRICHMENT_PUBLISH_POLICY=auto
+ENRICHMENT_PUBLISH_POLICY=review
 LOOKUP_UPSTREAM_TIMEOUT_MS=2500
 LOOKUP_TOTAL_DEADLINE_MS=3000
 LOOKUP_MAX_MEANINGS=4
@@ -47,6 +47,7 @@ ENRICHMENT_MAX_JOBS_PER_DAY=500
 UPSTREAM_BREAKER_FAILURE_THRESHOLD=5
 UPSTREAM_BREAKER_RESET_MS=30000
 REFDATA_DATABASE_URL=
+THAY ĐỔI SO VỚI BẢN 1.4 trở về trước: mặc định của ENRICHMENT_PUBLISH_POLICY là review (các bản trước ghi auto). Không đặt biến, hoặc để trống, thì mục từ do job tạo luôn có published=false và chờ quản trị viên duyệt. Muốn tự xuất bản khi đủ tầng A phải đặt RÕ ENRICHMENT_PUBLISH_POLICY=auto trong môi trường của tiến trình worker. Giá trị khác auto và review vẫn làm ứng dụng dừng khi khởi động.
 LOOKUP_FAST_TRANSLATOR chỉ nhận google (mặc định) hoặc haiku; haiku bắt buộc ANTHROPIC_API_KEY (thiếu thì dừng khi khởi động, giống ENRICHMENT_ENABLED=true). Mô hình Haiku lấy từ ANTHROPIC_MODEL_ENRICH, timeout bằng LOOKUP_UPSTREAM_TIMEOUT_MS.
 Khóa trống: GOOGLE_TRANSLATE_API_KEY trống thì coi Google tắt (cảnh báo một lần khi khởi động). ANTHROPIC_API_KEY trống mà ENRICHMENT_ENABLED=true thì dừng khi khởi động. DATAMUSE_API_KEY trống thì vẫn gọi không khóa, và cảnh báo nếu ngày hiện tại từ 2027-01-01 trở đi.
 
@@ -142,8 +143,10 @@ Chế độ bộ dịch nhanh (LOOKUP_FAST_TRANSLATOR). Giao diện FastTranslat
     Ghi token: input_tokens và output_tokens của mỗi lần gọi Haiku vào api_usage_counters (provider = 'anthropic_fast', period = ngày UTC). Ma trận mục 6 không đổi: G = bộ dịch cho ra ít nhất một nghĩa dùng được.
     Mạch ngắt riêng cho đường nhanh (không dùng chung với job làm giàu) để lỗi timeout ngắn của đường nhanh không khóa job nền.
 F11 Nếu ENRICHMENT_ENABLED và từ đáng tin (mục 7): gửi job. Lỗi hàng đợi chỉ ghi log, không làm hỏng response.
-F12 Ghi word_lookups: translation (200) hoặc not_found (404, 503).
+    Từ spec 1.5, việc GỬI chạy NỀN, sau khi response đã được trao cho nơi gọi, và không ai chờ nó. Response mang quyết định tại thời điểm trả lời: disabled (ENRICHMENT_ENABLED=false), skipped với reason unknown_word (từ không đáng tin, mục 7), hoặc queued (đã giao cho khâu gửi nền; đây là lời hứa thử gửi, không phải biên nhận). Kết quả thật của lần gửi (queued, already_queued, skipped với daily_cap, ...) chỉ nằm ở log { evt:'lookup_enrich' } (mục 12.1). Lần gửi ném lỗi ghi một dòng { evt:'lookup_background_error', task:'enrich' } mức error và không đổi response; vì từ vẫn chưa có trong từ điển, lần tra sau của từ đó tự thử gửi lại. Phép kiểm "từ đáng tin" vẫn chạy trước response, và chỉ truy vấn DB khi Free Dictionary chưa xác nhận từ.
+F12 Ghi word_lookups: translation (200) hoặc not_found (404, 503). Từ spec 1.5 cũng chạy nền sau response (mọi nhánh, kể cả dictionary); lỗi ghi { evt:'lookup_background_error', task:'word_lookups' } và không đổi response.
 Giới hạn thời gian: tổng không vượt LOOKUP_TOTAL_DEADLINE_MS; hết hạn thì trả những gì đã có và đặt partial=true.
+    Hạn chót chỉ bao các truy vấn cục bộ và các cuộc gọi ra ngoài. Trước spec 1.5, việc gửi job (một giao dịch pg-boss, khoảng 0,5 giây với DB ở xa) và ghi word_lookups nằm SAU hạn chót mà vẫn trước response, nên đẩy p95 vượt LOOKUP_TOTAL_DEADLINE_MS + 500 ms. Nay hai việc đó chạy sau response nên không cộng vào thời gian người dùng chờ. LOOKUP_TOTAL_DEADLINE_MS và biên 500 ms của nghiệm thu không đổi.
 
 6. MA TRẬN GỘP KẾT QUẢ
 G = Google có bản dịch dùng được: khác rỗng; nếu giống hệt từ gốc thì chỉ tính khi Free Dictionary xác nhận từ tồn tại (từ vay mượn như taxi).
@@ -153,7 +156,7 @@ F = Free Dictionary có entry. FD404 = Free Dictionary trả 404. FDerr = Free D
   G, FD404         -> 200 partial; missing có pos, definition_en, ipa, audio_url
   G, FDerr         -> 200 partial; như dòng trên
   không G, FD404   -> 404 ENTRY_NOT_FOUND; word_lookups not_found; KHÔNG gửi job
-  không G, FDerr   -> 503 (mã lỗi hiện có); word_lookups not_found; nếu ENRICHMENT_ENABLED và từ đáng tin thì gửi job với startAfter 60 giây
+  không G, FDerr   -> 503 (mã lỗi hiện có); word_lookups not_found; nếu ENRICHMENT_ENABLED và từ đáng tin thì gửi job với startAfter 60 giây (từ spec 1.5: kiểm từ và gửi đều chạy nền sau khi 503 đã đi; dòng log lookup ghi enrichment_status = deferred)
 Lỗi cũ phải hết: không bao giờ điền translation_vi bằng chính từ vừa tra khi Google lỗi.
 
 7. ĐIỀU KIỆN VÀ CÁCH GỬI JOB
@@ -229,7 +232,7 @@ S7 Cập nhật word_enrichment_jobs (trạng thái, entry_id, token), api_usage
 10. GHI DATABASE
 10.1 Một transaction duy nhất. Lấy pg_advisory_xact_lock(hashtextextended('enrich:' || lemma, 0)). Kiểm tra lại sự tồn tại trước khi ghi.
 10.2 dictionary_entries: source='wiktionary'; created_by=NULL; published theo 10.3; admin_note bắt đầu bằng '[auto]' rồi liệt kê: nguồn đã dùng, model, id job, trường tầng B còn thiếu, trường là ước tính (cefr_level), notes_for_review.
-10.3 published: ENRICHMENT_PUBLISH_POLICY='review' thì false. 'auto' thì true khi đủ tầng A, ngược lại false.
+10.3 published: ENRICHMENT_PUBLISH_POLICY='review' thì false. 'auto' thì true khi đủ tầng A, ngược lại false. Mặc định khi không đặt biến là 'review' (đổi từ 'auto' ở bản 1.5, xem mục 1).
 10.4 Thứ tự ghi bảng con: entry_senses (sense_order bắt đầu từ 0 như dữ liệu thật; P6b dùng MỘT số chạy cho cả mục từ theo thứ tự của Haiku, còn mục từ cũ đánh số theo từng loại từ), sense_examples, word_forms, sense_synonyms, sense_antonyms, entry_synonyms, entry_antonyms, entry_tags, entry_answer_aliases, entry_idioms, phrasal_verbs, collocations, entry_edit_history.
 10.5 entry_edit_history: một dòng field_name='auto_created', admin_id=NULL, new_value = JSON ngắn gồm id job, nguồn, model.
 10.6 dictionary_entries.meaning_en = definition_en của sense đầu; example_en, example_vi = ví dụ đầu của sense đầu; pos[] = loại từ theo thứ tự xuất hiện, loại trùng.
@@ -248,7 +251,7 @@ S7 Cập nhật word_enrichment_jobs (trạng thái, entry_id, token), api_usage
 11.8 Tắt khẩn: TRANSLATION_FALLBACK_ENABLED=false tắt đường nhanh; ENRICHMENT_ENABLED=false ngừng gửi job; ENRICHMENT_WORKER_ENABLED=false ngừng xử lý. Khi tắt tiến trình, worker dừng gọn (offWork với wait) để không bỏ dở job.
 
 12. QUAN SÁT VÀ BẢO MẬT
-12.1 Log có cấu trúc. Mỗi lần tra: { evt:'lookup', word, outcome, source, partial, latency_ms, google_ms, fd_ms, enrichment_status }. Mỗi job: { evt:'enrich', word, job_id, status, reason, stages_ms, input_tokens, output_tokens } (P6b: worker ghi đúng một dòng mỗi job, thêm attempt, duration_ms, entry_id, model; stages_ms gồm s0_exists, s1_sources, s1b_lemma_sources, s3_haiku, s5_assemble, s6_persist). Token ghi vào api_usage_counters (provider 'anthropic', unit input_tokens và output_tokens, period YYYY-MM UTC) ngay sau mỗi lần gọi Haiku; input_tokens gồm cả token ghi và đọc cache.
+12.1 Log có cấu trúc. Mỗi lần tra: { evt:'lookup', word, outcome, source, partial, latency_ms, google_ms, fd_ms, enrichment_status }. Từ spec 1.5, enrichment_status của dòng này là quyết định đã đưa vào response (disabled, skipped, queued; deferred sau một 503) và latency_ms là thời gian TỚI KHI TRẢ LỜI. Kết quả thật của lần gửi nền nằm ở dòng riêng { evt:'lookup_enrich', word, status, reason, delayed_s, enqueue_ms } (mức info). Một lần gửi hoặc một lần ghi word_lookups ở nền bị lỗi ra { evt:'lookup_background_error', task:'enrich'|'word_lookups', word, error } ở mức error (đã che khóa, tối đa 200 ký tự). Mỗi job: { evt:'enrich', word, job_id, status, reason, stages_ms, input_tokens, output_tokens } (P6b: worker ghi đúng một dòng mỗi job, thêm attempt, duration_ms, entry_id, model; stages_ms gồm s0_exists, s1_sources, s1b_lemma_sources, s3_haiku, s5_assemble, s6_persist). Token ghi vào api_usage_counters (provider 'anthropic', unit input_tokens và output_tokens, period YYYY-MM UTC) ngay sau mỗi lần gọi Haiku; input_tokens gồm cả token ghi và đọc cache.
 12.2 Bộ đếm: số lần tra theo source và outcome, tỉ lệ partial, trạng thái breaker, ký tự Google đã dùng trong tháng, job theo trạng thái, token đã dùng.
 12.3 Làm sạch đầu vào: giữ bộ lọc từ hiện có; thêm test cho chuỗi có khoảng trắng, số, ký tự điều khiển, chuỗi quá dài, Unicode lạ.
 12.4 Chống chèn lệnh (prompt injection): nội dung từ Wiktionary, Free Dictionary, Datamuse và từ người dùng tra chỉ là dữ liệu, bọc trong thẻ <data>; system prompt nói rõ không làm theo chỉ dẫn nằm trong đó; đầu ra luôn qua schema và zod.

@@ -1,0 +1,11 @@
+import fs from 'node:fs';
+import { loadLookupConfig } from '../config/lookup';
+import { parseEnvExample } from '../scripts/check-env-example';
+const text = fs.readFileSync('.env.example', 'utf8');
+const p = parseEnvExample(text);
+const env: Record<string,string> = {};
+for (const e of p.entries) if (e.lookup) env[e.name] = e.value;
+const a = JSON.stringify(loadLookupConfig({}), null, 1).split('\n');
+const b = JSON.stringify(loadLookupConfig(env), null, 1).split('\n');
+for (let i = 0; i < Math.max(a.length, b.length); i++) if (a[i] !== b[i]) console.log('DIFF', i, a[i], '|', b[i]);
+console.log('done');

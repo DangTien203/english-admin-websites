@@ -13,6 +13,7 @@ import 'dotenv/config';
 import type { AddressInfo } from 'node:net';
 import app from '../../app';
 import pool from '../../config/db';
+import { stopBoss } from '../../services/queue';
 
 if (process.env.NODE_ENV === 'production') {
   console.error('the load-test app runner is not for production');
@@ -43,6 +44,7 @@ process.on('message', async (message: { type?: string; n?: number }) => {
   } else if (message?.type === 'shutdown') {
     server.close();
     server.closeAllConnections();
+    await stopBoss(3000).catch(() => undefined); // only started when the scenario sends jobs (ENRICHMENT_ENABLED=true)
     await pool.end().catch(() => undefined);
     process.exit(0);
   }

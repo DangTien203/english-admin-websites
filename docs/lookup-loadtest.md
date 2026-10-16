@@ -1,6 +1,6 @@
 # WordyGo · Tải, hiệu năng truy vấn và máy chủ giả (P7)
 
-Đo ngày 15/10/2026 · Node v24.14, Windows 11 · DB: Neon ở Singapore (`ep-divine-field-…ap-southeast-1`), **gọi từ máy dev, không cùng vùng với DB** · Đặc tả: `docs/lookup-spec.md` §5 F6, F7, F8, §11, §12.
+Đo ngày 15/10/2026; mục 2.6 (kịch bản D, sau khi việc gửi job chạy sau response) đo ngày 16/10/2026 · Node v24.14, Windows 11 · DB: Neon ở Singapore (`ep-divine-field-…ap-southeast-1`), **gọi từ máy dev, không cùng vùng với DB** · Đặc tả: `docs/lookup-spec.md` §5 F6, F7, F8, §11, §12.
 
 > **Đọc phần 0 trước.** DB dev nằm xa máy chạy (một câu `SELECT 1` mất **72 ms**; pool mặc định 10 kết nối cho ~**56 câu truy vấn/giây**). Mỗi lần tra tốn khoảng 4 đến 5 câu truy vấn, nên môi trường này chặn ở khoảng **11 lần tra mỗi giây**, rất xa mức của một máy chủ đặt cạnh DB. Các số tuyệt đối về độ trễ dưới đây phản ánh **DB từ xa**, không phản ánh mã. Phần mã (single-flight, giới hạn F6, bộ nhớ, số request ra ngoài) được kiểm tra riêng và không phụ thuộc vào điều đó.
 
@@ -11,6 +11,7 @@
 | Single-flight: 200 request đồng thời cùng một từ mới | **Đúng 1 request Google và 1 request Free Dictionary** (mục 2.2). Kịch bản chính (nguồn chậm 10 s) và mọi vòng đo ở mục 2.1 đều cho đúng 1 chuyến bay cho từ chung khi DB không làm các request đến rời rạc |
 | Giới hạn F6 (`LOOKUP_MISS_RATE_LIMIT_PER_MIN=20`) | **20 lần miss được nhận, 5 lần sau bị 429** `LOOKUP_RATE_LIMITED`, `Retry-After: 60`; request bị từ chối **không tới** Free Dictionary; người dùng khác không bị ảnh hưởng (mục 2.3) |
 | p50 / p95 | Phụ thuộc DB: **2,0 đến 3,0 s / 2,0 đến 3,0 s** với tải mà DB từ xa chịu được (45 request/vòng); 8,8 đến 13 s với đúng tải đề bài (250 request/vòng) vì **hàng chờ kết nối DB** (mục 2.1). Thời gian riêng của các nguồn ngoài: ~0,4 s (bước 1) |
+| p50 / p95 khi việc gửi job chạy SAU response (kịch bản D, 16/10/2026) | **855 đến 880 ms / 893 đến 902 ms**, so với **1.275 / 1.426 ms** của mã cũ đo trong cùng điều kiện (gửi job thật vào pg-boss, 30 từ mới, nguồn ngoài giả trễ 300 ms). Mức giảm bằng đúng thời gian một lần gửi (320 đến 410 ms). Chi tiết ở mục 2.6 |
 | Heap trước và sau | **Không tăng**: 36,7 → 38,9 → 37,6 MB (2 vòng × 250 request); thay đổi từ −1,0 đến +1,7 MB trong ba lần chạy đo (mục 2.4) |
 | Lỗi tìm thấy khi đo | **Hai lỗi thật** (đã vá, có test): bộ làm sạch từ bậc hai (một thân 1 MB chặn máy chủ hàng chục phút), và truy vấn F4 / S0 không dùng được chỉ mục `lower()` (42 đến 56 ms mỗi lần tra ở 200.000 mục từ). Chi tiết ở `docs/lookup-audit.md` mục 4 |
 | EXPLAIN | Mọi truy vấn trên đường tra dưới 1 ms; sau khi sửa F4 và S0, **dùng đủ** `lower(headword)`, `lower(lemma)`, `lower(form_value)`, chỉ mục `word` của `ref_wiktionary_en`. **Không cần migration chỉ mục mới** (mục 3) |
@@ -82,12 +83,15 @@ npm run loadtest:lookup                                  # đúng đề bài: 20
 npm run loadtest:lookup -- --same 30 --distinct 15       # tải nhỏ hơn
 npm run loadtest:lookup -- --deadline 60000              # nới LOOKUP_TOTAL_DEADLINE_MS của ứng dụng trong kịch bản A
 npm run loadtest:lookup -- --skip-slow --json out.json   # bỏ kịch bản B (chờ ~20 s), ghi thêm JSON
+npm run loadtest:lookup -- --only-send                   # chỉ kịch bản D (khoảng 1 đến 2 phút, phần lớn là pg-boss tạo schema riêng)
+npm run loadtest:lookup -- --skip-send                   # bỏ kịch bản D
 ```
 
 | Kịch bản | Làm gì | Kiểm tra (in PASS/FAIL; mã thoát 1 nếu có FAIL) |
 |---|---|---|
 | **A** nền | 200 request cùng một từ mới **cùng lúc**, cộng 50 từ khác nhau rải đều trong 10 s, nguồn ngoài trễ 300 ms, lặp `--rounds` vòng | mọi request 200 và đầy đủ; mọi request ra ngoài thuộc đúng một chuyến bay (FD = đầu từ = định nghĩa = số chuyến bay); 200 = chuyến bay + người nhập chung; mỗi từ khác chỉ tới Free Dictionary đúng 1 lần; heap không tăng bất thường |
 | **B** single-flight | 200 request cùng một từ mới, trong khi chuyến bay duy nhất kéo dài 10 s (mọi request tới trong lúc đó); `LOOKUP_TRANSLATE_DEFINITIONS=false` để "một request Google" là nghĩa đen | Free Dictionary nhận **đúng 1**, Google nhận **đúng 1**; log của ứng dụng: 1 chuyến bay + 199 người nhập chung |
+| **D** trả lời và gửi job | `--send` từ mới (mặc định 30) lần lượt từng từ, `ENRICHMENT_ENABLED=true` với bộ gửi pg-boss THẬT trong schema riêng `lt_<mã>` (không worker nên không job nào được xử lý), nguồn ngoài giả trễ `--latency` ms | mọi câu 200 đầy đủ và `enrichment.status = "queued"`; mọi từ có hàng trong sổ job (việc gửi nền có chạy); mọi lần gửi nền ra `queued`; thời gian trả lời nhỏ hơn "trả lời cộng thời gian gửi". Dọn xong: hàng sổ job, ô đếm job của ngày (`api_usage_counters`), schema `lt_<mã>` |
 | **C** F6 | một người dùng hỏi 25 từ mới cùng lúc | đúng 20 được nhận, 5 bị 429 với `Retry-After` nguyên từ 1 đến 60; request bị từ chối không tới nguồn ngoài; request tiếp theo vẫn 429; người dùng khác không bị ảnh hưởng |
 
 Tiến trình cha còn lấy mẫu hàng chờ của pool DB (`waitingCount`) mỗi 400 ms và đợi pool "xả" (các câu `INSERT word_lookups` / `words_looked_up` chạy ngầm) giữa các giai đoạn.
@@ -166,6 +170,30 @@ RSS 112 đến 142 MB, tăng nhẹ rồi phẳng. Ngưỡng của kịch bản: 
 
 * **Khởi động nguội + dồn dập.** Lần chạy đầu (chưa làm ấm pool) cho 200 request: nhiều request mất ~30 s, có cả 401 và 503. Mở đồng thời hơn mười kết nối TLS mới tới Neon làm Neon chậm/hủy. Kịch bản làm ấm pool (`app-runner.ts`, tin nhắn `warm`) trước khi đo; trên thực tế sau mỗi lần triển khai nên có bước làm ấm hoặc tăng dần.
 * **`requireApiAuth` biến mọi lỗi DB thành `401 INVALID_TOKEN`** (`middlewares/apiAuth.ts`, khối `catch`). Khi DB chậm hoặc rớt kết nối, ứng dụng di động thấy "token không hợp lệ", dễ hiểu thành đăng xuất. Nên trả 503 cho lỗi không phải JWT. Không sửa ở đây vì đổi hành vi của mọi endpoint.
+
+### 2.6 Kịch bản D: thời gian trả lời khi việc gửi job và ghi `word_lookups` chạy sau response (16/10/2026)
+
+**Vì sao.** Lần nghiệm thu 15/10/2026 cho p95 nhóm C, D, E, H là **3.756 ms**, vượt `LOOKUP_TOTAL_DEADLINE_MS + 500` = 3.500 ms. Hạn chót 3.000 ms chỉ bao truy vấn cục bộ và các cuộc gọi ra ngoài; việc gửi job (một giao dịch pg-boss, khoảng 0,4 giây với DB ở Singapore) và việc ghi `word_lookups` nằm sau hạn chót mà vẫn trước response. Từ spec 1.5 hai việc đó chạy **sau** response (`docs/lookup-spec.md` mục 5 F11, F12). `LOOKUP_TOTAL_DEADLINE_MS` và biên 500 ms không đổi.
+
+**Cách đo.** 30 từ mới, từng từ một (tuần tự, để số đo là chi phí của mã và của các vòng gọi DB, không phải hàng chờ kết nối), `ENRICHMENT_ENABLED=true`, bộ gửi pg-boss thật trong schema riêng, nguồn ngoài giả trễ 300 ms, DB là Neon ở Singapore gọi từ máy dev. Cột "mã cũ" là kết quả đo THẲNG: đặt tạm tệp `services/lookup/lookupService.ts` của commit HEAD vào cây làm việc, chạy `npm run loadtest:lookup -- --only-send --send 30`, rồi trả tệp mới về chỗ cũ.
+
+| | n | p50 | p95 | max |
+|---|---|---|---|---|
+| **Mã cũ** (gửi job TRƯỚC response), đo thẳng | 30 | 1.275 ms | 1.426 ms | 1.601 ms |
+| **Mã mới**, lần chạy 1 | 30 | **855 ms** | **893 ms** | 917 ms |
+| mã mới, lần 1, cộng thời gian gửi (`enqueue_ms` trong log `lookup_enrich`) = người dùng đã phải chờ bao lâu nếu việc gửi đứng trước | 30 | 1.270 ms | 1.303 ms | 1.327 ms |
+| riêng việc gửi job, lần 1 | 30 | 410 ms | 425 ms | 439 ms |
+| **Mã mới**, lần chạy 2 (bản cuối, có gộp các lần gửi cùng từ) | 30 | **880 ms** | **902 ms** | 934 ms |
+| mã mới, lần 2, cộng thời gian gửi | 30 | 1.206 ms | 1.243 ms | 1.253 ms |
+| riêng việc gửi job, lần 2 | 30 | 320 ms | 349 ms | 354 ms |
+
+Đọc: p50 giảm khoảng 400 ms (−31 đến −33%) và p95 khoảng 520 ms (−37%), khớp với thời gian một lần gửi. Hai cách ước (đo thẳng mã cũ, và "mã mới cộng thời gian gửi") cho cùng một con số trong sai số của Neon (1.275 so với 1.206 đến 1.270). Mọi kiểm tra của kịch bản đạt (30 câu 200 đầy đủ, `enrichment.status = "queued"`, 33 hàng sổ job cho 33 từ kể cả 3 từ làm ấm, mọi lần gửi nền `queued`), cả hai lần chạy của mã mới.
+
+**Trên nghiệm thu thật** (nguồn ngoài thật, Free Dictionary chập chờn khiến nhiều từ chạm hết hạn chót 3.000 ms): p95 của C, D, E, H là **3.389 ms** và **3.432 ms** ở hai lần chạy ngày 16/10, nằm trong giới hạn 3.500 ms (trước đó 3.756 ms). Phần vượt hạn chót của câu chậm nhất giảm từ ~756 ms xuống ~390 đến 430 ms, tức bớt đúng một lần gửi job; còn lại là truy vấn cục bộ, xác thực và HTTP. Xem `docs/lookup-acceptance-report.md`.
+
+**Kiểm tra không thụt lùi ở tải** (`--same 30 --distinct 15 --skip-slow`, cấu hình mặc định, 16/10/2026, bản cuối): 21 trên 21 kiểm tra đạt. 30 cùng một từ cộng 15 từ khác: p50 1.529 / 1.508 ms, p95 1.535 / 1.512 ms (hai vòng); hàng chờ DB cao nhất 50 và 49; 1 chuyến bay + 29 người nhập chung, Free Dictionary và Google mỗi nơi nhận đúng 1 request cho từ chung ở cả hai vòng; F6 đúng 20 nhận và 5 bị 429; heap +1,6 MB sau hai vòng (vòng cuối +0,3 MB). Con số này **không so sánh được** với mục 2.1 lần 3 (3.021 / 2.041 ms): hôm đó và hôm nay DB ở xa chậm khác nhau, và kịch bản A chạy với `ENRICHMENT_ENABLED=false` nên không có việc gửi job; chỉ kết luận được là không có hồi quy (kiểm tra đạt, hàng chờ DB không tăng).
+
+**Điều cần biết.** Trước đây việc gửi job nằm trong request nên số request chạy việc đó cùng lúc bị chặn bởi số request đang chạy. Nay không còn chặn: một đợt tra dồn dập tạo ra các lần gửi cùng lúc, tranh kết nối với những lần tra tiếp theo. Hai biện pháp có trong mã: (1) mỗi tiến trình chỉ chạy **một** lần gửi cho mỗi từ tại một thời điểm (trăm request chung một chuyến bay không còn thành trăm giao dịch pg-boss; hàng đợi vốn chỉ nhận một job mỗi từ), (2) khi tắt gọn (SIGTERM) tiến trình chờ tối đa 10 giây cho các việc nền đang chạy xong (`app.ts`, bước `lookup_background`). Chưa có giới hạn tổng số việc nền chạy cùng lúc: đó là mục "bộ giới hạn đồng thời" của khuyến nghị 2 ở mục 2.1, vẫn để bạn quyết.
 
 ## 3. EXPLAIN (ANALYZE, BUFFERS)
 

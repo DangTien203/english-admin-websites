@@ -1,0 +1,238 @@
+{
+  "args": {
+    "SAME": 30,
+    "DISTINCT": 15,
+    "WINDOW_S": 10,
+    "LATENCY_MS": 300,
+    "ROUNDS": 2
+  },
+  "node": "v24.14.0",
+  "report": {
+    "baseline": {
+      "latencyMs": 300,
+      "rounds": [
+        {
+          "round": 1,
+          "peakWaiting": 50,
+          "wallMs": 10211,
+          "same": {
+            "n": 30,
+            "p50": 1531,
+            "p95": 1535,
+            "p99": 1535,
+            "max": 1535,
+            "mean": 1531
+          },
+          "distinct": {
+            "n": 15,
+            "p50": 856,
+            "p95": 1573,
+            "p99": 1573,
+            "max": 1573,
+            "mean": 917
+          },
+          "all": {
+            "n": 45,
+            "p50": 1529,
+            "p95": 1535,
+            "p99": 1573,
+            "max": 1573,
+            "mean": 1326
+          },
+          "statuses": {
+            "200": 45
+          },
+          "sharedWord": {
+            "flights": 1,
+            "joined": 29,
+            "fd": 1,
+            "googleHeadline": 1,
+            "googleDefinitions": 1
+          }
+        },
+        {
+          "round": 2,
+          "peakWaiting": 49,
+          "wallMs": 10225,
+          "same": {
+            "n": 30,
+            "p50": 1510,
+            "p95": 1512,
+            "p99": 1513,
+            "max": 1513,
+            "mean": 1510
+          },
+          "distinct": {
+            "n": 15,
+            "p50": 875,
+            "p95": 1505,
+            "p99": 1505,
+            "max": 1505,
+            "mean": 923
+          },
+          "all": {
+            "n": 45,
+            "p50": 1508,
+            "p95": 1512,
+            "p99": 1513,
+            "max": 1513,
+            "mean": 1314
+          },
+          "statuses": {
+            "200": 45
+          },
+          "sharedWord": {
+            "flights": 1,
+            "joined": 29,
+            "fd": 1,
+            "googleHeadline": 1,
+            "googleDefinitions": 1
+          }
+        }
+      ],
+      "heapMB": [
+        {
+          "used": 37.4,
+          "total": 104.8,
+          "rss": 160.2
+        },
+        {
+          "used": 38.7,
+          "total": 42.4,
+          "rss": 127.5
+        },
+        {
+          "used": 39,
+          "total": 42.9,
+          "rss": 130.9
+        }
+      ]
+    },
+    "f6": {
+      "limit": 20,
+      "admitted": 20,
+      "answered": 20,
+      "refused": 5,
+      "retryAfter": [
+        "60"
+      ]
+    },
+    "jobSend": {
+      "latencyMs": 300,
+      "words": 30,
+      "answer": {
+        "n": 30,
+        "p50": 880,
+        "p95": 902,
+        "p99": 934,
+        "max": 934,
+        "mean": 883
+      },
+      "answerPlusSend": {
+        "n": 30,
+        "p50": 1206,
+        "p95": 1243,
+        "p99": 1253,
+        "max": 1253,
+        "mean": 1206
+      },
+      "sendAlone": {
+        "n": 30,
+        "p50": 320,
+        "p95": 349,
+        "p99": 354,
+        "max": 354,
+        "mean": 323
+      },
+      "statuses": {
+        "200": 30
+      }
+    }
+  },
+  "checks": [
+    {
+      "ok": true,
+      "text": "round 1: every request answered 200 ({\"200\":45})"
+    },
+    {
+      "ok": true,
+      "text": "round 1: every answer complete (partial=false)"
+    },
+    {
+      "ok": true,
+      "text": "round 1: every upstream request belongs to exactly one flight (FD 1 = headline 1 = definitions 1 = flights 1): no flight made a duplicate call"
+    },
+    {
+      "ok": true,
+      "text": "round 1: 30 requests = 1 flights + 29 joiners"
+    },
+    {
+      "ok": true,
+      "text": "round 1: each of the 15 different words reached Free Dictionary exactly once"
+    },
+    {
+      "ok": true,
+      "text": "round 2: every request answered 200 ({\"200\":45})"
+    },
+    {
+      "ok": true,
+      "text": "round 2: every answer complete (partial=false)"
+    },
+    {
+      "ok": true,
+      "text": "round 2: every upstream request belongs to exactly one flight (FD 1 = headline 1 = definitions 1 = flights 1): no flight made a duplicate call"
+    },
+    {
+      "ok": true,
+      "text": "round 2: 30 requests = 1 flights + 29 joiners"
+    },
+    {
+      "ok": true,
+      "text": "round 2: each of the 15 different words reached Free Dictionary exactly once"
+    },
+    {
+      "ok": true,
+      "text": "heap did not grow abnormally (1.6 MB in total, 0.3 MB in the last round; thresholds 40 / 15 MB)"
+    },
+    {
+      "ok": true,
+      "text": "exactly 20 misses admitted, the other 5 refused with 429 (got 20 and 5)"
+    },
+    {
+      "ok": true,
+      "text": "every 429 carries an integer Retry-After between 1 and 60 seconds"
+    },
+    {
+      "ok": true,
+      "text": "a refused request never reached Free Dictionary"
+    },
+    {
+      "ok": true,
+      "text": "one more miss from the same user is still 429"
+    },
+    {
+      "ok": true,
+      "text": "another user is not affected"
+    },
+    {
+      "ok": true,
+      "text": "the answer is faster than answer + send (p95 902 ms against 1243 ms)"
+    },
+    {
+      "ok": true,
+      "text": "every answer is 200 and complete"
+    },
+    {
+      "ok": true,
+      "text": "every answer says enrichment.status = \"queued\" ([\"queued\"])"
+    },
+    {
+      "ok": true,
+      "text": "every word reached the job ledger (33 rows for 33 words): the send really ran"
+    },
+    {
+      "ok": true,
+      "text": "every background send was queued (none already_queued / skipped / failed)"
+    }
+  ]
+}

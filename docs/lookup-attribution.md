@@ -1,6 +1,6 @@
 # WordyGo · Nguồn dữ liệu, giấy phép và ghi công (tra từ và làm giàu từ điển)
 
-Cập nhật 15/10/2026 (P7b). Tài liệu này ghi **những gì đã đọc được** về điều khoản của từng nguồn dữ liệu mà tính năng tra từ dùng, và **đề xuất nơi** ứng dụng có thể hiển thị ghi công để bạn quyết định.
+Cập nhật 16/10/2026 (vá sau P8: mục 2.5 nhãn nhà cung cấp, mục 4 và 5.7 Datamuse); lần đầu 15/10/2026 (P7b). Tài liệu này ghi **những gì đã đọc được** về điều khoản của từng nguồn dữ liệu mà tính năng tra từ dùng, và **đề xuất nơi** ứng dụng có thể hiển thị ghi công để bạn quyết định.
 
 **Nguyên tắc của tài liệu này**
 * Chỉ ghi điều đọc được từ phản hồi thật của dịch vụ, tệp LICENSE, hoặc trang chính thức, kèm nơi đọc và ngày đọc. Điều chưa đọc được ghi rõ là **chưa xác minh**.
@@ -39,9 +39,28 @@ Thư viện wordfreq (Python) chỉ chạy lúc xuất dữ liệu: `npm run ref
 |---|---|
 | API `source = "translation"` | `attribution[]` chỉ chứa Wiktionary-via-Free-Dictionary (tối đa 3 mục), và là mảng rỗng khi Free Dictionary không có dữ liệu. **Không có mục cho Google, Anthropic, Datamuse, wordfreq.** `providers[]` liệt kê `google_translate`, `free_dictionary_api`, `claude_haiku` (tùy trường hợp) |
 | API `source = "dictionary"` (mục từ đã có) | Không có trường ghi công |
-| App Flutter, popup tra từ (`wordygo/lib/features/ebook/widgets/word_lookup_popup.dart`) | Hiển thị một dòng chữ nhỏ: `Translated by Google` nếu có nhà cung cấp tên `google`, ngược lại `Auto-translated`. **Backend gửi `google_translate`, không phải `google`**, nên điều kiện không bao giờ đúng và dòng luôn là `Auto-translated`. App không đọc trường `attribution` |
+| App Flutter, popup tra từ (`wordygo/lib/features/ebook/widgets/word_lookup_popup.dart`) | Hiển thị một dòng chữ nhỏ: `Translated by Google` nếu có nhà cung cấp tên `google`, ngược lại `Auto-translated`. **Backend gửi `google_translate`, không phải `google`**, nên điều kiện không bao giờ đúng và dòng luôn là `Auto-translated`. App không đọc trường `attribution`. Hai giá trị và nơi cần sửa: mục 2.5 |
 | App Flutter, màn hình giới thiệu / giấy phép | Không thấy màn nào (không có `showAboutDialog`, `showLicensePage` hay mục tương tự trong `wordygo/lib`; màn cài đặt có ở `lib/features/profile/screens/settings_screen.dart`) |
 | Âm thanh | Không lưu tác giả hay giấy phép của tệp âm thanh |
+
+### 2.5 Nhãn nhà cung cấp: backend gửi gì, app so khớp gì, sửa ở đâu
+
+Kiểm ngày 16/10/2026 bằng đọc mã của hai bên (`grep` trên `english-admin-websites` và `wordygo/lib`).
+
+| | Giá trị | Nơi |
+|---|---|---|
+| **Backend đang gửi** cho Google Translate | `google_translate` | `services/lookup/merge.ts` (hàm `composeTemporary`, dòng `providers.push('google_translate')`): có khi Google dịch từ gốc (chế độ `LOOKUP_FAST_TRANSLATOR=google`) **hoặc** khi bước 2 (dịch định nghĩa) đã chạy. Đường cũ `services/wordTranslationService.ts` (dòng `providers.push('google_translate')`, và cả hàng đã lưu trong bảng cache) gửi cùng giá trị |
+| **App đang so khớp** | `google` | `wordygo/lib/features/ebook/widgets/word_lookup_popup.dart`, getter `_attribution`: `providers.any((p) => p.toLowerCase() == 'google')` |
+
+`google_translate` khác `google`, nên điều kiện không bao giờ đúng: mọi bản dịch tạm đều hiện `Auto-translated`, kể cả khi bản dịch chính là của Google.
+
+**Backend KHÔNG đổi giá trị** (quy tắc của đặc tả mục 0.3: response chỉ được THÊM trường, không đổi tên hay giá trị, vì app cũ đang chạy và `docs/lookup-api.md` đã ghi `google_translate`). Việc sửa nhãn nằm ở **app**. Những chỗ cần sửa, và chỉ những chỗ này (đã tìm hết trong `wordygo/lib`):
+
+1. `lib/features/ebook/widgets/word_lookup_popup.dart`, getter `_attribution` (khoảng dòng 478 đến 484): đổi so khớp `== 'google'` thành `== 'google_translate'`. Đây là chỗ DUY NHẤT đọc `providers`.
+2. Cũng ở getter đó, **xử lý `claude_haiku`**: khi `LOOKUP_FAST_TRANSLATOR=haiku`, `translation_vi` đến từ Claude còn `providers` vẫn có `google_translate` (vì bước 2 dịch định nghĩa vẫn dùng Google). Nếu chỉ sửa theo ý 1, dòng `Translated by Google` sẽ hiện cho một bản dịch của Claude, là sai sự thật. Nên kiểm `claude_haiku` TRƯỚC (ví dụ nhãn "Dịch bởi AI") rồi mới tới `google_translate`. Ngoài ra `providers` chỉ có `free_dictionary_api` (Google lỗi, `translation_vi = null`) thì không được ghi Google.
+3. Không cần đổi `lib/features/ebook/models/word_lookup_result.dart` (dòng 101, 114) và `word_lookup_result.g.dart` (dòng 27, 28, 42): chúng chỉ mang chuỗi qua lại.
+
+Việc ghi công đầy đủ hơn (huy hiệu Google, Wiktionary từ `attribution[]`) là các đề xuất #1 và #2 ở mục 3, vẫn chờ bạn quyết định.
 
 ## 3. Đề xuất nơi hiển thị (để bạn chọn; chưa làm gì trong mã)
 
@@ -58,7 +77,8 @@ Khuyến nghị tối thiểu của tôi (chỉ là gợi ý, bạn quyết): #1
 
 ## 4. Mốc thời gian cần theo dõi
 
-* **Datamuse yêu cầu khóa API**: phần đầu trang nói từ **1/2/2027**, mục *Usage limits* của chính trang đó nói **1/1/2027** (mâu thuẫn tại thời điểm đọc). Mã dùng ngày an toàn hơn, 1/1/2027, để cảnh báo. Chi tiết: `docs/lookup-runbook.md` mục 11.2.
+* **Datamuse yêu cầu khóa API**: phần đầu trang nói từ **1/2/2027**, mục *Usage limits* của chính trang đó nói **1/1/2027** (mâu thuẫn tại thời điểm đọc, đọc lại 16/10/2026 vẫn vậy). Mã dùng ngày an toàn hơn, 1/1/2027, để cảnh báo. Chi tiết: `docs/lookup-runbook.md` mục 11.2.
+* **Datamuse: trang chính thức vẫn KHÔNG nói cách gửi khóa** (đọc `https://www.datamuse.com/api/` ngày 16/10/2026, cả bản đã dựng lẫn HTML gốc): không có tên tham số truy vấn, tên header hay kiểu `Authorization`. Chỉ có hai câu: khóa "sẽ bắt buộc trong mọi request, giới hạn 100.000 request mỗi ngày mỗi khóa" và "nếu chưa có khóa, hãy liên hệ qua biểu mẫu phản hồi"; kèm một ghi chú ngày 5/10 của chủ trang nói đang xử lý dần các yêu cầu cấp khóa. Vì vậy `applyDatamuseAuth` (`services/upstream/datamuseClient.ts`) **được giữ nguyên là hàm rỗng**: đoán tên tham số rồi gửi khóa đi một nơi chưa được tài liệu hóa vừa có thể bị từ chối, vừa đưa khóa vào URL/header theo cách không ai cam kết.
 * **Google Cloud Translation**: Google nói hướng dẫn thương hiệu có thể đổi không báo trước; kiểm tra lại trang *Attribution Requirements* mỗi lần phát hành.
 
 ## 5. Điều cần bạn quyết hoặc xác minh (chưa kết luận)
@@ -69,7 +89,7 @@ Khuyến nghị tối thiểu của tôi (chỉ là gợi ý, bạn quyết): #1
 4. **Âm thanh Commons**: các tệp CC BY-SA yêu cầu ghi tác giả; app phát thẳng URL mà không hiển thị tác giả. Chọn phương án #4 nào (liên kết, hay lưu thêm tác giả)?
 5. **Free Dictionary**: dịch vụ không có điều khoản đọc được. Có chấp nhận dùng nó trong sản phẩm phát hành khi chưa có điều khoản không? (Job nền ưu tiên Wiktionary cục bộ nên có thể bỏ Free Dictionary khỏi đường làm giàu, chỉ giữ ở đường tra nhanh.)
 6. **Anthropic**: xác nhận tài khoản API thuộc điều khoản thương mại (mục B, D.3 đọc ở trên) và quyết định cách thông báo cho người dùng (#1 và #5 ở mục 3).
-7. **Datamuse**: xin khóa, và quyết định có ghi nhận trong tài liệu ứng dụng (#6) không.
+7. **Datamuse**: xin khóa qua biểu mẫu phản hồi của họ (trang nói ghi chú 5/10 là họ đang cấp dần), hỏi luôn **cách gửi khóa** nếu thư cấp khóa không nói; khi có câu trả lời bằng văn bản, viết vào `applyDatamuseAuth` (nơi duy nhất) kèm test. Và quyết định có ghi nhận trong tài liệu ứng dụng (#6) không.
 
 ## 6. Điều chưa xác minh (tổng hợp)
 

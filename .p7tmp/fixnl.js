@@ -1,0 +1,10 @@
+const fs = require('fs');
+const BS = String.fromCharCode(92);
+const LF = String.fromCharCode(10);
+let s = fs.readFileSync('tests/config/envExample.test.ts', 'utf8');
+const bad = ".join('" + LF + "')";
+const good = ".join('" + BS + "n')";
+const n = s.split(bad).length - 1;
+s = s.split(bad).join(good);
+fs.writeFileSync('tests/config/envExample.test.ts', s);
+console.log('fixed', n);

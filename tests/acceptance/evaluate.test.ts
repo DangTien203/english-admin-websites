@@ -25,6 +25,7 @@ import {
   GROUP_WORDS,
   jobExpectation,
   planWords,
+  RUN_ORDER,
   type Group,
   type WordFacts,
 } from '../../scripts/acceptance/words';
@@ -333,8 +334,10 @@ describe('the 30 words', () => {
     expect(GROUP_WORDS.A).toEqual(['run', 'bank', 'light']);
     expect(GROUP_WORDS.B).toEqual(['ran', 'running', 'went', 'children', 'banks', 'lights']);
     expect(GROUP_WORDS.H).toEqual(['batter', 'mole', 'sage', 'tick', 'bass', 'fawn']);
-    expect(FALLBACK_WORDS).toEqual({ C: ['nostalgia', 'gregarious', 'lucid'], H: ['trunk', 'rack', 'pawn'] });
-    expect(ALL_ACCEPTANCE_WORDS).toHaveLength(36);
+    // H has many stand-ins: a run of H that could not be judged (Free Dictionary down) still leaves an entry for every H word it used
+    expect(FALLBACK_WORDS).toEqual({ C: ['nostalgia', 'gregarious', 'lucid'], H: ['trunk', 'rack', 'pawn', 'bark', 'crane', 'pitch', 'seal', 'bolt', 'stalk', 'jam', 'ring', 'spring', 'bat', 'mint', 'pound', 'row', 'wave', 'well', 'yard', 'fan', 'tap', 'rock', 'bear', 'pool'] });
+    expect(ALL_ACCEPTANCE_WORDS).toHaveLength(57);
+    expect(new Set(ALL_ACCEPTANCE_WORDS).size).toBe(57); // no word twice, in a group or between a group and a stand-in
   });
 });
 
@@ -404,6 +407,22 @@ describe('planWords', () => {
 
   it('only the selected groups, in canonical order', () => {
     expect(planWords(['H', 'A'], allOk).run.map((w) => w.group)).toEqual(['A', 'A', 'A', 'H', 'H', 'H', 'H', 'H', 'H']);
+  });
+
+  it('RUNS group H before E and F (the two groups that make Free Dictionary hang), whatever order --only lists them in', () => {
+    expect(RUN_ORDER).toEqual(['A', 'B', 'C', 'D', 'H', 'E', 'F']);
+    expect([...RUN_ORDER].sort()).toEqual([...GROUP_ORDER].sort()); // the same seven groups, only the order differs
+    const order = (groups: readonly Group[]) => [...new Set(planWords(groups, allOk).run.map((w) => w.group))];
+    expect(order(GROUP_ORDER)).toEqual(['A', 'B', 'C', 'D', 'H', 'E', 'F']);
+    expect(order(['F', 'E', 'H'])).toEqual(['H', 'E', 'F']);
+    expect(GROUP_ORDER).toEqual(['A', 'B', 'C', 'D', 'E', 'F', 'H']); // the order of the brief and of the tables is not touched
+  });
+
+  it('a second run of H finds fresh words after the first one used up its own (their entries now exist)', () => {
+    const used = new Set(['batter', 'mole', 'sage', 'tick', 'bass', 'fawn', 'trunk', 'rack']);
+    const p = planWords(['H'], (_g, w) => (used.has(w) ? { ok: false, reason: 'đã có mục từ' } : { ok: true, reason: 'ok' }));
+    expect(p.run.map((w) => w.word)).toEqual(['pawn', 'bark', 'crane', 'pitch', 'seal', 'bolt']);
+    expect(p.run.filter((w) => w.standsInFor).length).toBe(6);
   });
 });
 

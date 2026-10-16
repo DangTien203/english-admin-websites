@@ -121,6 +121,7 @@ describe('the merge matrix of spec §6, over HTTP', () => {
     expect(d.enrichment).toEqual({ status: 'queued' });
     expect(d.lookup_context).toEqual({ source: 'ebook', ebook_id: a.ebookId, paragraph_id: null });
 
+    await a.settle(); // the job is sent after the answer
     expect(enqueued).toEqual([{ word: w.fg, requestedBy: a.user.id, ebookId: a.ebookId, startAfterSeconds: undefined }]);
     expect((await lookupRow(a, w.fg)).lookup_result).toBe('translation');
   });
@@ -135,6 +136,7 @@ describe('the merge matrix of spec §6, over HTTP', () => {
     expect(d.senses.length).toBeGreaterThan(0);
     for (const s of d.senses) expect(s.definition_vi).toBeNull(); // step 2 needs the fast translator to have worked
     expect(d.providers).toEqual(['free_dictionary_api']);
+    await a.settle();
     expect(enqueued.map((e) => e.word)).toEqual([w.fNoG]); // Free Dictionary knows it: a trusted word
     expect((await lookupRow(a, w.fNoG)).lookup_result).toBe('translation');
   });
@@ -148,6 +150,7 @@ describe('the merge matrix of spec §6, over HTTP', () => {
     expect(d.missing).toEqual(expect.arrayContaining(['pos', 'definition_en', 'ipa', 'audio_url']));
     expect(d).toMatchObject({ pos: null, ipa: null, audio_url: null, pos_list: [], senses: [], attribution: [] });
     expect(d.enrichment).toEqual({ status: 'skipped', reason: 'unknown_word' });
+    await a.settle();
     expect(enqueued).toEqual([]);
     expect((await lookupRow(a, w.gFd404)).lookup_result).toBe('translation');
   });
@@ -166,6 +169,7 @@ describe('the merge matrix of spec §6, over HTTP', () => {
     expect(res.status).toBe(404);
     expect(res.body).toMatchObject({ success: false, error: { code: 'ENTRY_NOT_FOUND' } });
     expect(res.headers['cache-control']).toBe('no-store');
+    await a.settle();
     expect(enqueued).toEqual([]);
     expect((await lookupRow(a, w.noGFd404)).lookup_result).toBe('not_found');
   });
@@ -175,6 +179,7 @@ describe('the merge matrix of spec §6, over HTTP', () => {
     expect(res.status).toBe(503);
     expect(res.body).toMatchObject({ success: false, error: { code: 'TRANSLATION_UNAVAILABLE' } });
     expect(res.headers['cache-control']).toBe('no-store');
+    await a.settle();
     expect(enqueued).toEqual([{ word: w.noGFdErr, requestedBy: a.user.id, ebookId: a.ebookId, startAfterSeconds: 60 }]);
     expect((await lookupRow(a, w.noGFdErr)).lookup_result).toBe('not_found');
   });
@@ -182,8 +187,81 @@ describe('the merge matrix of spec §6, over HTTP', () => {
   it('not G and FDerr, a word nobody knows → 503 and no job', async () => {
     const res = await a.lookup(w.noGFdErrUnknown);
     expect(res.status).toBe(503);
+    await a.settle();
     expect(enqueued).toEqual([]);
     expect((await lookupRow(a, w.noGFdErrUnknown)).lookup_result).toBe('not_found');
+  });
+
+  // Spec 1.5: the job send and the word_lookups insert run after the answer. The sender below can only finish when the test lets it,
+  // so an answer that waited for it would never arrive (the test would time out instead of passing).
+  it('the answer does not wait for the job send, and word_lookups is still written', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const sent: EnqueueInput[] = [];
+    a.setEnqueuer({
+      enqueue: async (input) => {
+        sent.push(input);
+        await gate;
+        return { status: 'queued' };
+      },
+    });
+    const word = fixtureWord('slowsend');
+    try {
+      const res = await a.lookup(word);
+      expect(res.status).toBe(200);
+      expect(res.body.data).toMatchObject({ source: 'translation', partial: false });
+      expect(res.body.data.enrichment).toEqual({ status: 'queued' });
+      await a.waitFor(async () => sent.length > 0, 'the background send to start');
+      expect((await lookupRow(a, word)).lookup_result).toBe('translation'); // the insert does not queue behind the send either
+    } finally {
+      release();
+      await a.settle();
+      a.setEnqueuer({
+        enqueue: async (input) => {
+          enqueued.push(input);
+          return { status: 'queued' };
+        },
+      });
+    }
+    expect(sent.map((s) => s.word)).toEqual([word]);
+  });
+
+  it('a send that throws leaves the answer and word_lookups alone and is reported as one structured error line', async () => {
+    const errors = console.error as unknown as jest.Mock;
+    a.setEnqueuer({
+      enqueue: async () => {
+        throw new Error('queue is down');
+      },
+    });
+    const word = fixtureWord('sendfails');
+    try {
+      const before = errors.mock.calls.length;
+      const res = await a.lookup(word);
+      expect(res.status).toBe(200);
+      expect(res.body.data).toMatchObject({ source: 'translation', partial: false, enrichment: { status: 'queued' } });
+      await a.settle();
+      expect((await lookupRow(a, word)).lookup_result).toBe('translation');
+      const reported = errors.mock.calls
+        .slice(before)
+        .map((c) => {
+          try {
+            return JSON.parse(String(c[0]));
+          } catch {
+            return null;
+          }
+        })
+        .filter((l) => l?.evt === 'lookup_background_error');
+      expect(reported).toEqual([{ evt: 'lookup_background_error', task: 'enrich', word, error: 'queue is down' }]);
+    } finally {
+      a.setEnqueuer({
+        enqueue: async (input) => {
+          enqueued.push(input);
+          return { status: 'queued' };
+        },
+      });
+    }
   });
 
   it('writes one structured log line per lookup with the spec §12.1 fields and no external content', async () => {

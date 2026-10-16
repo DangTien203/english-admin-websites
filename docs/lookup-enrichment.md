@@ -372,7 +372,7 @@ Test (không gọi mạng): `tests/enrichment/*` (schema, prompt, summarize, val
 | `source`, `created_by` | `'wiktionary'`, NULL |
 | `entry_edit_history` | Một dòng `auto_created`, `admin_id` NULL, `new_value` = `{"job_id", "sources", "model"}` |
 
-**Phân tầng và `published`** (spec §3, §10.3). Tầng A (thiếu thì `published = false`): headword, lemma, pos (từ 1), `meaning_vi`, từ 1 sense có `definition_en` và `definition_vi`, từ 1 ví dụ có cả hai thứ tiếng. Tầng B (thiếu vẫn xuất bản, ghi vào `admin_note`): IPA (một trong hai), `cefr_level`, `frequency_rank`, `is_countable` (khi có nghĩa danh từ), `is_transitive` (khi có nghĩa động từ), từ 1 chủ đề, `etymology`. `ENRICHMENT_PUBLISH_POLICY=review` → luôn `false`; `auto` → `true` khi đủ tầng A.
+**Phân tầng và `published`** (spec §3, §10.3). Tầng A (thiếu thì `published = false`): headword, lemma, pos (từ 1), `meaning_vi`, từ 1 sense có `definition_en` và `definition_vi`, từ 1 ví dụ có cả hai thứ tiếng. Tầng B (thiếu vẫn xuất bản, ghi vào `admin_note`): IPA (một trong hai), `cefr_level`, `frequency_rank`, `is_countable` (khi có nghĩa danh từ), `is_transitive` (khi có nghĩa động từ), từ 1 chủ đề, `etymology`. `ENRICHMENT_PUBLISH_POLICY=review` → luôn `false`; `auto` → `true` khi đủ tầng A. **Mặc định khi không đặt biến là `review`** (đổi từ `auto` ở spec 1.5); `auto` phải được đặt tường minh.
 
 **`admin_note`** bắt đầu bằng `[auto]`, rồi (ngăn cách bằng ` · `): nguồn đã dùng, model, id job, trạng thái xuất bản, tầng A thiếu, tầng B thiếu, trường là ước tính (`cefr_level=B1`), cảnh báo giọng IPA, loại từ Wiktionary không có trong mục, ghi chú của Haiku (kể cả dòng `[kiểm tra]` của validator). Không chứa email, tên hay nội dung của người dùng. Tối đa 4000 ký tự.
 

@@ -93,7 +93,7 @@ Kết nối của pg-boss lấy từ `pool.options` của `config/db.ts` (cùng 
 
 ## 3. Gửi job (enqueue)
 
-Khi `ENRICHMENT_ENABLED=true`, `services/lookup/index.ts` dùng `PgBossEnrichmentEnqueuer`; khi `false` vẫn dùng `NoopEnqueuer` (trả `disabled`). Đường nhanh gọi trong `try/catch` (F11): lỗi hàng đợi không làm hỏng response.
+Khi `ENRICHMENT_ENABLED=true`, `services/lookup/index.ts` dùng `PgBossEnrichmentEnqueuer`; khi `false` vẫn dùng `NoopEnqueuer` (trả `disabled`). Đường nhanh gọi trong `try/catch` (F11): lỗi hàng đợi không làm hỏng response. **Từ spec 1.5 lần gọi này xảy ra SAU response**, trong khâu nền của `WordLookupService` (`afterResponse`): response chỉ mang `queued` (đã giao), kết quả thật của `enqueue()` ghi ở log `lookup_enrich`, và một `enqueue()` ném lỗi ghi `lookup_background_error` (task `enrich`). Trang quản trị (`POST /lookup/api/jobs`) gọi enqueuer trực tiếp nên vẫn nhận kết quả thật.
 
 ```
 enqueue({ word, requestedBy, ebookId, startAfterSeconds? })
@@ -246,11 +246,11 @@ npm run enrich:redrive -- [--word a,b] [--id <id>] [--reason upstream_error] [--
 
 | Mã | `status` | Ghi ở đâu | Do ai | Ý nghĩa |
 |---|---|---|---|---|
-| `invalid_word` | (không có hàng) | `enrichment.reason` trong response | enqueuer (a) | Từ không qua bộ làm sạch của đường nhanh |
+| `invalid_word` | (không có hàng) | log `lookup_enrich` (từ spec 1.5; trước đó ở `enrichment.reason` của response) | enqueuer (a) | Từ không qua bộ làm sạch của đường nhanh |
 | `exists` | (không có hàng) / `skipped` | response; hàng ở P6 (S0) | enqueuer (c), P6 | Đã có entry |
-| `daily_cap` | (không có hàng) | response + log warn + bộ đếm | enqueuer (d) | Hết `ENRICHMENT_MAX_JOBS_PER_DAY` của ngày UTC |
+| `daily_cap` | (không có hàng) | log `lookup_enrich` + log warn + bộ đếm (từ spec 1.5 không còn ở response) | enqueuer (d) | Hết `ENRICHMENT_MAX_JOBS_PER_DAY` của ngày UTC |
 | `duplicate` | `skipped` | hàng audit | enqueuer (f) | `send` trả `null`: pg-boss đã có job cho từ này mà sổ không có hàng hoạt động |
-| `queue_error` | `failed` | hàng audit + `enrichment.reason` (P3) | enqueuer | `send` / kết nối pg-boss lỗi |
+| `queue_error` | `failed` | hàng audit + log `lookup_background_error` (từ spec 1.5 không còn ở `enrichment.reason`) | enqueuer | `send` / kết nối pg-boss lỗi |
 | `upstream_error` | `queued` (giữa các lần thử) / `failed` (lần cuối) | hàng | worker | `UpstreamUnavailable` hoặc lỗi lạ |
 | `config_error` | `failed` | hàng | worker | `UpstreamConfigError` (400/401/403, thiếu khóa) |
 | `budget` | `skipped` | hàng | worker | `BudgetExceeded` |

@@ -1,0 +1,65 @@
+{
+  "args": {
+    "SAME": 200,
+    "DISTINCT": 50,
+    "WINDOW_S": 10,
+    "LATENCY_MS": 300,
+    "ROUNDS": 2
+  },
+  "node": "v24.14.0",
+  "report": {
+    "jobSend": {
+      "latencyMs": 300,
+      "words": 30,
+      "answer": {
+        "n": 30,
+        "p50": 855,
+        "p95": 893,
+        "p99": 917,
+        "max": 917,
+        "mean": 861
+      },
+      "answerPlusSend": {
+        "n": 30,
+        "p50": 1270,
+        "p95": 1303,
+        "p99": 1327,
+        "max": 1327,
+        "mean": 1275
+      },
+      "sendAlone": {
+        "n": 30,
+        "p50": 410,
+        "p95": 425,
+        "p99": 439,
+        "max": 439,
+        "mean": 413
+      },
+      "statuses": {
+        "200": 30
+      }
+    }
+  },
+  "checks": [
+    {
+      "ok": true,
+      "text": "the answer is faster than answer + send (p95 893 ms against 1303 ms)"
+    },
+    {
+      "ok": true,
+      "text": "every answer is 200 and complete"
+    },
+    {
+      "ok": true,
+      "text": "every answer says enrichment.status = \"queued\" ([\"queued\"])"
+    },
+    {
+      "ok": true,
+      "text": "every word reached the job ledger (33 rows for 33 words): the send really ran"
+    },
+    {
+      "ok": true,
+      "text": "every background send was queued (none already_queued / skipped / failed)"
+    }
+  ]
+}

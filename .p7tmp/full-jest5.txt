@@ -1,0 +1,16 @@
+
+> english-admin-websites@1.0.0 test
+> tsx scripts/check-env-example.ts && jest
+
+check-env-example: OK (32 biến của schema khớp .env.example)
+(node:7096) [DEP0044] DeprecationWarning: The `util.isArray` API is deprecated. Please use `Array.isArray()` instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+Fri, 16 Oct 2026 06:57:52 GMT express deprecated res.location("back"): use res.location(req.get("Referrer") || "/") and refer to https://dub.sh/security-redirect for best practices at controllers\userController.ts:164:24
+
+Test Suites: 95 passed, 95 total
+Tests:       2006 passed, 2006 total
+Snapshots:   0 total
+Time:        370.096 s
+Ran all test suites.
+Force exiting Jest: Have you considered using `--detectOpenHandles` to detect async operations that kept running after all tests finished?
+exit=0

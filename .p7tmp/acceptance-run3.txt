@@ -1,0 +1,142 @@
+
+> english-admin-websites@1.0.0 acceptance:lookup
+> tsx scripts/acceptance/lookup-acceptance.ts --staging --base-url http://localhost:3010 --wait-minutes 12
+
+DATABASE: ep-divine-field-aoljwkwq.c-2.ap-southeast-1.aws.neon.tech / neondb   máy chủ: http://localhost:3010   nhóm: A,B,C,D,E,F,H
+ENRICHMENT_PUBLISH_POLICY=review  LOOKUP_TOTAL_DEADLINE_MS=3000  LOOKUP_MISS_RATE_LIMIT_PER_MIN=20
+
+Chạy 15 từ, bỏ qua 40 (tiền đề sai).
+  bỏ qua A:run - có mục từ nhưng published=false
+  bỏ qua A:light - có mục từ nhưng published=false
+  bỏ qua B:ran - mục từ gốc "run" có nhưng published=false
+  bỏ qua B:running - mục từ gốc "run" có nhưng published=false
+  bỏ qua B:went - mục từ gốc "go" có nhưng published=false
+  bỏ qua B:lights - mục từ gốc "light" có nhưng published=false
+  bỏ qua C:serendipity - đã có mục từ (published=false, ví dụ do P6b tạo)
+  bỏ qua C:nostalgia - đã có mục từ (published=false, ví dụ do P6b tạo) (từ dự phòng cho "serendipity")
+  bỏ qua C:gregarious - đã có mục từ (published=false, ví dụ do P6b tạo) (từ dự phòng cho "serendipity")
+  bỏ qua C:lucid - đã có mục từ (published=false, ví dụ do P6b tạo) (từ dự phòng cho "serendipity")
+  bỏ qua C:ubiquitous - đã có mục từ (published=false, ví dụ do P6b tạo)
+  bỏ qua C:ephemeral - đã có mục từ (published=false, ví dụ do P6b tạo)
+  bỏ qua C:podcast - đã có mục từ (published=false, ví dụ do P6b tạo)
+  bỏ qua C:quarantine - đã có mục từ (published=false, ví dụ do P6b tạo)
+  bỏ qua C:procrastinate - đã có mục từ (published=false, ví dụ do P6b tạo)
+  bỏ qua D:karaoke - đã có mục từ (published=false, ví dụ do P6b tạo)
+  bỏ qua D:sushi - đã có mục từ (published=false, ví dụ do P6b tạo)
+  bỏ qua D:tsunami - đã có mục từ (published=false, ví dụ do P6b tạo)
+  bỏ qua H:batter - đã có mục từ (published=false, ví dụ do P6b tạo)
+  bỏ qua H:trunk - đã có mục từ (published=false, ví dụ do P6b tạo) (từ dự phòng cho "batter")
+  bỏ qua H:rack - đã có mục từ (published=false, ví dụ do P6b tạo) (từ dự phòng cho "batter")
+  bỏ qua H:pawn - đã có mục từ (published=false, ví dụ do P6b tạo) (từ dự phòng cho "batter")
+  bỏ qua H:bark - đã có mục từ (published=false, ví dụ do P6b tạo) (từ dự phòng cho "batter")
+  bỏ qua H:crane - đã có mục từ (published=false, ví dụ do P6b tạo) (từ dự phòng cho "batter")
+  bỏ qua H:pitch - đã có mục từ (published=false, ví dụ do P6b tạo) (từ dự phòng cho "batter")
+  bỏ qua H:seal - đã có mục từ (published=false, ví dụ do P6b tạo) (từ dự phòng cho "batter")
+  bỏ qua H:bolt - đã có mục từ (published=false, ví dụ do P6b tạo) (từ dự phòng cho "batter")
+  bỏ qua H:stalk - đã có mục từ (published=false, ví dụ do P6b tạo) (từ dự phòng cho "batter")
+  bỏ qua H:jam - đã có mục từ (published=false, ví dụ do P6b tạo) (từ dự phòng cho "batter")
+  bỏ qua H:ring - đã có mục từ (published=false, ví dụ do P6b tạo) (từ dự phòng cho "batter")
+  bỏ qua H:spring - đã có mục từ (published=false, ví dụ do P6b tạo) (từ dự phòng cho "batter")
+  bỏ qua H:bat - đã có trong từ điển (published) (từ dự phòng cho "batter")
+  bỏ qua H:mint - đã có mục từ (published=false, ví dụ do P6b tạo) (từ dự phòng cho "batter")
+  bỏ qua H:pound - đã có mục từ (published=false, ví dụ do P6b tạo) (từ dự phòng cho "batter")
+  bỏ qua H:row - đã có mục từ (published=false, ví dụ do P6b tạo) (từ dự phòng cho "batter")
+  bỏ qua H:mole - đã có mục từ (published=false, ví dụ do P6b tạo)
+  bỏ qua H:sage - đã có mục từ (published=false, ví dụ do P6b tạo)
+  bỏ qua H:tick - đã có mục từ (published=false, ví dụ do P6b tạo)
+  bỏ qua H:bass - đã có trong từ điển (published)
+  bỏ qua H:fawn - đã có mục từ (published=false, ví dụ do P6b tạo)
+
+── thăm dò Free Dictionary ──
+  thăm dò Free Dictionary (trước khi chạy): KHÔNG KHỎE - lần 1 (house): OK (HTTP 200) 234 ms; lần 2 (water): http_404 (HTTP 404) 86 ms; lần 3 (tree): http_404 (HTTP 404) 87 ms
+  CẢNH BÁO: Free Dictionary không khỏe. Nhóm H và các ca 503 của nhóm E, F sẽ được ghi là "KHÔNG ĐÁNH GIÁ ĐƯỢC: nguồn ngoài lỗi", không phải "không đạt".
+  Không chạy nhóm H (6 từ): KHÔNG ĐÁNH GIÁ ĐƯỢC: nguồn ngoài lỗi. Chạy lại khi Free Dictionary khỏe.
+
+── đường nhanh ──
+  A bank           HTTP 200 dictionary     174 ms  enrichment=-
+  B children       HTTP 200 dictionary     163 ms  enrichment=-
+  B banks          HTTP 200 dictionary     163 ms  enrichment=-
+  E london         HTTP 200 translation    616 ms  enrichment=queued
+  E microsoft      HTTP 503 TRANSLATION_UNAVAILABLE  3396 ms  enrichment=-
+  E shakespeare    HTTP 503 TRANSLATION_UNAVAILABLE   330 ms  enrichment=-
+  F asdfghjk       HTTP 503 TRANSLATION_UNAVAILABLE   694 ms  enrichment=-
+  F xinchao        HTTP 503 TRANSLATION_UNAVAILABLE   353 ms  enrichment=-
+  F recieve        HTTP 200 translation    369 ms  enrichment=queued
+  thăm dò Free Dictionary (sau lượt tra): KHÔNG KHỎE - lần 1 (house): OK (HTTP 200) 213 ms; lần 2 (water): http_404 (HTTP 404) 65 ms; lần 3 (tree): http_404 (HTTP 404) 109 ms
+
+── job nền (chờ tối đa 12 phút) ──
+  còn 3 job chưa xong: microsoft, shakespeare, recieve
+  còn 2 job chưa xong: microsoft, shakespeare
+  còn 2 job chưa xong: microsoft, shakespeare
+  còn 2 job chưa xong: microsoft, shakespeare
+  còn 2 job chưa xong: microsoft, shakespeare
+  còn 2 job chưa xong: microsoft, shakespeare
+  còn 2 job chưa xong: microsoft, shakespeare
+  còn 2 job chưa xong: microsoft, shakespeare
+  còn 2 job chưa xong: microsoft, shakespeare
+  còn 2 job chưa xong: microsoft, shakespeare
+  còn 2 job chưa xong: microsoft, shakespeare
+  còn 2 job chưa xong: microsoft, shakespeare
+  còn 2 job chưa xong: microsoft, shakespeare
+
+── KẾT QUẢ ──
+┌─────────┬──────┬───────────────┬──────┬───────────────────────────┬──────┬────────────────────────┬────────────────────────────────────────┬──────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ (index) │ nhóm │ từ            │ HTTP │ source                    │ ms   │ job                    │ kết quả                                │ lý do                                                                                                            │
+├─────────┼──────┼───────────────┼──────┼───────────────────────────┼──────┼────────────────────────┼────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ 0       │ 'A'  │ 'bank'        │ 200  │ 'dictionary'              │ 174  │ '-'                    │ 'ĐẠT'                                  │ ''                                                                                                               │
+│ 1       │ 'B'  │ 'children'    │ 200  │ 'dictionary'              │ 163  │ '-'                    │ 'ĐẠT'                                  │ ''                                                                                                               │
+│ 2       │ 'B'  │ 'banks'       │ 200  │ 'dictionary'              │ 163  │ '-'                    │ 'ĐẠT'                                  │ ''                                                                                                               │
+│ 3       │ 'E'  │ 'london'      │ 200  │ 'translation'             │ 616  │ 'rejected/proper_noun' │ 'ĐẠT'                                  │ ''                                                                                                               │
+│ 4       │ 'E'  │ 'microsoft'   │ 503  │ 'TRANSLATION_UNAVAILABLE' │ 3396 │ 'rejected/proper_noun' │ 'KHÔNG ĐÁNH GIÁ ĐƯỢC: nguồn ngoài lỗi' │ '503 TRANSLATION_UNAVAILABLE: Free Dictionary lỗi hoặc treo và Google không cho bản dịch dùng được; spec §6 (kh' │
+│ 5       │ 'E'  │ 'shakespeare' │ 503  │ 'TRANSLATION_UNAVAILABLE' │ 330  │ 'rejected/proper_noun' │ 'KHÔNG ĐÁNH GIÁ ĐƯỢC: nguồn ngoài lỗi' │ '503 TRANSLATION_UNAVAILABLE: Free Dictionary lỗi hoặc treo và Google không cho bản dịch dùng được; spec §6 (kh' │
+│ 6       │ 'F'  │ 'asdfghjk'    │ 503  │ 'TRANSLATION_UNAVAILABLE' │ 694  │ '-'                    │ 'KHÔNG ĐÁNH GIÁ ĐƯỢC: nguồn ngoài lỗi' │ '503 TRANSLATION_UNAVAILABLE: Free Dictionary lỗi hoặc treo và Google không cho bản dịch dùng được; spec §6 (kh' │
+│ 7       │ 'F'  │ 'xinchao'     │ 503  │ 'TRANSLATION_UNAVAILABLE' │ 353  │ '-'                    │ 'KHÔNG ĐÁNH GIÁ ĐƯỢC: nguồn ngoài lỗi' │ '503 TRANSLATION_UNAVAILABLE: Free Dictionary lỗi hoặc treo và Google không cho bản dịch dùng được; spec §6 (kh' │
+│ 8       │ 'F'  │ 'recieve'     │ 200  │ 'translation'             │ 369  │ 'skipped/variant_form' │ 'ĐẠT'                                  │ ''                                                                                                               │
+└─────────┴──────┴───────────────┴──────┴───────────────────────────┴──────┴────────────────────────┴────────────────────────────────────────┴──────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  BỎ QUA A:run - có mục từ nhưng published=false
+  BỎ QUA A:light - có mục từ nhưng published=false
+  BỎ QUA B:ran - mục từ gốc "run" có nhưng published=false
+  BỎ QUA B:running - mục từ gốc "run" có nhưng published=false
+  BỎ QUA B:went - mục từ gốc "go" có nhưng published=false
+  BỎ QUA B:lights - mục từ gốc "light" có nhưng published=false
+  BỎ QUA C:serendipity - đã có mục từ (published=false, ví dụ do P6b tạo)
+  BỎ QUA C:nostalgia - đã có mục từ (published=false, ví dụ do P6b tạo) (từ dự phòng cho "serendipity")
+  BỎ QUA C:gregarious - đã có mục từ (published=false, ví dụ do P6b tạo) (từ dự phòng cho "serendipity")
+  BỎ QUA C:lucid - đã có mục từ (published=false, ví dụ do P6b tạo) (từ dự phòng cho "serendipity")
+  BỎ QUA C:ubiquitous - đã có mục từ (published=false, ví dụ do P6b tạo)
+  BỎ QUA C:ephemeral - đã có mục từ (published=false, ví dụ do P6b tạo)
+  BỎ QUA C:podcast - đã có mục từ (published=false, ví dụ do P6b tạo)
+  BỎ QUA C:quarantine - đã có mục từ (published=false, ví dụ do P6b tạo)
+  BỎ QUA C:procrastinate - đã có mục từ (published=false, ví dụ do P6b tạo)
+  BỎ QUA D:karaoke - đã có mục từ (published=false, ví dụ do P6b tạo)
+  BỎ QUA D:sushi - đã có mục từ (published=false, ví dụ do P6b tạo)
+  BỎ QUA D:tsunami - đã có mục từ (published=false, ví dụ do P6b tạo)
+  BỎ QUA H:batter - đã có mục từ (published=false, ví dụ do P6b tạo)
+  BỎ QUA H:trunk - đã có mục từ (published=false, ví dụ do P6b tạo) (từ dự phòng cho "batter")
+  BỎ QUA H:rack - đã có mục từ (published=false, ví dụ do P6b tạo) (từ dự phòng cho "batter")
+  BỎ QUA H:pawn - đã có mục từ (published=false, ví dụ do P6b tạo) (từ dự phòng cho "batter")
+  BỎ QUA H:bark - đã có mục từ (published=false, ví dụ do P6b tạo) (từ dự phòng cho "batter")
+  BỎ QUA H:crane - đã có mục từ (published=false, ví dụ do P6b tạo) (từ dự phòng cho "batter")
+  BỎ QUA H:pitch - đã có mục từ (published=false, ví dụ do P6b tạo) (từ dự phòng cho "batter")
+  BỎ QUA H:seal - đã có mục từ (published=false, ví dụ do P6b tạo) (từ dự phòng cho "batter")
+  BỎ QUA H:bolt - đã có mục từ (published=false, ví dụ do P6b tạo) (từ dự phòng cho "batter")
+  BỎ QUA H:stalk - đã có mục từ (published=false, ví dụ do P6b tạo) (từ dự phòng cho "batter")
+  BỎ QUA H:jam - đã có mục từ (published=false, ví dụ do P6b tạo) (từ dự phòng cho "batter")
+  BỎ QUA H:ring - đã có mục từ (published=false, ví dụ do P6b tạo) (từ dự phòng cho "batter")
+  BỎ QUA H:spring - đã có mục từ (published=false, ví dụ do P6b tạo) (từ dự phòng cho "batter")
+  BỎ QUA H:bat - đã có trong từ điển (published) (từ dự phòng cho "batter")
+  BỎ QUA H:mint - đã có mục từ (published=false, ví dụ do P6b tạo) (từ dự phòng cho "batter")
+  BỎ QUA H:pound - đã có mục từ (published=false, ví dụ do P6b tạo) (từ dự phòng cho "batter")
+  BỎ QUA H:row - đã có mục từ (published=false, ví dụ do P6b tạo) (từ dự phòng cho "batter")
+  BỎ QUA H:mole - đã có mục từ (published=false, ví dụ do P6b tạo)
+  BỎ QUA H:sage - đã có mục từ (published=false, ví dụ do P6b tạo)
+  BỎ QUA H:tick - đã có mục từ (published=false, ví dụ do P6b tạo)
+  BỎ QUA H:bass - đã có trong từ điển (published)
+  BỎ QUA H:fawn - đã có mục từ (published=false, ví dụ do P6b tạo)
+Google chars (A+B): 7727 -> 7727  ĐẠT
+p50 616 ms, p95 3396 ms (giới hạn 3500 ms)  ĐẠT
+
+ĐẠT 5  KHÔNG ĐẠT 0  KHÔNG ĐÁNH GIÁ ĐƯỢC 10  BỎ QUA 40   báo cáo: docs\lookup-acceptance-report.md
+Có 10 từ không đánh giá được vì nguồn ngoài lỗi (không phải lỗi của mã). Chạy lại riêng khi Free Dictionary khỏe:
+  npm run acceptance:lookup -- --staging --only H,E,F --base-url http://localhost:3010
+exit=3

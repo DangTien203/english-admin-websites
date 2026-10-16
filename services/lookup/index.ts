@@ -41,6 +41,24 @@ export function setEnrichmentEnqueuer(next: EnrichmentEnqueuer): void {
   service = undefined; // rebuilt with the new enqueuer on next use
 }
 
+/**
+ * Graceful shutdown: lets the job sends and word_lookups inserts that follow answers already given finish (spec 1.5 runs them after
+ * the response, so closing the HTTP server no longer waits for them). Bounded: a send stuck on a dead database must not hold the exit.
+ */
+export async function drainBackground(target: { idle(): Promise<void> } | undefined, maxMs: number = 10_000): Promise<void> {
+  if (!target) return;
+  let timer: NodeJS.Timeout | undefined;
+  await Promise.race([
+    target.idle().catch(() => undefined),
+    new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, maxMs);
+    }),
+  ]);
+  if (timer) clearTimeout(timer);
+}
+
+export const drainLookupBackground = (maxMs?: number): Promise<void> => drainBackground(service, maxMs);
+
 /** Usage ledger name for the fast-path Haiku calls (api_usage_counters.provider). */
 export const HAIKU_FAST_USAGE_PROVIDER = 'anthropic_fast';
 

@@ -15,7 +15,11 @@ import { fetchUpstream, UpstreamConfig, UpstreamDeps } from './upstream';
  * docs/lookup-spec.md §5 F4–F12. Dependencies are injected so every branch is unit-testable.
  *
  *   F4/F4b local dictionary  →  F5 flag  →  F6 per-user limit  →  F7 single-flight  →  F8/F9 upstream
- *   →  F10 merge (§6 matrix)  →  F11 enrichment hook  →  F12 word_lookups
+ *   →  F10 merge (§6 matrix)  →  response  ⇢  F11 send the enrichment job  ⇢  F12 word_lookups
+ *
+ * F11 and F12 run AFTER the answer has been handed to the caller (spec 1.5): the deadline only bounds the outside calls, and a job
+ * send (~0.5 s on a remote database) or an insert must not add its time to the visitor's wait. Whatever goes wrong there is logged
+ * (structured, never the response); the word is still missing from the dictionary, so the next lookup tries to send the job again.
  *
  * Nothing about a temporary result is cached or stored in dictionary tables.
  */
@@ -51,6 +55,10 @@ export const REF_PROBE_TTL_MS = 300_000;
 
 export class WordLookupService {
   private refProbe?: { populated: boolean; at: number };
+  /** Work started after a response (job send, word_lookups insert) that has not finished yet. */
+  private readonly pending = new Set<Promise<void>>();
+  /** Words whose job send is running right now in this process (see sendOnce). */
+  private readonly sending = new Set<string>();
   private readonly now: () => number;
   private readonly log: (record: Record<string, unknown>) => void;
   private readonly metrics: Pick<LookupMetrics, 'record'>;
@@ -109,20 +117,28 @@ export class WordLookupService {
 
     if (merged.kind === 'unavailable') {
       this.recordLookup(input, null, 'not_found');
-      // Both sources failed, but the word may be real: try again in the background later.
-      const enrichment = await this.enrich(input, false, OUTAGE_JOB_DELAY_SECONDS);
-      this.logLookup(input, { outcome: 'unavailable', source: 'none', partial: false, started, localMs, bundle, shared, enrichment });
+      // Both sources failed, but the word may be real: try again in the background later (the check of the word and the send both
+      // happen after the 503 has gone out; there is no body to carry the answer anyway).
+      const enabled = this.deps.config.enrichmentEnabled;
+      if (enabled) this.sendOnce(input, () => this.sendIfTrusted(input, false, OUTAGE_JOB_DELAY_SECONDS));
+      this.logLookup(input, { outcome: 'unavailable', source: 'none', partial: false, started, localMs, bundle, shared, enrichment: { status: enabled ? 'deferred' : 'disabled' } });
       return { kind: 'unavailable' };
     }
 
-    // F11 — enrichment hook (never able to break the response).
-    const enrichment = await this.enrich(input, bundle.fd.status === 'found');
-    const body = composeTemporary(merged, bundle, input.word.display, enrichment);
+    // F11 — decide what the response says about the job; the job itself is sent after the response (never able to break it).
+    const plan = await this.planEnrichment(input, bundle.fd.status === 'found');
+    const body = composeTemporary(merged, bundle, input.word.display, plan.info);
+    if (plan.send) this.sendOnce(input, () => this.sendJob(input));
 
     // F12
     this.recordLookup(input, null, 'translation');
-    this.logLookup(input, { outcome: 'temporary', source: 'translation', partial: body.partial, started, localMs, bundle, shared, enrichment });
+    this.logLookup(input, { outcome: 'temporary', source: 'translation', partial: body.partial, started, localMs, bundle, shared, enrichment: plan.info });
     return { kind: 'temporary', body };
+  }
+
+  /** Resolves when everything started after a response has finished (tests; a caller that wants to drain before it exits). */
+  async idle(): Promise<void> {
+    while (this.pending.size > 0) await Promise.allSettled([...this.pending]);
   }
 
   // ── F4 / F4b ───────────────────────────────────────────────────────────────
@@ -161,40 +177,109 @@ export class WordLookupService {
 
   // ── F11 ────────────────────────────────────────────────────────────────────
 
-  private async enrich(input: LookupInput, fdFound: boolean, startAfterSeconds?: number): Promise<EnrichmentInfo> {
-    if (!this.deps.config.enrichmentEnabled) return { status: 'disabled' };
-    try {
-      // §7 "trusted word": Free Dictionary has it, or the local reference data knows it.
-      const trusted = fdFound || (await isKnownInReferenceData(this.deps.refDb, input.word.normalized).catch(() => false));
-      if (!trusted) return { status: 'skipped', reason: 'unknown_word' };
+  /**
+   * What the response says about the job, decided WITHOUT sending it (spec 1.5):
+   *   disabled                  ENRICHMENT_ENABLED=false
+   *   skipped / unknown_word    the word is not trusted (§7): no job will be sent
+   *   queued                    the job is handed over to the background send. This is a promise to try, not a receipt: the real
+   *                             answer (queued, already_queued, daily cap, queue error) is in the `lookup_enrich` log line.
+   * The trust check is a database read, so it is only made when Free Dictionary did not already vouch for the word.
+   */
+  private async planEnrichment(input: LookupInput, fdFound: boolean): Promise<{ info: EnrichmentInfo; send: boolean }> {
+    if (!this.deps.config.enrichmentEnabled) return { info: { status: 'disabled' }, send: false };
+    if (!(await this.isTrusted(input, fdFound))) return { info: { status: 'skipped', reason: 'unknown_word' }, send: false };
+    return { info: { status: 'queued' }, send: true };
+  }
 
-      return await this.deps.enqueuer.enqueue({
-        word: input.word.normalized,
-        requestedBy: input.userId,
-        ebookId: input.ebookId,
-        startAfterSeconds,
+  /** §7 "trusted word": Free Dictionary has it, or the local reference data knows it. */
+  private async isTrusted(input: LookupInput, fdFound: boolean): Promise<boolean> {
+    return fdFound || (await isKnownInReferenceData(this.deps.refDb, input.word.normalized).catch(() => false));
+  }
+
+  /**
+   * Starts a background send, unless one for the same word is already running in this process. A burst of lookups of one word
+   * (single-flight lets hundreds share one upstream call) would otherwise start one send each, all at once and with nobody waiting for
+   * them any more; the queue admits one job per word anyway (policy exclusive, spec §7), so the extra sends could only come back
+   * "already_queued". If the running send fails, the next lookup of the word sends again.
+   */
+  private sendOnce(input: LookupInput, work: () => Promise<void>): void {
+    const word = input.word.normalized;
+    if (this.sending.has(word)) return;
+    this.sending.add(word);
+    this.afterResponse('enrich', input, () => work().finally(() => this.sending.delete(word)));
+  }
+
+  /** Background: check the word, then send (used after a 503, where no response body exists to carry a plan). */
+  private async sendIfTrusted(input: LookupInput, fdFound: boolean, startAfterSeconds?: number): Promise<void> {
+    if (!(await this.isTrusted(input, fdFound))) {
+      this.log({ evt: 'lookup_enrich', word: input.word.normalized, status: 'skipped', reason: 'unknown_word', delayed_s: startAfterSeconds ?? null });
+      return;
+    }
+    await this.sendJob(input, startAfterSeconds);
+  }
+
+  /** Background: the send itself. An exception is reported by afterResponse(); a refusal (daily cap, already queued) is a normal answer. */
+  private async sendJob(input: LookupInput, startAfterSeconds?: number): Promise<void> {
+    const t0 = this.now();
+    const result = await this.deps.enqueuer.enqueue({
+      word: input.word.normalized,
+      requestedBy: input.userId,
+      ebookId: input.ebookId,
+      startAfterSeconds,
+    });
+    this.log({
+      evt: 'lookup_enrich',
+      word: input.word.normalized,
+      status: result.status,
+      reason: result.reason ?? null,
+      delayed_s: startAfterSeconds ?? null,
+      enqueue_ms: this.now() - t0,
+    });
+  }
+
+  // ── after the response ─────────────────────────────────────────────────────
+
+  /**
+   * Runs `work` after the current turn of the event loop, so the caller has already got its answer (a promise continuation, which
+   * is where the route writes the response, runs before a setImmediate callback). Nobody waits for it. If it fails, ONE structured
+   * error line is written; it never reaches the response, the metrics of the lookup or the next lookup.
+   */
+  private afterResponse(task: 'enrich' | 'word_lookups', input: LookupInput, work: () => Promise<void>): void {
+    const run = new Promise<void>((resolve) => {
+      setImmediate(() => {
+        Promise.resolve()
+          .then(work)
+          .catch((err) => this.logBackgroundError(task, input, err))
+          .then(() => resolve());
       });
-    } catch (err: any) {
-      console.error('[lookup] enrichment enqueue failed:', err?.message ?? err);
-      return { status: 'skipped', reason: 'queue_error' };
+    });
+    this.pending.add(run);
+    void run.then(() => this.pending.delete(run));
+  }
+
+  private logBackgroundError(task: string, input: LookupInput, err: unknown): void {
+    try {
+      console.error(redactSecrets(JSON.stringify({ evt: 'lookup_background_error', task, word: input.word.normalized, error: String((err as Error)?.message ?? err).slice(0, 200) })));
+    } catch {
+      /* reporting must never fail either */
     }
   }
 
   // ── F12 / logging ──────────────────────────────────────────────────────────
 
   private recordLookup(input: LookupInput, entryId: string | null, result: 'dictionary' | 'translation' | 'not_found'): void {
-    void this.deps.db
-      .query(
+    this.afterResponse('word_lookups', input, async () => {
+      await this.deps.db.query(
         `INSERT INTO word_lookups (user_id, entry_id, word_text, source, lookup_result, ebook_id, paragraph_id)
          VALUES ($1, $2, $3, 'ebook', $4, $5, $6)`,
         [input.userId, entryId, input.word.display, result, input.ebookId, input.paragraphId]
-      )
-      .catch((err) => console.error('[ebooks] word_lookups insert failed:', err?.message ?? err));
+      );
+    });
   }
 
   private logLookup(
     input: LookupInput,
-    d: { outcome: string; source: string; partial: boolean; started: number; localMs?: number; reason?: string; bundle?: UpstreamBundle; shared?: boolean; enrichment?: EnrichmentInfo }
+    d: { outcome: string; source: string; partial: boolean; started: number; localMs?: number; reason?: string; bundle?: UpstreamBundle; shared?: boolean; enrichment?: { status: string } }
   ): void {
     try {
       this.metrics.record({ outcome: d.outcome, source: d.source, partial: d.partial, latencyMs: this.now() - d.started });

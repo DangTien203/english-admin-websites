@@ -58,7 +58,7 @@ Giữ nguyên (toàn bộ mục từ phẳng + `source:"dictionary"` + `lookup_c
 | `partial` | boolean | `true` khi thiếu dữ liệu vì một nguồn lỗi, không có, hoặc hết thời gian |
 | `missing` | string[] | Phần thiếu: `translation_vi`; `pos`, `definition_en`, `ipa`, `audio_url`; `definition_vi` |
 | `attribution` | `{name, license, url}[]` | Ghi công Wiktionary (CC BY-SA) lấy từ `license` và `sourceUrls` của Free Dictionary. **Mảng rỗng khi không có dữ liệu Free Dictionary** |
-| `enrichment` | `{status, reason?}` | `queued` \| `already_queued` \| `skipped` \| `disabled`. Hiện luôn `disabled` (chưa có hàng đợi thật, làm ở P5) |
+| `enrichment` | `{status, reason?}` | `queued` \| `already_queued` \| `skipped` \| `disabled`. Từ spec 1.5 giá trị là **quyết định tại thời điểm trả lời**, vì việc gửi job chạy NỀN sau response: `disabled` (`ENRICHMENT_ENABLED=false`), `skipped` với `reason: unknown_word` (từ không đáng tin), hoặc `queued` (đã giao cho khâu gửi nền: lời hứa thử gửi, không phải biên nhận). `already_queued` và `skipped` với `daily_cap`, `queue_error`, `invalid_word` không còn xuất hiện ở đây; kết quả thật của lần gửi nằm ở log `lookup_enrich`. Tên trường và các giá trị cũ giữ nguyên; app hiện không đọc trường này |
 
 ### Cách ghép (spec mục 6)
 
@@ -74,7 +74,7 @@ Giữ nguyên (toàn bộ mục từ phẳng + `source:"dictionary"` + `lookup_c
 
 ### Thứ tự xử lý
 
-F1 làm sạch từ → F2 kiểm tra đoạn văn → F3 tăng `words_looked_up` (chạy ngầm, như cũ) → F4/F4b tra từ điển cục bộ → F5 cờ `TRANSLATION_FALLBACK_ENABLED` → F6 giới hạn tần suất → F7 single-flight theo từ → F8 Google (nghĩa chính) và Free Dictionary **song song** → F9 một request Google dịch `"<từ>: <định nghĩa>"` cho tối đa N sense → F10 ghép → F11 gắn hàng đợi → F12 ghi `word_lookups` (`dictionary`, `translation` hoặc `not_found`). Tổng thời gian tính **từ đầu lần tra** và không vượt `LOOKUP_TOTAL_DEADLINE_MS`; hết hạn thì trả phần đã có với `partial:true`.
+F1 làm sạch từ → F2 kiểm tra đoạn văn → F3 tăng `words_looked_up` (chạy ngầm, như cũ) → F4/F4b tra từ điển cục bộ → F5 cờ `TRANSLATION_FALLBACK_ENABLED` → F6 giới hạn tần suất → F7 single-flight theo từ → F8 Google (nghĩa chính) và Free Dictionary **song song** → F9 một request Google dịch `"<từ>: <định nghĩa>"` cho tối đa N sense → F10 ghép → F11 gắn hàng đợi → F12 ghi `word_lookups` (`dictionary`, `translation` hoặc `not_found`); **từ spec 1.5, F11 (gửi job) và F12 chạy nền sau khi response đã đi**, lỗi của chúng chỉ ra log. Tổng thời gian tính **từ đầu lần tra** và không vượt `LOOKUP_TOTAL_DEADLINE_MS`; hết hạn thì trả phần đã có với `partial:true`.
 
 ## Ví dụ 1 · Đầy đủ (từ `ubiquitous`, thật, ~0,55 s)
 

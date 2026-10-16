@@ -19,7 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import pool from '../../config/db';
 import { lookupConfig } from '../../config/lookup';
-import { estimateCallCostUsd, PRICING_CHECKED_ON } from '../../services/enrichment/pricing';
+import { estimateCallCostUsd } from '../../services/enrichment/pricing';
 import { getRefDb } from '../../services/lookup/refDb';
 import { readArg } from '../enrichment/args';
 import {
@@ -44,8 +44,11 @@ import {
   evaluateGoogleChars,
   evaluateJob,
   evaluateLatency,
+  isSourceOutage,
+  reclassifyForSource,
   summarizeFast,
   TERMINAL_JOB_STATUSES,
+  UNEVALUABLE_LABEL,
   type EntryObservation,
   type FastObservation,
   type FastSummary,
@@ -54,21 +57,13 @@ import {
   type LatencyResult,
   type Verdict,
 } from './evaluate';
+import { buildReport, verdictLabel, fmtMs, type BreakerWait, type ProbeEntry, type RunSummary, type WordCheckEntry, type WordResult } from './report';
+import { breakerLikelyOpen, breakerWaitMs, classifyWordCheck, describeProbe, fdFailureEvidence, probeFreeDictionary, rerunCommand, sourceHealthFor, type ProbeResult, type WordCheck } from './source';
 import { checkPrecondition, GROUP_ORDER, GROUP_TITLES, GROUP_WORDS, FALLBACK_WORDS, jobExpectation, MISS_GROUPS, planWords, type Group, type PlannedWord, type SkippedWord, type WordFacts } from './words';
 
 const argv = process.argv.slice(2);
 const has = (flag: string) => argv.includes(flag);
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-
-interface WordResult {
-  planned: PlannedWord;
-  fast: FastObservation | null;
-  summary: FastSummary | null;
-  formPresent: boolean | null;
-  job: JobObservation | null;
-  verdicts: { fast: Verdict; form?: Verdict; job: Verdict };
-  verdict: Verdict;
-}
 
 // ── HTTP ────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -187,108 +182,6 @@ async function formRowExists(word: string): Promise<boolean> {
   return rows.length > 0;
 }
 
-// ── helpers for the report ──────────────────────────────────────────────────────────────────────────────────────────
-
-const fmtMs = (ms: number | null | undefined) => (ms === null || ms === undefined || Number.isNaN(ms) ? '-' : String(Math.round(ms)));
-const cell = (v: unknown) => (v === null || v === undefined ? '-' : String(v).replace(/\|/g, '\\|'));
-const verdictLabel = (v: Verdict) => (v.verdict === 'pass' ? 'ĐẠT' : v.verdict === 'fail' ? 'KHÔNG ĐẠT' : 'BỎ QUA');
-
-interface RunSummary {
-  startedAtDb: string;
-  identity: DatabaseIdentity;
-  baseUrl: string;
-  groups: Group[];
-  results: WordResult[];
-  skipped: SkippedWord[];
-  chars?: { before: number; after: number; verdict: Verdict };
-  latency: LatencyResult;
-  tokens: { anthropicBefore: { input: number; output: number }; anthropicAfter: { input: number; output: number }; jobs: { input: number; output: number; calls: number; costUsd: number | null } };
-  waitMinutes: number;
-  jobWaitTimedOut: boolean;
-  elapsedSec: number;
-}
-
-function buildReport(s: RunSummary): string {
-  const counts = { pass: 0, fail: 0, skip: 0 };
-  for (const r of s.results) counts[r.verdict.verdict]++;
-  counts.skip += s.skipped.length;
-  const lines: string[] = [];
-  lines.push('# WordyGo · Báo cáo nghiệm thu tra từ (P7b)');
-  lines.push('');
-  lines.push(`Chạy lúc ${s.startedAtDb} (đồng hồ DB) · DB: ${dbLabel(s.identity)} · máy chủ: ${s.baseUrl} · nhóm: ${s.groups.join(', ')} · ENRICHMENT_PUBLISH_POLICY=${lookupConfig.flags.enrichmentPublishPolicy} · LOOKUP_TOTAL_DEADLINE_MS=${lookupConfig.lookup.totalDeadlineMs} · LOOKUP_FAST_TRANSLATOR=${lookupConfig.lookup.fastTranslator} · tổng thời gian ${Math.round(s.elapsedSec)} s.`);
-  lines.push('Tạo bởi `npm run acceptance:lookup`; cách chạy ở `docs/lookup-runbook.md` mục 12. Bảng bên dưới là kết quả ĐO, không chỉnh để cho xanh.');
-  lines.push('');
-  lines.push('## 1. Tóm tắt');
-  lines.push('');
-  lines.push(`| Đạt | Không đạt | Bỏ qua (tiền đề sai) |`);
-  lines.push('|---|---|---|');
-  lines.push(`| ${counts.pass} | ${counts.fail} | ${counts.skip} |`);
-  lines.push('');
-  lines.push('| Kiểm tra cấp lần chạy | Kết quả | Chi tiết |');
-  lines.push('|---|---|---|');
-  if (s.chars) lines.push(`| Nhóm A và B không gọi Google (ký tự không đổi) | ${verdictLabel(s.chars.verdict)} | trước ${s.chars.before}, sau ${s.chars.after}${s.chars.verdict.reasons.length ? `; ${s.chars.verdict.reasons.join('; ')}` : ''} |`);
-  lines.push(`| p95 đường nhanh nhóm C, D, E, H ≤ ${s.latency.limitMs} ms | ${verdictLabel(s.latency)} | p50 = ${fmtMs(s.latency.p50)} ms, p95 = ${fmtMs(s.latency.p95)} ms, ${s.latency.samples} mẫu${s.latency.reasons.length ? `; ${s.latency.reasons.join('; ')}` : ''} |`);
-  lines.push('');
-  lines.push('## 2. Đường nhanh (mỗi từ một lần tra)');
-  lines.push('');
-  lines.push('| Nhóm | Từ | HTTP | source | temporary | matched_form | partial | missing | meanings_vi | senses | enrichment | ms | Kết quả đường nhanh |');
-  lines.push('|---|---|---|---|---|---|---|---|---|---|---|---|---|');
-  for (const r of s.results) {
-    const f = r.summary!;
-    lines.push(
-      `| ${r.planned.group} | ${r.planned.word}${r.planned.standsInFor ? ` (thay ${r.planned.standsInFor})` : ''} | ${f.status}${f.errorCode ? ` ${f.errorCode}` : ''}${r.fast?.retriedAfter429 ? ' (sau 429)' : ''} | ${cell(f.source)} | ${cell(f.temporary)} | ${cell(f.matchedForm)} | ${cell(f.partial)} | ${cell(f.missing.join(','))} | ${cell(f.meaningsCount)} | ${cell(f.sensesCount)} | ${cell(f.enrichmentStatus)} | ${fmtMs(f.ms)} | ${verdictLabel(r.verdicts.fast)} |`
-    );
-  }
-  lines.push('');
-  lines.push('## 3. Job nền và dữ liệu đã ghi');
-  lines.push('');
-  lines.push(`Chờ tối đa ${s.waitMinutes} phút${s.jobWaitTimedOut ? ' (**ĐÃ HẾT HẠN CHỜ**, còn job chưa xong)' : ''}.`);
-  lines.push('');
-  lines.push('| Nhóm | Từ | Kỳ vọng | Job | reason | Mục từ | published | sense | ví dụ | meaning_vi | Kết quả job |');
-  lines.push('|---|---|---|---|---|---|---|---|---|---|---|');
-  for (const r of s.results) {
-    const j = r.job!;
-    const row = j.rows[0];
-    const e = j.entry;
-    lines.push(
-      `| ${r.planned.group} | ${r.planned.word} | ${jobExpectation(r.planned.group, r.planned.word)}${r.formPresent !== null ? `; word_forms ${r.formPresent ? 'có' : 'KHÔNG'}` : ''} | ${row ? row.status : 'không có'} | ${cell(row?.reason)} | ${e ? 'có' : j.headwordEntryExists ? 'có (có từ trước lần chạy)' : 'không'} | ${e ? e.published : '-'} | ${e ? e.senseCount : '-'} | ${e ? e.exampleCount : '-'} | ${e ? cell((e.meaningVi ?? '').slice(0, 60)) : '-'} | ${verdictLabel(r.verdicts.job)} |`
-    );
-  }
-  lines.push('');
-  lines.push('## 4. Từ KHÔNG ĐẠT, nguyên nhân');
-  lines.push('');
-  const failed = s.results.filter((r) => r.verdict.verdict === 'fail');
-  if (failed.length === 0) lines.push('Không có.');
-  else {
-    lines.push('| Nhóm | Từ | Nguyên nhân |');
-    lines.push('|---|---|---|');
-    for (const r of failed) lines.push(`| ${r.planned.group} | ${r.planned.word} | ${r.verdict.reasons.map((x) => cell(x)).join('<br>')} |`);
-  }
-  lines.push('');
-  lines.push('## 5. Từ BỎ QUA (tiền đề sai)');
-  lines.push('');
-  if (s.skipped.length === 0) lines.push('Không có.');
-  else {
-    lines.push('| Nhóm | Từ | Lý do |');
-    lines.push('|---|---|---|');
-    for (const k of s.skipped) lines.push(`| ${k.group} | ${k.word} | ${cell(k.reason)} |`);
-    const standIns = s.results.filter((r) => r.planned.standsInFor);
-    if (standIns.length > 0) lines.push('', `Từ dự phòng đã chạy: ${standIns.map((r) => `${r.planned.word} (thay ${r.planned.standsInFor})`).join(', ')}.`);
-  }
-  lines.push('');
-  lines.push('## 6. Token và chi phí của lần chạy');
-  lines.push('');
-  const t = s.tokens;
-  lines.push('| Đại lượng | Giá trị |');
-  lines.push('|---|---|');
-  lines.push(`| \`api_usage_counters\` anthropic (tháng ${utcMonth()}) tăng | vào ${t.anthropicAfter.input - t.anthropicBefore.input}, ra ${t.anthropicAfter.output - t.anthropicBefore.output} |`);
-  lines.push(`| Cộng từ hàng job (${t.jobs.calls} job có gọi Haiku) | vào ${t.jobs.input}, ra ${t.jobs.output} |`);
-  lines.push(`| Chi phí ước tính | ${t.jobs.costUsd === null ? 'n/a' : `$${t.jobs.costUsd.toFixed(5)}`} |`);
-  lines.push('');
-  lines.push(`Chi phí là ƯỚC TÍNH từ bảng giá nhập tay ngày ${PRICING_CHECKED_ON} (\`services/enrichment/pricing.ts\`, phải xác minh lại), giả định mỗi job đọc 7.859 token system prompt từ cache còn phần vào còn lại tính đầy đủ; hàng job chỉ lưu tổng token đầu vào nên không tách được chính xác (ghi cache, lần sửa). Token vào gồm cả ghi và đọc cache. Chi phí Google chỉ biết số ký tự (mục 1), không quy ra tiền.`);
-  lines.push('');
-  return lines.join('\n') + '\n';
-}
 
 // ── the run ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -340,8 +233,52 @@ async function runAcceptance(): Promise<number> {
   let charsAfter: number | null = null;
   const hasAB = plan.run.some((p) => p.group === 'A' || p.group === 'B');
 
+  // ── Free Dictionary: probe it directly before anything is looked up ──
+  const usesFd = plan.run.some((p) => MISS_GROUPS.has(p.group));
+  const probes: ProbeEntry[] = [];
+  const waits: BreakerWait[] = [];
+  const probe = async (label: string): Promise<ProbeResult> => {
+    const result = await probeFreeDictionary(lookupConfig.freeDictionary.baseUrl, lookupConfig.lookup.upstreamTimeoutMs);
+    probes.push({ label, result });
+    console.log(`  thăm dò Free Dictionary (${label}): ${result.healthy ? 'KHỎE' : 'KHÔNG KHỎE'} - ${describeProbe(result)}`);
+    return result;
+  };
+  if (usesFd) {
+    console.log('\n── thăm dò Free Dictionary ──');
+    const first = await probe('trước khi chạy');
+    if (!first.healthy) console.warn(`  CẢNH BÁO: Free Dictionary không khỏe. Nhóm H và các ca 503 của nhóm E, F sẽ được ghi là "${UNEVALUABLE_LABEL}", không phải "không đạt".`);
+  }
+  // Free Dictionary is not answering: group H cannot be judged, and running it would only use up its words (each run leaves an entry
+  // behind) and ask more of a service that is struggling. The words are listed as "not judged" with the command that runs them later.
+  const deferred: SkippedWord[] = [];
+  if (probes.length > 0 && !probes[0].result.healthy) {
+    for (const p of plan.run.filter((x) => x.group === 'H')) {
+      deferred.push({ group: 'H', word: p.word, reason: `${UNEVALUABLE_LABEL}: chưa chạy vì Free Dictionary không trả lời lúc bắt đầu (từ giữ nguyên cho lần chạy lại)` });
+    }
+    plan.run = plan.run.filter((x) => x.group !== 'H');
+    if (deferred.length > 0) console.warn(`  Không chạy nhóm H (${deferred.length} từ): ${UNEVALUABLE_LABEL}. Chạy lại khi Free Dictionary khỏe.`);
+  }
+  // One entry per lookup that reached Free Dictionary: did it fail? (the end of this list is how the circuit breaker of the server is guessed)
+  const fdHistory: boolean[] = [];
+  let lastEvidenceAt = 0;
+  let previousGroup: Group | null = null;
+  const contextOf = new Map<string, { probeHealthy: boolean | null; breakerOpen: boolean }>();
+
   console.log('\n── đường nhanh ──');
   for (const planned of plan.run) {
+    // The group before left the circuit breaker of Free Dictionary open? Let it close (UPSTREAM_BREAKER_RESET_MS) before the next group,
+    // and look again: a group judged while the breaker is open measures the breaker, not the word.
+    if (previousGroup !== null && previousGroup !== planned.group && MISS_GROUPS.has(planned.group) && breakerLikelyOpen(fdHistory, lookupConfig.breaker.failureThreshold)) {
+      const waitMs = breakerWaitMs(lastEvidenceAt, Date.now(), lookupConfig.breaker.resetMs);
+      console.log(`  Free Dictionary có vẻ đang bị ngắt mạch sau nhóm ${previousGroup}: chờ ${Math.round(waitMs / 1000)} s (UPSTREAM_BREAKER_RESET_MS=${lookupConfig.breaker.resetMs}) trước nhóm ${planned.group}`);
+      await sleep(waitMs);
+      waits.push({ before: planned.group, after: previousGroup, waitedMs: waitMs });
+      await probe(`sau nhóm ${previousGroup}`);
+      fdHistory.length = 0; // the breaker has had its time: the next lookup is its trial
+    }
+    previousGroup = planned.group;
+    contextOf.set(planned.word, { probeHealthy: probes.length > 0 ? probes[probes.length - 1].result.healthy : null, breakerOpen: breakerLikelyOpen(fdHistory, lookupConfig.breaker.failureThreshold) });
+
     if (charsBefore === null && hasAB && (planned.group === 'A' || planned.group === 'B')) charsBefore = await readCounter(pool, 'google_translate', 'chars', utcMonth());
     if (MISS_GROUPS.has(planned.group)) {
       // stay under the per-user miss limit (the server counts a rolling minute)
@@ -355,6 +292,11 @@ async function runAcceptance(): Promise<number> {
     }
     const obs = await lookup(baseUrl, token, creds, planned.word);
     observations.set(planned.word, obs);
+    if (MISS_GROUPS.has(planned.group)) {
+      const failed = fdFailureEvidence(planned.group, obs);
+      fdHistory.push(failed);
+      if (failed) lastEvidenceAt = Date.now();
+    }
     const f = summarizeFast(obs);
     console.log(`  ${planned.group} ${planned.word.padEnd(14)} HTTP ${String(f.status).padEnd(3)} ${String(f.source ?? f.errorCode ?? '-').padEnd(12)} ${String(Math.round(f.ms)).padStart(5)} ms  enrichment=${f.enrichmentStatus ?? '-'}`);
     const lastAB = planned === [...plan.run].reverse().find((p) => p.group === 'A' || p.group === 'B');
@@ -362,6 +304,22 @@ async function runAcceptance(): Promise<number> {
       await sleep(1500); // the background inserts of the last lookup (word_lookups, word_forms) must have landed
       charsAfter = await readCounter(pool, 'google_translate', 'chars', utcMonth());
     }
+  }
+
+  // ── Free Dictionary once more, now that the fast path is over (decides the words that ran while it was struggling) ──
+  const endProbe = usesFd ? await probe('sau lượt tra') : null;
+
+  // ── group H words that came back with nothing from Free Dictionary: does it have the word now? ──
+  const wordCheck = new Map<string, WordCheck>();
+  const wordChecks: WordCheckEntry[] = [];
+  for (const p of plan.run.filter((x) => x.group === 'H')) {
+    const obs = observations.get(p.word)!;
+    if (isSourceOutage(obs) || !fdFailureEvidence('H', obs)) continue; // answered with senses, or a 503 (unevaluable without any look)
+    const r = await probeFreeDictionary(lookupConfig.freeDictionary.baseUrl, lookupConfig.lookup.upstreamTimeoutMs, {}, p.word, 1);
+    const outcome = classifyWordCheck(r.attempts[0]);
+    wordCheck.set(p.word, outcome);
+    wordChecks.push({ word: p.word, outcome });
+    console.log(`  hỏi lại Free Dictionary về "${p.word}": ${outcome === 'has' ? 'có dữ liệu' : outcome === 'absent' ? '404 (nguồn không có từ này)' : 'không trả lời'}`);
   }
 
   // ── word_forms rows of group B (written in the background) ──
@@ -411,7 +369,8 @@ async function runAcceptance(): Promise<number> {
       headwordEntryExists: await headwordEntryExists(planned.word),
       timedOut: timedOut && rows.length > 0 && !TERMINAL_JOB_STATUSES.includes(rows[0].status),
     };
-    const fastV = evaluateFast(planned.group, planned.word, obs);
+    const at = contextOf.get(planned.word) ?? { probeHealthy: null, breakerOpen: false };
+    const fastV = reclassifyForSource(planned.group, obs, evaluateFast(planned.group, planned.word, obs), sourceHealthFor(at, endProbe ? endProbe.healthy : null, wordCheck.get(planned.word) ?? null));
     const formV = planned.group === 'B' ? evaluateFormRow(planned.word, formPresence.get(planned.word) ?? false) : undefined;
     const jobV = evaluateJob(planned.group, planned.word, job, lookupConfig.flags.enrichmentPublishPolicy);
     results.push({
@@ -425,6 +384,8 @@ async function runAcceptance(): Promise<number> {
     });
   }
 
+  const unevaluableGroups = new Set<Group>([...results.filter((r) => r.verdict.verdict === 'unevaluable').map((r) => r.planned.group), ...deferred.map((d) => d.group)]);
+  const rerun = unevaluableGroups.size > 0 ? rerunCommand(unevaluableGroups, baseUrl) : null;
   const chars = charsBefore !== null && charsAfter !== null ? { before: charsBefore, after: charsAfter, verdict: evaluateGoogleChars(charsBefore, charsAfter) } : undefined;
   const latency = evaluateLatency(results.map((r) => ({ group: r.planned.group, ms: r.summary!.ms })), lookupConfig.lookup.totalDeadlineMs);
 
@@ -468,6 +429,13 @@ async function runAcceptance(): Promise<number> {
     waitMinutes,
     jobWaitTimedOut: timedOut,
     elapsedSec: (Date.now() - started) / 1000,
+    probes,
+    waits,
+    deferred,
+    wordChecks,
+    breakerResetMs: lookupConfig.breaker.resetMs,
+    settings: { publishPolicy: lookupConfig.flags.enrichmentPublishPolicy, totalDeadlineMs: lookupConfig.lookup.totalDeadlineMs, fastTranslator: lookupConfig.lookup.fastTranslator },
+    rerun,
   };
   const report = buildReport(summary);
   const reportPath = repoPath(readArg(argv, 'report') ?? path.join('docs', 'lookup-acceptance-report.md'));
@@ -492,8 +460,12 @@ async function runAcceptance(): Promise<number> {
   console.log(`p50 ${fmtMs(latency.p50)} ms, p95 ${fmtMs(latency.p95)} ms (giới hạn ${latency.limitMs} ms)  ${verdictLabel(latency)}`);
   const pass = results.filter((r) => r.verdict.verdict === 'pass').length;
   const fail = results.filter((r) => r.verdict.verdict === 'fail').length;
-  console.log(`\nĐẠT ${pass}  KHÔNG ĐẠT ${fail}  BỎ QUA ${plan.skipped.length}   báo cáo: ${path.relative(process.cwd(), reportPath)}`);
-  return fail > 0 || chars?.verdict.verdict === 'fail' || latency.verdict === 'fail' ? 1 : 0;
+  const unevaluableCount = results.filter((r) => r.verdict.verdict === 'unevaluable').length + deferred.length;
+  console.log(`\nĐẠT ${pass}  KHÔNG ĐẠT ${fail}  KHÔNG ĐÁNH GIÁ ĐƯỢC ${unevaluableCount}  BỎ QUA ${plan.skipped.length}   báo cáo: ${path.relative(process.cwd(), reportPath)}`);
+  if (rerun) console.log(`Có ${unevaluableCount} từ không đánh giá được vì nguồn ngoài lỗi (không phải lỗi của mã). Chạy lại riêng khi Free Dictionary khỏe:\n  ${rerun}`);
+  // 1 = something failed; 3 = nothing failed but the run did not reach a verdict on every word (so it must not be read as a pass)
+  if (fail > 0 || chars?.verdict.verdict === 'fail' || latency.verdict === 'fail') return 1;
+  return unevaluableCount > 0 ? 3 : 0;
 }
 
 // ── cleanup ─────────────────────────────────────────────────────────────────────────────────────────────────────────

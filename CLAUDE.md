@@ -30,9 +30,9 @@ npm run mock:upstream # local fake Google / Free Dictionary / Datamuse (127.0.0.
 npm run loadtest:lookup  # burst load test of POST /api/v1/ebooks/:id/lookup (single-flight, per-user limit, latency, heap)
 npm run health:snapshot  # LookupHealthService.getSnapshot() as JSON (breakers, Google chars, tokens, jobs, queue depth)
 npm run enrich:redrive   # re-send dead-lettered enrichment jobs; dry-run unless --confirm — docs/lookup-runbook.md
-npm run check:env-example  # .env.example must match config/lookup.ts (also runs first in `npm test`)
+npm run check:env-example  # .env.example must match config/lookup.ts, and every example value must equal the schema default (also runs first in `npm test`)
 npm run seed:lookup-test -- --staging   # test user/ebook + prerequisite entries for the acceptance run; writes .acceptance.local.json (git-ignored)
-npm run acceptance:lookup -- --staging  # 30-word acceptance run against a running server on the dev DB (real network, spends tokens); report in docs/lookup-acceptance-report.md; --cleanup needs the DB name retyped — docs/lookup-runbook.md §12
+npm run acceptance:lookup -- --staging  # 30-word acceptance run against a running server on the dev DB (real network, spends tokens); report in docs/lookup-acceptance-report.md; probes Free Dictionary first (words it cannot judge are "không đánh giá được", exit code 3); --cleanup needs the DB name retyped — docs/lookup-runbook.md §12
 
 npm run db:migrate    # run all 32 migrations (idempotent, tracked in schema_migrations)
 npm run db:seed       # seed admin + sample data (scripts/seed.ts)

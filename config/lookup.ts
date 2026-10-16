@@ -79,9 +79,11 @@ const envSchema = z.object({
   TRANSLATION_FALLBACK_ENABLED: envBool(true),
   ENRICHMENT_ENABLED: envBool(false),
   ENRICHMENT_WORKER_ENABLED: envBool(true),
+  // Safe by default: an entry written by the job waits for an admin unless "auto" is set explicitly (docs/lookup-spec.md §1, §10.3;
+  // changed from "auto" in spec 1.5).
   ENRICHMENT_PUBLISH_POLICY: z.preprocess(
     blankToUndefined,
-    z.enum(['auto', 'review'], { error: 'must be "auto" or "review"' }).default('auto')
+    z.enum(['auto', 'review'], { error: 'must be "auto" or "review"' }).default('review')
   ),
 
   LOOKUP_UPSTREAM_TIMEOUT_MS: envInt(2500, 100, 30_000),
