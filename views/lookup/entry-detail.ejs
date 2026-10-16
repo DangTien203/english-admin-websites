@@ -1,0 +1,175 @@
+<%
+  var e = entry;
+  var statusBadge = e.published ? 'badge-success' : 'badge-warning';
+  var cefrBadge = { A1:'badge-success', A2:'badge-success', B1:'badge-warning', B2:'badge-warning', C1:'badge-info', C2:'badge-info' };
+%>
+<div class="lk-detail" data-entry-id="<%= e.id %>" data-headword="<%= e.headword %>" data-tier-a-missing="<%= e.tier_a_missing.join(', ') %>" data-published="<%= e.published ? '1' : '0' %>">
+  <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start">
+    <div>
+      <h2><%= e.headword %></h2>
+      <div class="lk-muted" style="margin-top:4px">
+        gốc: <strong><%= e.lemma %></strong>
+        <% (e.pos || []).forEach(function(p) { %> <span class="badge badge-primary" style="font-size:11px"><%= p %></span><% }) %>
+        <% if (e.cefr_level) { %> <span class="badge <%= cefrBadge[e.cefr_level] || '' %>" style="font-size:11px"><%= e.cefr_level %> (ước tính)</span><% } %>
+      </div>
+      <% if (e.ipa_us || e.ipa_uk) { %>
+        <div class="lk-mono" style="margin-top:4px">
+          <% if (e.ipa_us) { %>US <%= e.ipa_us %><% } %><% if (e.ipa_us && e.ipa_uk) { %> · <% } %><% if (e.ipa_uk) { %>UK <%= e.ipa_uk %><% } %>
+        </div>
+      <% } %>
+    </div>
+    <span class="badge <%= statusBadge %>" id="lk-detail-status"><%= e.published ? 'Đã xuất bản' : 'Chờ duyệt' %></span>
+  </div>
+
+  <div class="lk-actions">
+    <% if (canWrite) { %>
+      <% if (!e.published) { %>
+        <button type="button" class="btn btn-primary" data-lk-publish="<%= e.id %>">Xuất bản</button>
+      <% } else { %>
+        <button type="button" class="btn btn-danger" data-lk-hide="<%= e.id %>">Ẩn</button>
+      <% } %>
+      <a class="btn btn-secondary" href="/dictionary/<%= e.id %>/edit">Sửa</a>
+    <% } %>
+    <a class="btn btn-secondary" href="/dictionary/<%= e.id %>" target="_blank" rel="noopener">Xem trong từ điển</a>
+  </div>
+
+  <% if (!e.tier_a_complete) { %>
+    <div class="lk-tier-a-missing">
+      <strong>Thiếu trường bắt buộc (tầng A):</strong> <%= e.tier_a_missing.join(', ') %>.
+      Ứng dụng có thể hiển thị thiếu nếu xuất bản; nên bổ sung bằng nút Sửa trước.
+    </div>
+  <% } %>
+
+  <% if (e.note.review_notes.length > 0) { %>
+    <div class="lk-review-notes">
+      <strong>Haiku không chắc về các điểm sau (notes_for_review):</strong>
+      <ul>
+        <% e.note.review_notes.forEach(function(n) { %><li><%= n %></li><% }) %>
+      </ul>
+    </div>
+  <% } %>
+
+  <h3>Nghĩa tiếng Việt của mục từ (hiển thị khi sense không có nghĩa)</h3>
+  <% if (e.meanings_vi.length === 0) { %>
+    <div class="lk-muted">Trống</div>
+  <% } else { %>
+    <ul class="lk-meanings">
+      <% e.meanings_vi.forEach(function(m) { %>
+        <li class="<%= (m.too_long || m.in_review_notes) ? 'lk-flag' : '' %>"><%= m.text %>
+          <% if (m.too_long) { %><span class="lk-flag-tag">dài bất thường</span><% } %>
+          <% if (m.in_review_notes) { %><span class="lk-flag-tag">có trong ghi chú cần xem</span><% } %>
+        </li>
+      <% }) %>
+    </ul>
+  <% } %>
+
+  <h3>Các nghĩa (<%= e.senses.length %>)</h3>
+  <% if (e.senses.length === 0) { %><div class="lk-muted">Chưa có nghĩa nào</div><% } %>
+  <% e.senses.forEach(function(s, i) { %>
+    <div class="lk-sense">
+      <div class="lk-sense-head">
+        <strong>#<%= i + 1 %></strong>
+        <span class="badge badge-primary" style="font-size:11px"><%= s.pos %></span>
+        <% if (s.register) { %><span class="badge badge-secondary" style="font-size:11px"><%= s.register %></span><% } %>
+        <% if (s.domain) { %><span class="badge badge-secondary" style="font-size:11px"><%= s.domain %></span><% } %>
+        <% if (s.region) { %><span class="badge badge-secondary" style="font-size:11px"><%= s.region %></span><% } %>
+      </div>
+      <div style="font-size:14px"><%= s.definition_en || '—' %></div>
+      <% if (s.meanings_vi.length > 0) { %>
+        <ul class="lk-meanings">
+          <% s.meanings_vi.forEach(function(m) { %>
+            <li class="<%= (m.too_long || m.in_review_notes) ? 'lk-flag' : '' %>"><%= m.text %>
+              <% if (m.too_long) { %><span class="lk-flag-tag">dài bất thường</span><% } %>
+              <% if (m.in_review_notes) { %><span class="lk-flag-tag">có trong ghi chú cần xem</span><% } %>
+            </li>
+          <% }) %>
+        </ul>
+      <% } else { %>
+        <div class="lk-muted" style="margin:6px 0">Chưa có nghĩa tiếng Việt</div>
+      <% } %>
+      <% if (s.grammar_note) { %><div class="lk-muted">Ngữ pháp: <%= s.grammar_note %></div><% } %>
+      <% if (s.usage_note) { %><div class="lk-muted">Cách dùng: <%= s.usage_note %></div><% } %>
+      <% s.examples.forEach(function(x) { %>
+        <div class="lk-example">“<%= x.example_en %>”<% if (x.example_vi) { %> — <%= x.example_vi %><% } else { %> <span class="lk-flag-tag">thiếu bản dịch</span><% } %></div>
+      <% }) %>
+      <% if (s.synonyms.length > 0) { %><div class="lk-muted">Đồng nghĩa: <%= s.synonyms.join(', ') %></div><% } %>
+      <% if (s.antonyms.length > 0) { %><div class="lk-muted">Trái nghĩa: <%= s.antonyms.join(', ') %></div><% } %>
+    </div>
+  <% }) %>
+
+  <h3>Thông tin khác</h3>
+  <dl class="lk-kv">
+    <dt>Chủ đề</dt><dd><%= e.topics.length ? e.topics.join(', ') : '—' %></dd>
+    <dt>Hạng tần suất</dt><dd><%= e.frequency_rank != null ? lk.num(e.frequency_rank) : '—' %></dd>
+    <dt>Đếm được / ngoại động</dt><dd><%= e.is_countable == null ? '—' : (e.is_countable ? 'đếm được' : 'không đếm được') %> · <%= e.is_transitive == null ? '—' : (e.is_transitive ? 'ngoại động từ' : 'nội động từ') %></dd>
+    <dt>Từ nguyên</dt><dd><%= e.etymology || '—' %></dd>
+    <dt>Đồng nghĩa (mục từ)</dt><dd><%= e.synonyms.length ? e.synonyms.map(function(x) { return x.headword; }).join(', ') : '—' %></dd>
+    <dt>Trái nghĩa (mục từ)</dt><dd><%= e.antonyms.length ? e.antonyms.map(function(x) { return x.headword; }).join(', ') : '—' %></dd>
+    <dt>Dạng biến</dt><dd><%= e.word_forms.length ? e.word_forms.map(function(f) { return f.form_value + ' (' + f.form_type + ')'; }).join(', ') : '—' %></dd>
+  </dl>
+
+  <% if (e.idioms.length > 0) { %>
+    <details style="margin-top:10px"><summary><strong>Thành ngữ (<%= e.idioms.length %>)</strong></summary>
+      <% e.idioms.forEach(function(x) { %>
+        <div class="lk-sense"><strong><%= x.idiom_text %></strong><div style="font-size:13px"><%= x.definition_en || '' %></div><div style="font-size:13px"><%= x.definition_vi || '' %></div>
+          <% if (x.example_en) { %><div class="lk-example">“<%= x.example_en %>”<% if (x.example_vi) { %> — <%= x.example_vi %><% } %></div><% } %></div>
+      <% }) %>
+    </details>
+  <% } %>
+  <% if (e.phrasal_verbs.length > 0) { %>
+    <details style="margin-top:10px"><summary><strong>Cụm động từ (<%= e.phrasal_verbs.length %>)</strong></summary>
+      <% e.phrasal_verbs.forEach(function(x) { %>
+        <div class="lk-sense"><strong><%= x.phrasal_verb %></strong> <span class="lk-muted">(<%= x.particle %><%= x.is_separable ? ', tách được' : '' %>)</span>
+          <div style="font-size:13px"><%= x.definition_en || '' %></div><div style="font-size:13px"><%= x.definition_vi || '' %></div>
+          <% if (x.example_en) { %><div class="lk-example">“<%= x.example_en %>”<% if (x.example_vi) { %> — <%= x.example_vi %><% } %></div><% } %></div>
+      <% }) %>
+    </details>
+  <% } %>
+  <% if (e.collocations.length > 0) { %>
+    <details style="margin-top:10px"><summary><strong>Cụm từ hay đi cùng (<%= e.collocations.length %>)</strong></summary>
+      <% e.collocations.forEach(function(x) { %>
+        <div class="lk-sense"><strong><%= x.collocation %></strong><% if (x.pattern) { %> <span class="lk-muted">(<%= x.pattern %>)</span><% } %>
+          <% if (x.example_en) { %><div class="lk-example">“<%= x.example_en %>”<% if (x.example_vi) { %> — <%= x.example_vi %><% } %></div><% } %></div>
+      <% }) %>
+    </details>
+  <% } %>
+
+  <h3>Ghi chú của hệ thống (admin_note)</h3>
+  <dl class="lk-kv">
+    <dt>Nguồn</dt><dd><%= e.note.sources.length ? e.note.sources.join(', ') : '—' %></dd>
+    <dt>Model</dt><dd class="lk-mono"><%= e.note.model || '—' %></dd>
+    <dt>Job</dt>
+    <dd>
+      <% if (e.note.job_id) { %><span class="lk-mono"><%= e.note.job_id %></span> · <a href="/lookup/jobs?q=<%= encodeURIComponent(e.lemma) %>">xem job của từ này</a><% } else { %>—<% } %>
+    </dd>
+    <dt>Lúc tạo</dt><dd><%= e.note.publish_note || '—' %></dd>
+    <dt>Thiếu tầng B</dt><dd><%= e.note.tier_b_missing.length ? e.note.tier_b_missing.join(', ') : 'không thiếu' %></dd>
+    <dt>Giá trị ước tính</dt><dd><%= e.note.estimated.length ? e.note.estimated.join(', ') : '—' %></dd>
+    <% if (e.note.other.length > 0) { %><dt>Khác</dt><dd><%= e.note.other.join(' · ') %></dd><% } %>
+  </dl>
+  <details style="margin-top:8px"><summary class="lk-muted">Văn bản gốc của admin_note</summary>
+    <pre style="font-size:11px;white-space:pre-wrap;padding:8px;background:var(--bg);border-radius:var(--radius);margin-top:4px"><%= e.admin_note %></pre>
+  </details>
+
+  <h3>Lịch sử thay đổi</h3>
+  <% if (e.history.length === 0) { %>
+    <div class="lk-muted">Chưa có</div>
+  <% } else { %>
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>Lúc</th><th>Trường</th><th>Từ</th><th>Thành</th><th>Người sửa</th></tr></thead>
+        <tbody>
+          <% e.history.forEach(function(h) { %>
+            <tr>
+              <td style="font-size:12px"><%= lk.date(h.created_at) %></td>
+              <td class="lk-mono"><%= h.field_name %></td>
+              <td class="lk-mono"><%= h.old_value == null ? '—' : String(h.old_value).slice(0, 60) %></td>
+              <td class="lk-mono"><%= h.new_value == null ? '—' : String(h.new_value).slice(0, 60) %></td>
+              <td style="font-size:12px"><%= h.admin_name || 'hệ thống' %></td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </div>
+  <% } %>
+</div>

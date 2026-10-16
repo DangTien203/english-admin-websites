@@ -55,7 +55,8 @@
       <div class="card">
         <div class="card-header"><h2>Part of Speech (POS)</h2></div>
         <div style="padding:16px;display:flex;flex-wrap:wrap;gap:10px">
-          <% VALID_POS.forEach(p => { %>
+          <%# A part of speech the entry has but the list does not (the enrichment job writes 'exclamation', 'modal verb', 'number', 'article') stays ticked, so saving does not drop it %>
+          <% VALID_POS.concat(entryPos.filter(p => !VALID_POS.includes(p))).forEach(p => { %>
             <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:14px">
               <input type="checkbox" name="pos" value="<%= p %>" <%= entryPos.includes(p) ? 'checked' : '' %>>
               <%= p %>

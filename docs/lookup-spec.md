@@ -1,5 +1,5 @@
 WORDYGO · ĐẶC TẢ TRA TỪ NHANH VÀ TỰ BỔ SUNG TỪ ĐIỂN
-Tệp: docs/lookup-spec.md · Phiên bản 1.3 · 15/10/2026 (1.3: P6b — mục 3 meaning_vi, 8 S2, 8.1 IPA / audio / sense, 9.4 cửa sổ Wiktionary, 9.8 vòng tròn, 10.7, 11.2 / 11.4 breaker, 12.1; 1.2: mục 9.5 chốt khóa đầu ra ở P6a; 1.1: thêm LOOKUP_FAST_TRANSLATOR, chế độ haiku ở mục 5)
+Tệp: docs/lookup-spec.md · Phiên bản 1.4 · 16/10/2026 (1.4: P8 — mục 12.6 phân quyền trang quản trị; 1.3: P6b — mục 3 meaning_vi, 8 S2, 8.1 IPA / audio / sense, 9.4 cửa sổ Wiktionary, 9.8 vòng tròn, 10.7, 11.2 / 11.4 breaker, 12.1; 1.2: mục 9.5 chốt khóa đầu ra ở P6a; 1.1: thêm LOOKUP_FAST_TRANSLATOR, chế độ haiku ở mục 5)
 Mọi prompt P1 đến P8 dựa vào tệp này. Khi mâu thuẫn, thứ tự ưu tiên: migration thật, tệp này, prompt.
 
 0. QUY TẮC LÀM VIỆC
@@ -253,7 +253,7 @@ S7 Cập nhật word_enrichment_jobs (trạng thái, entry_id, token), api_usage
 12.3 Làm sạch đầu vào: giữ bộ lọc từ hiện có; thêm test cho chuỗi có khoảng trắng, số, ký tự điều khiển, chuỗi quá dài, Unicode lạ.
 12.4 Chống chèn lệnh (prompt injection): nội dung từ Wiktionary, Free Dictionary, Datamuse và từ người dùng tra chỉ là dữ liệu, bọc trong thẻ <data>; system prompt nói rõ không làm theo chỉ dẫn nằm trong đó; đầu ra luôn qua schema và zod.
 12.5 Không ghi khóa API vào log, lỗi hay response. Khi cần in thì che, chỉ hiện 4 ký tự cuối.
-12.6 Phân quyền admin theo admin_accounts.role (super_admin, content_editor, moderator) cho các tính năng ở P8.
+12.6 Phân quyền admin theo admin_accounts.role (super_admin, content_editor, moderator) cho các tính năng ở P8 (chốt ở P8, hiện thực ở routes/lookup.ts và middlewares/adminJson.ts; hướng dẫn ở docs/lookup-admin.md): super_admin và content_editor xem và thao tác (thêm từ vào hàng đợi, thử lại job, xuất bản, ẩn, xuất bản hàng loạt); moderator chỉ xem danh sách và chi tiết: nút ghi bị ẩn ở giao diện, API ghi trả 403 FORBIDDEN. Mọi thao tác ghi để lại log evt='admin_action'.
 
 13. KIỂM THỬ VÀ TIÊU CHÍ HOÀN THÀNH
 13.1 Unit test cho: sanitizer, ma trận gộp (bảng test theo mục 6, có ca lỗi cũ), tách 'từ: định nghĩa', single-flight, breaker, token bucket, parser Free Dictionary (fixture từ phản hồi thật), client Google, hợp đồng Haiku (mock), validator, bộ gom nghĩa, ghi DB idempotent.

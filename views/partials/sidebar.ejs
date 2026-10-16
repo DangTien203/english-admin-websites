@@ -20,6 +20,24 @@
       <span class="nav-icon">📖</span>
       <span class="nav-label">Dictionary</span>
     </a>
+    <a href="/lookup" class="nav-item <%= typeof active !== 'undefined' && active === 'lookup' ? 'active' : '' %>">
+      <span class="nav-icon">🔎</span>
+      <span class="nav-label">Tra từ &amp; làm giàu</span>
+    </a>
+    <% if (typeof active !== 'undefined' && active === 'lookup') { %>
+      <a href="/lookup/jobs" class="nav-item" style="padding-left:40px;font-size:13px">
+        <span class="nav-icon" style="font-size:13px">⏳</span>
+        <span class="nav-label">Hàng đợi làm giàu</span>
+      </a>
+      <a href="/lookup/review" class="nav-item" style="padding-left:40px;font-size:13px">
+        <span class="nav-icon" style="font-size:13px">✅</span>
+        <span class="nav-label">Duyệt mục từ tự tạo</span>
+      </a>
+      <a href="/lookup/health" class="nav-item" style="padding-left:40px;font-size:13px">
+        <span class="nav-icon" style="font-size:13px">🩺</span>
+        <span class="nav-label">Sức khỏe tra từ</span>
+      </a>
+    <% } %>
     <%# Lessons — hidden from sidebar; route /lessons still accessible via URL %>
     <a href="/decks" class="nav-item <%= typeof active !== 'undefined' && active === 'flashcards' ? 'active' : '' %>">
       <span class="nav-icon">🃏</span>

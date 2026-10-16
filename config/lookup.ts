@@ -133,6 +133,9 @@ const envSchema = z.object({
   REFDATA_DATABASE_URL: envPgUrl,
 });
 
+/** The schema itself, for tools that compare it with something else (scripts/check-env-example.ts). Importing it has no side effect beyond this module's own load. */
+export const lookupEnvSchema = envSchema;
+
 // ── Public shape ─────────────────────────────────────────────────────────────
 
 export type DeepReadonly<T> = T extends (infer U)[]

@@ -30,6 +30,11 @@ function getEnqueuer(): EnrichmentEnqueuer {
   return enqueuer;
 }
 
+/** The enqueuer of this process, for callers outside the lookup path (the admin pages of P8 send jobs through it too). */
+export function getEnrichmentEnqueuer(): EnrichmentEnqueuer {
+  return getEnqueuer();
+}
+
 /** Replaces the enqueuer (tests). */
 export function setEnrichmentEnqueuer(next: EnrichmentEnqueuer): void {
   enqueuer = next;

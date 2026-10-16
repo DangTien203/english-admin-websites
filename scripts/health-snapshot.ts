@@ -1,6 +1,6 @@
 /**
  * Prints the LookupHealthService snapshot as JSON (breakers, Google characters, Anthropic tokens, jobs, queue depth, the last
- * failures). Read-only; the HTTP endpoint comes in P8. The in-memory parts (lookup counters, queue counters) describe THIS
+ * failures). Read-only; the same snapshot is served at GET /lookup/api/health (P8). The in-memory parts (lookup counters, queue counters) describe THIS
  * process only, so from a command line they are empty: look at the API process's own snapshot for those.
  *
  *   npm run health:snapshot

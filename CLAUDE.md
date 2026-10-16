@@ -30,6 +30,9 @@ npm run mock:upstream # local fake Google / Free Dictionary / Datamuse (127.0.0.
 npm run loadtest:lookup  # burst load test of POST /api/v1/ebooks/:id/lookup (single-flight, per-user limit, latency, heap)
 npm run health:snapshot  # LookupHealthService.getSnapshot() as JSON (breakers, Google chars, tokens, jobs, queue depth)
 npm run enrich:redrive   # re-send dead-lettered enrichment jobs; dry-run unless --confirm — docs/lookup-runbook.md
+npm run check:env-example  # .env.example must match config/lookup.ts (also runs first in `npm test`)
+npm run seed:lookup-test -- --staging   # test user/ebook + prerequisite entries for the acceptance run; writes .acceptance.local.json (git-ignored)
+npm run acceptance:lookup -- --staging  # 30-word acceptance run against a running server on the dev DB (real network, spends tokens); report in docs/lookup-acceptance-report.md; --cleanup needs the DB name retyped — docs/lookup-runbook.md §12
 
 npm run db:migrate    # run all 32 migrations (idempotent, tracked in schema_migrations)
 npm run db:seed       # seed admin + sample data (scripts/seed.ts)
@@ -49,7 +52,7 @@ Tests require `JWT_SECRET` in `.env` — `tests/setup.ts` throws otherwise. Test
 ### Mount order (app.ts)
 
 1. `injectAdmin` middleware on every request (web + API). Loads admin from session, populates `res.locals.admin`, and for super_admin fetches pending-approvals + pending-transactions counts for sidebar badges. **Don't add expensive queries here.**
-2. **Web routes** (`/auth`, `/dashboard`, `/approvals`, `/users`, `/profile`, `/dictionary`, `/lessons`, `/decks`, `/ebooks`, `/subscriptions`, `/settings`, `/games`, `/ai-content`).
+2. **Web routes** (`/auth`, `/dashboard`, `/approvals`, `/users`, `/profile`, `/dictionary`, `/lessons`, `/decks`, `/ebooks`, `/subscriptions`, `/settings`, `/games`, `/ai-content`, `/lookup`).
 3. **API routes** (`/api/v1/...`) — see "API surface" below.
 4. **Catch-all** `/api/v1` cards mount must come **after** all specific `/api/v1/*` mounts (currently last, line ~142). Adding a new API resource? Mount it before the cards line.
 5. `/api/*` 404 returns JSON via `apiError`. Web 404 renders `views/404.ejs`.
@@ -113,6 +116,7 @@ Railway (`railway.json`): build `npm run build`, start `node dist/database/migra
 | `/settings` | `routes/settings.ts` → `settingsController` | any admin | minimal settings page |
 | `/games` | `routes/games.ts` → `gameController` | super_admin, moderator | word lists, levels, semantic sets CRUD; leaderboard view |
 | `/ai-content` | `routes/ai-content.ts` → `aiContentController` | super_admin, moderator | retrieval sessions, moderation queue, prompt templates |
+| `/lookup` | `routes/lookup.ts` → `lookupAdminController` (pages) + `lookupAdminApiController` (JSON under `/lookup/api/*`, session auth, `requireAdminJson`) | read: any admin; write: super_admin, content_editor | enrichment queue (send words, retry), review / publish / hide entries made by the job (`[auto]`), lookup health, most looked-up missing words — `docs/lookup-admin.md`, survey `docs/lookup-admin-notes.md` |
 
 ### Admin roles
 
@@ -121,6 +125,9 @@ Railway (`railway.json`): build `npm run build`, start `node dist/database/migra
 | Capability | super_admin | moderator | content_editor |
 |---|:---:|:---:|:---:|
 | Dictionary, lessons, decks, games, ebooks, ai-content | ✅ | ✅ | ❌ (not currently gated to it) |
+| `/dictionary/:id` page and `/dictionary/:id/edit` editor | ✅ | ✅ | ✅ (opened for the review screen of `/lookup`; list / create / import / delete are not) |
+| `/lookup` pages and read API | ✅ | ✅ | ✅ |
+| `/lookup` writes (send words, retry, publish, hide, bulk publish) | ✅ | ❌ (403) | ✅ |
 | Users CRUD | ✅ | ✅ | ❌ |
 | Approvals (queue, approve/reject) | ✅ | ❌ | ❌ |
 | Subscriptions (plans, payment methods, transactions) | ✅ | ❌ | ❌ |
@@ -137,7 +144,7 @@ Railway (`railway.json`): build `npm run build`, start `node dist/database/migra
 - Master layout: `views/layouts/main.ejs` (header, sidebar, footer). All pages inherit.
 - `res.locals.admin` available in every view (set by `injectAdmin`).
 - Flash messages via `connect-flash` (`success`, `error`, `warning`).
-- Folder structure mirrors web routes: `views/{auth,dashboard,approvals,users,profile,dictionary,lessons,decks,ebooks,subscriptions,settings,games,ai-content}/...` plus `views/partials/` (sidebar, header, pagination).
+- Folder structure mirrors web routes: `views/{auth,dashboard,approvals,users,profile,dictionary,lessons,decks,ebooks,subscriptions,settings,games,ai-content,lookup}/...` plus `views/partials/` (sidebar, header, pagination).
 
 ---
 
@@ -387,6 +394,7 @@ Real PostgreSQL, sequential (`maxWorkers: 1`). Cleanup via DELETE WHERE email LI
 | `home.test.ts` | dashboard sections, word-of-the-day determinism |
 | `notifications.test.ts` | listing, mark read, delete |
 | `retrieval.test.ts` | start/sentence/answer flow, feature gating |
+| `admin/lookupAdmin*.test.ts`, `admin/dictionaryEditor.test.ts` | the `/lookup` admin: roles (session login per role via `/auth/login`), jobs, retry, review / publish / hide / bulk publish (+ `entry_edit_history`), health, missing words, `admin_action` log, rendered pages; the dictionary editor's `published` checkbox. Real PG, fake enqueuer (one suite uses real pg-boss in its own schema) |
 | `word-translation.test.ts` | Claude translation cache hit/miss |
 | `paragraphSegmenter.test.ts` | text → paragraph boundary unit tests |
 
@@ -528,6 +536,7 @@ Folder is `dictionary` only when `source_type === 'dictionary_headword'`; otherw
 - **Always** wrap async API handlers with `asyncHandler` so `errorHandler` catches PG errors.
 - **Web routes** don't currently flow through `errorHandler` (they render or redirect on failure) — keep web errors local.
 - New API resource? Mount **before** the broad `/api/v1` cards mount in `app.ts`.
+- Session-cookie surface = CSRF-guarded: `middlewares/sameOrigin.ts` (`requireSameOrigin`) refuses POST/PUT/PATCH/DELETE whose `Origin` (or `Referer`) host differs from `Host`; no header at all passes. It is mounted in `app.ts` on an explicit prefix list (web mounts + `/lookup`), **not** on `/api/v1` (JWT). A new session-authenticated mount must be added to that list. The session cookie is `SameSite=Lax`, `Secure` in production.
 - New migration? Append to the `migrations` array in `database/migrate.ts` with a never-changing `key`. Do not edit historical migrations once deployed.
 - Rate limiters skip under `NODE_ENV=test` — production rate limits are real, watch the per-user TTS limit (30/min).
 - The codebase has loose TS strictness — actively check for null/undefined; the compiler won't.

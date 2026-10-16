@@ -233,7 +233,7 @@ const dictionaryController = {
       const pos = Array.isArray(req.body.pos) ? req.body.pos : (req.body.pos ? [req.body.pos] : []);
       const tagIds = Array.isArray(req.body.tagIds) ? req.body.tagIds : (req.body.tagIds ? [req.body.tagIds] : []);
 
-      await DictionaryEntry.update(id, { ...req.body, pos }, tagIds);
+      await DictionaryEntry.update(id, { ...req.body, pos }, tagIds, req.session.admin.id);
       req.flash('success', 'Word updated successfully');
       return res.redirect(`/dictionary/${id}`);
     } catch (err) {

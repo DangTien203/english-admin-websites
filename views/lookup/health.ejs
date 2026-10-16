@@ -1,0 +1,225 @@
+<%
+  var RANK = { unknown: 0, ok: 1, warn: 2, critical: 3 };
+  function worst() {
+    var best = 'ok';
+    for (var i = 0; i < arguments.length; i++) { if (RANK[arguments[i]] > RANK[best]) best = arguments[i]; }
+    return best;
+  }
+  function failed(section) { return section && typeof section === 'object' && typeof section.error === 'string'; }
+  var providers = ['google_translate', 'free_dictionary', 'datamuse', 'anthropic', 'anthropic_fast'];
+  var google = snapshot.google;
+  var anthropic = snapshot.anthropic;
+  var jobs = snapshot.jobs;
+  var queue = snapshot.queue;
+  var lookups = snapshot.lookups;
+%>
+<div class="page-header" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+  <div>
+    <h1>Sức khỏe tra từ</h1>
+    <p>Tình trạng các dịch vụ ngoài, mức dùng so với trần, hàng đợi và các từ được tra nhiều mà từ điển chưa có</p>
+  </div>
+  <a href="/lookup/health?days=<%= missing.days %>" class="btn btn-secondary">↻ Làm mới</a>
+</div>
+
+<%- include('_tabs', { section }) %>
+
+<div class="lk-muted" style="margin-bottom:16px">
+  Chụp lúc <%= lk.date(snapshot.generatedAt) %>. Cấu hình của tiến trình phục vụ trang này:
+  tra qua dịch vụ ngoài <strong><%= flags.translationFallback ? 'bật' : 'tắt' %></strong> ·
+  gửi job <strong><%= flags.enrichment ? 'bật' : 'tắt' %></strong> ·
+  worker trong tiến trình này <strong><%= flags.worker ? 'bật' : 'tắt' %></strong> ·
+  chính sách xuất bản <strong><%= flags.publishPolicy === 'review' ? 'review (luôn chờ duyệt)' : 'auto (tự xuất bản khi đủ tầng A)' %></strong>.
+  Worker chạy ở dịch vụ khác có thể cấu hình khác.
+</div>
+
+<% if (!flags.enrichment) { %>
+  <div class="alert alert-warning">Làm giàu từ điển đang <strong>tắt</strong> trên máy chủ này (<code>ENRICHMENT_ENABLED=false</code>): nút “Thêm vào hàng đợi” sẽ không gửi được job.</div>
+<% } %>
+
+<!-- Providers -->
+<h2 style="font-size:16px;margin-bottom:12px">Nhà cung cấp</h2>
+<div class="lk-health-grid">
+  <% providers.forEach(function(p) {
+    var b = snapshot.breakers[p];
+    var bl = b ? lk.breakerLevel(b.state) : 'unknown';
+    var usageUsed = null, usageLimit = null;
+    if (p === 'google_translate' && !failed(google)) { usageUsed = google.charsUsed; usageLimit = google.monthlyCharLimit; }
+    var ul = usageUsed === null ? 'ok' : lk.usageLevel(usageUsed, usageLimit);
+    var level = worst(bl === 'unknown' ? 'ok' : bl, ul);
+  %>
+    <div class="lk-health-card <%= lk.levelClass(level) %>" data-provider="<%= p %>">
+      <h3><span class="lk-level-dot"></span><%= lk.providerLabel(p) %></h3>
+      <% if (!b) { %>
+        <div class="lk-muted">Không đọc được trạng thái (có thể thiếu cấu hình)</div>
+      <% } else { %>
+        <div>Breaker: <strong><%= lk.breakerLabel(b.state) %></strong></div>
+        <div class="lk-muted">
+          Lỗi liên tiếp: <%= b.consecutiveFailures %><% if (b.openedAt) { %> · mở lúc <%= lk.date(b.openedAt) %><% } %>
+        </div>
+      <% } %>
+
+      <% if (p === 'google_translate') { %>
+        <% if (failed(google)) { %>
+          <div class="lk-muted" style="margin-top:8px">Không đọc được mức dùng: <%= google.error %></div>
+        <% } else { %>
+          <div style="margin-top:10px">Ký tự tháng <%= google.period %>: <strong><%= lk.num(google.charsUsed) %></strong> / <%= lk.num(google.monthlyCharLimit) %> (<%= lk.percent(google.charsUsed, google.monthlyCharLimit) %>)</div>
+          <div class="lk-meter <%= lk.levelClass(ul) %>"><span style="width:<%= Math.min(100, google.monthlyCharLimit > 0 ? Math.round(google.charsUsed / google.monthlyCharLimit * 100) : 0) %>%"></span></div>
+          <div class="lk-muted">Còn lại <%= lk.num(google.remaining) %> ký tự. Hết thì không gọi Google nữa (bản tạm thiếu nghĩa tiếng Việt).</div>
+        <% } %>
+      <% } %>
+
+      <% if (p === 'anthropic') { %>
+        <% if (failed(anthropic)) { %>
+          <div class="lk-muted" style="margin-top:8px">Không đọc được mức dùng: <%= anthropic.error %></div>
+        <% } else { %>
+          <div style="margin-top:10px">Token tháng <%= anthropic.period %> (làm giàu):</div>
+          <div><strong><%= lk.num(anthropic.enrichment.inputTokens) %></strong> vào · <strong><%= lk.num(anthropic.enrichment.outputTokens) %></strong> ra</div>
+          <div class="lk-muted">Trần chi tiêu do Anthropic đặt, không đọc được từ đây. Hết thì job báo “Hết ngân sách Anthropic”.</div>
+        <% } %>
+      <% } %>
+
+      <% if (p === 'anthropic_fast') { %>
+        <% if (failed(anthropic)) { %>
+          <div class="lk-muted" style="margin-top:8px">Không đọc được mức dùng: <%= anthropic.error %></div>
+        <% } else { %>
+          <div style="margin-top:10px">Token tháng <%= anthropic.period %> (tra nhanh, chỉ khi <code>LOOKUP_FAST_TRANSLATOR=haiku</code>):</div>
+          <div><strong><%= lk.num(anthropic.fastPath.inputTokens) %></strong> vào · <strong><%= lk.num(anthropic.fastPath.outputTokens) %></strong> ra</div>
+        <% } %>
+      <% } %>
+    </div>
+  <% }) %>
+</div>
+
+<!-- Jobs and queue -->
+<h2 style="font-size:16px;margin-bottom:12px">Job và hàng đợi</h2>
+<div class="lk-health-grid">
+  <%
+    var jl = 'unknown';
+    if (!failed(jobs)) jl = lk.usageLevel(jobs.today.used, jobs.today.limit);
+  %>
+  <div class="lk-health-card <%= lk.levelClass(jl) %>" data-card="jobs-today">
+    <h3><span class="lk-level-dot"></span>Job hôm nay (UTC)</h3>
+    <% if (failed(jobs)) { %>
+      <div class="lk-muted">Không đọc được: <%= jobs.error %></div>
+    <% } else { %>
+      <div class="lk-big"><%= lk.num(jobs.today.used) %> / <%= lk.num(jobs.today.limit) %></div>
+      <div class="lk-meter <%= lk.levelClass(jl) %>"><span style="width:<%= Math.min(100, jobs.today.limit > 0 ? Math.round(jobs.today.used / jobs.today.limit * 100) : 0) %>%"></span></div>
+      <div class="lk-muted">Còn <%= lk.num(jobs.today.remaining) %> job. Hết trần thì job mới bị bỏ qua (daily_cap) đến hết ngày UTC.</div>
+      <div style="margin-top:8px;font-size:13px">
+        <% Object.keys(jobs.byStatus).forEach(function(s) { %>
+          <span class="badge <%= lk.statusBadge(s) %>" style="margin:0 4px 4px 0"><%= lk.statusLabel(s) %>: <%= lk.num(jobs.byStatus[s]) %></span>
+        <% }) %>
+      </div>
+    <% } %>
+  </div>
+
+  <%
+    var ql = 'unknown';
+    if (!failed(queue) && queue) ql = queue.deadLetter.waiting > 0 ? 'warn' : 'ok';
+  %>
+  <div class="lk-health-card <%= lk.levelClass(ql) %>" data-card="queue">
+    <h3><span class="lk-level-dot"></span>Hàng đợi (pg-boss)</h3>
+    <% if (failed(queue)) { %>
+      <div class="lk-muted">Không đọc được: <%= queue.error %></div>
+    <% } else if (!queue) { %>
+      <div class="lk-muted">pg-boss chưa từng được cài trên DB này (chưa bật làm giàu).</div>
+    <% } else { %>
+      <div>Đang chờ: <strong><%= lk.num(queue.main.waiting) %></strong> · Đang chạy: <strong><%= lk.num(queue.main.active) %></strong></div>
+      <div>Hàng lỗi chết: <strong><%= lk.num(queue.deadLetter.waiting) %></strong></div>
+      <div class="lk-muted">
+        <% if (queue.main.waiting > 0 && queue.main.active === 0) { %>Có job chờ mà không job nào chạy: kiểm tra worker còn sống không (<code>docs/lookup-runbook.md</code> mục 10.4).<% } %>
+        <% if (queue.deadLetter.waiting > 0) { %>Có job hết số lần thử: xem bảng lỗi bên dưới, thử lại ở tab Hàng đợi.<% } %>
+      </div>
+    <% } %>
+  </div>
+
+  <div class="lk-health-card lk-ok" data-card="lookups">
+    <h3><span class="lk-level-dot"></span>Lượt tra (từ khi tiến trình này khởi động)</h3>
+    <div class="lk-big"><%= lk.num(lookups.total) %></div>
+    <div class="lk-muted">
+      Bản tạm thiếu dữ liệu (partial): <%= lookups.partial.count %> / <%= lookups.partial.of %>
+      <% if (lookups.partial.of > 0) { %>(<%= Math.round(lookups.partial.rate * 100) %>%)<% } %>
+    </div>
+    <div class="lk-muted">
+      Độ trễ (<%= lookups.latency.samples %> lượt gần nhất):
+      p50 <%= lookups.latency.p50 === null ? '—' : lookups.latency.p50 + ' ms' %> ·
+      p95 <%= lookups.latency.p95 === null ? '—' : lookups.latency.p95 + ' ms' %>
+    </div>
+    <div class="lk-muted">Số liệu này nằm trong bộ nhớ của tiến trình, mất khi khởi động lại.</div>
+  </div>
+</div>
+
+<!-- Recent failures -->
+<div class="card" style="margin-bottom:24px">
+  <div class="card-header"><h2>20 lỗi gần nhất</h2></div>
+  <% if (failed(snapshot.recentFailures)) { %>
+    <div style="padding:20px" class="lk-muted">Không đọc được: <%= snapshot.recentFailures.error %></div>
+  <% } else if (snapshot.recentFailures.length === 0) { %>
+    <div style="padding:30px;text-align:center;color:var(--text-secondary)">Không có lỗi nào</div>
+  <% } else { %>
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>Từ</th><th>Trạng thái</th><th>Lý do</th><th style="text-align:right">Lần chạy</th><th>Lúc</th></tr></thead>
+        <tbody>
+          <% snapshot.recentFailures.forEach(function(f) { %>
+            <tr>
+              <td style="font-weight:600"><a href="/lookup/jobs?q=<%= encodeURIComponent(f.word) %>"><%= f.word %></a></td>
+              <td><span class="badge <%= lk.statusBadge(f.status) %>"><%= lk.statusLabel(f.status) %></span></td>
+              <td>
+                <% if (f.reason) { %><div class="lk-mono"><%= f.reason %></div><div class="lk-muted"><%= lk.reasonLabel(f.reason) %></div><% } else { %>—<% } %>
+              </td>
+              <td style="text-align:right"><%= f.attempts %></td>
+              <td style="font-size:12px"><%= lk.date(f.at) %></td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </div>
+  <% } %>
+</div>
+
+<!-- Most looked-up words the dictionary does not have -->
+<div class="card">
+  <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+    <h2>Từ được tra nhiều mà từ điển chưa có (top 50)</h2>
+    <div style="display:flex;gap:6px">
+      <a href="/lookup/health?days=7"  class="btn btn-sm <%= missing.days === 7  ? 'btn-primary' : 'btn-secondary' %>">7 ngày</a>
+      <a href="/lookup/health?days=30" class="btn btn-sm <%= missing.days === 30 ? 'btn-primary' : 'btn-secondary' %>">30 ngày</a>
+    </div>
+  </div>
+  <div class="lk-muted" style="padding:0 20px 8px">Tính từ các lượt tra trả bản tạm hoặc không tìm thấy trong <%= missing.days %> ngày qua. Từ đã có mục từ xuất bản thì không hiện.</div>
+  <% if (missing.items.length === 0) { %>
+    <div style="padding:30px;text-align:center;color:var(--text-secondary)">Chưa có từ nào</div>
+  <% } else { %>
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>Từ</th><th style="text-align:right">Lượt tra</th><th>Lần cuối</th><th>Job gần nhất</th><th>Mục từ</th><th></th></tr></thead>
+        <tbody>
+          <% missing.items.forEach(function(m) { %>
+            <tr>
+              <td style="font-weight:600"><%= m.word %></td>
+              <td style="text-align:right"><%= lk.num(m.lookups) %></td>
+              <td style="font-size:12px"><%= lk.date(m.last_lookup_at) %></td>
+              <td>
+                <% if (m.job) { %>
+                  <span class="badge <%= lk.statusBadge(m.job.status) %>"><%= lk.statusLabel(m.job.status) %></span>
+                  <% if (m.job.reason) { %><div class="lk-muted"><%= lk.reasonLabel(m.job.reason) %></div><% } %>
+                <% } else { %><span class="lk-muted">chưa có job</span><% } %>
+              </td>
+              <td>
+                <% if (m.entry) { %><a href="<%= m.entry.url %>"><%= m.entry.is_auto ? 'chờ duyệt' : 'có sẵn (chưa xuất bản)' %></a><% } else { %><span class="lk-muted">—</span><% } %>
+              </td>
+              <td>
+                <% if (canWrite && m.can_enqueue) { %>
+                  <button type="button" class="btn btn-sm btn-secondary" data-lk-add-word="<%= m.word %>">Thêm vào hàng đợi</button>
+                <% } %>
+              </td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </div>
+  <% } %>
+</div>
+
+<script src="/js/lookup-admin.js"></script>

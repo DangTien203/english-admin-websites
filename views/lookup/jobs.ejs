@@ -1,0 +1,152 @@
+<div class="page-header">
+  <h1>Hàng đợi làm giàu</h1>
+  <p>Các job tự bổ sung từ điển: từ nào đang chờ, đã tạo mục từ, bị bỏ qua hay lỗi</p>
+</div>
+
+<%- include('_tabs', { section }) %>
+
+<% if (!enrichmentEnabled) { %>
+  <div class="alert alert-warning">
+    Làm giàu từ điển đang <strong>tắt</strong> trên máy chủ này (<code>ENRICHMENT_ENABLED=false</code>): thêm từ hoặc thử lại sẽ không gửi được job.
+    Bảng bên dưới vẫn là lịch sử các job đã có.
+  </div>
+<% } %>
+
+<% if (canWrite) { %>
+<div class="card" style="padding:16px;margin-bottom:20px">
+  <form id="lk-add-words" data-max="<%= maxWords %>">
+    <div class="form-group">
+      <label for="lk-words">Thêm từ vào hàng đợi <span class="lk-muted">(mỗi từ một dòng, tối đa <%= maxWords %> từ mỗi lần)</span></label>
+      <textarea id="lk-words" name="words" rows="5" placeholder="ubiquitous&#10;serendipity&#10;ephemeral" spellcheck="false"></textarea>
+    </div>
+    <div style="display:flex;gap:12px;align-items:center;margin-top:10px">
+      <button type="submit" class="btn btn-primary">Thêm vào hàng đợi</button>
+      <span id="lk-word-count" class="lk-muted"></span>
+    </div>
+  </form>
+  <div id="lk-add-result" style="display:none;margin-top:16px">
+    <div id="lk-add-summary" style="font-size:13px;margin-bottom:8px"></div>
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>Từ</th><th>Kết quả</th><th>Chi tiết</th></tr></thead>
+        <tbody id="lk-add-rows"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+<% } else { %>
+  <p class="lk-muted" style="margin-bottom:16px">Tài khoản của bạn chỉ có quyền xem: không thêm từ hoặc thử lại job được.</p>
+<% } %>
+
+<!-- Filters -->
+<div class="card" style="padding:16px;margin-bottom:20px">
+  <form method="GET" action="/lookup/jobs" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+    <div class="form-group" style="margin:0;flex:1;min-width:160px">
+      <label style="font-size:12px">Từ khóa</label>
+      <input type="text" name="q" value="<%= filters.q %>" placeholder="Một phần của từ...">
+    </div>
+    <div class="form-group" style="margin:0;min-width:140px">
+      <label style="font-size:12px">Trạng thái</label>
+      <select name="status">
+        <option value="">Tất cả</option>
+        <% ['queued','running','succeeded','rejected','failed','skipped'].forEach(function(s) { %>
+          <option value="<%= s %>" <%= filters.status === s ? 'selected' : '' %>><%= lk.statusLabel(s) %></option>
+        <% }) %>
+      </select>
+    </div>
+    <div class="form-group" style="margin:0;min-width:200px">
+      <label style="font-size:12px">Lý do</label>
+      <select name="reason">
+        <option value="">Tất cả</option>
+        <option value="none" <%= filters.reason === 'none' ? 'selected' : '' %>>(không có lý do)</option>
+        <% lk.reasonCodes.forEach(function(r) { %>
+          <option value="<%= r %>" <%= filters.reason === r ? 'selected' : '' %>><%= r %> — <%= lk.reasonLabel(r) %></option>
+        <% }) %>
+      </select>
+    </div>
+    <div class="form-group" style="margin:0">
+      <label style="font-size:12px">Từ ngày</label>
+      <input type="date" name="from" value="<%= filters.from %>">
+    </div>
+    <div class="form-group" style="margin:0">
+      <label style="font-size:12px">Đến ngày</label>
+      <input type="date" name="to" value="<%= filters.to %>">
+    </div>
+    <div style="display:flex;gap:8px">
+      <button type="submit" class="btn btn-primary">Lọc</button>
+      <a href="/lookup/jobs" class="btn btn-secondary">Xóa lọc</a>
+    </div>
+  </form>
+  <div class="lk-muted" style="margin-top:8px">Ngày tính theo giờ UTC. Bảng hiển thị giờ Việt Nam (UTC+7).</div>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <h2>Job (<%= lk.num(pagination.total) %>)</h2>
+  </div>
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>Từ</th>
+          <th>Trạng thái</th>
+          <th>Lý do</th>
+          <th style="text-align:right">Lần chạy</th>
+          <th>Mục từ</th>
+          <th>Model và token</th>
+          <th>Tạo lúc</th>
+          <th>Xong lúc</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        <% if (jobs.length === 0) { %>
+          <tr><td colspan="9" class="text-center" style="padding:40px;color:var(--text-secondary)">Không có job nào khớp bộ lọc</td></tr>
+        <% } %>
+        <% jobs.forEach(function(j) { %>
+          <tr>
+            <td style="font-weight:600"><%= j.word %></td>
+            <td><span class="badge <%= lk.statusBadge(j.status) %>"><%= lk.statusLabel(j.status) %></span></td>
+            <td>
+              <% if (j.reason) { %>
+                <div class="lk-mono"><%= j.reason %></div>
+                <div class="lk-muted"><%= lk.reasonLabel(j.reason) %></div>
+              <% } else { %><span class="lk-muted">—</span><% } %>
+            </td>
+            <td style="text-align:right"><%= j.attempts %></td>
+            <td>
+              <% if (j.entry) { %>
+                <a href="<%= j.entry.url %>"><%= j.entry.headword %></a>
+                <div>
+                  <% if (j.entry.is_auto) { %>
+                    <span class="badge <%= j.entry.published ? 'badge-success' : 'badge-warning' %>" style="font-size:11px"><%= j.entry.published ? 'đã xuất bản' : 'chờ duyệt' %></span>
+                  <% } else { %>
+                    <span class="badge badge-secondary" style="font-size:11px">mục từ có sẵn</span>
+                  <% } %>
+                </div>
+              <% } else { %><span class="lk-muted">—</span><% } %>
+            </td>
+            <td class="lk-muted">
+              <% if (j.model) { %>
+                <div class="lk-mono"><%= j.model %></div>
+                <div><%= lk.num(j.input_tokens) %> vào / <%= lk.num(j.output_tokens) %> ra</div>
+              <% } else { %>—<% } %>
+            </td>
+            <td style="font-size:12px"><%= lk.date(j.created_at) %></td>
+            <td style="font-size:12px"><%= lk.date(j.finished_at) %></td>
+            <td>
+              <% if (canWrite && j.retryable) { %>
+                <button type="button" class="btn btn-sm btn-secondary" data-lk-retry="<%= j.id %>" data-word="<%= j.word %>">Thử lại</button>
+              <% } else if (j.retry_blocked === 'word_active') { %>
+                <span class="lk-muted" title="Từ này đang nằm trong hàng đợi hoặc đang chạy">đang chờ</span>
+              <% } %>
+            </td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+  <%- include('../partials/pagination', { pagination }) %>
+</div>
+
+<script src="/js/lookup-admin.js"></script>

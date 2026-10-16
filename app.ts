@@ -8,6 +8,7 @@ import path from 'path';
 import expressLayouts from 'express-ejs-layouts';
 
 import { injectAdmin } from './middlewares/auth';
+import { requireSameOrigin } from './middlewares/sameOrigin';
 import { errorHandler } from './middlewares/errorHandler';
 import pool from './config/db';
 import { startEnrichmentRuntime } from './services/queue';
@@ -45,6 +46,7 @@ import subscriptionsRoutes from './routes/subscriptions';
 import settingsRoutes from './routes/settings';
 import gamesRoutes from './routes/games';
 import aiContentRoutes from './routes/ai-content';
+import lookupRoutes from './routes/lookup';
 
 const app = express();
 
@@ -91,13 +93,26 @@ app.use(
     saveUninitialized: false,
     cookie: {
       maxAge: 24 * 60 * 60 * 1000,
-      secure: false,
+      // Not sent on cross-site POST / fetch (CSRF); still sent when an admin follows a link to the dashboard.
+      sameSite: 'lax',
+      // HTTPS only in production (trust proxy above lets express-session see Railway's X-Forwarded-Proto).
+      secure: process.env.NODE_ENV === 'production',
     },
   })
 );
 
 // ── Flash Messages ──
 app.use(flash());
+
+// ── CSRF: reject cross-site writes on every path that authenticates with the session cookie ──
+// /api/v1/* is left out on purpose (JWT Bearer, no cookie). A new session-authenticated mount below must be added here too.
+app.use(
+  [
+    '/auth', '/dashboard', '/approvals', '/users', '/profile', '/dictionary', '/lessons', '/decks',
+    '/ebooks', '/subscriptions', '/settings', '/games', '/ai-content', '/lookup',
+  ],
+  requireSameOrigin
+);
 
 // ── Inject Admin Data vào tất cả Views ──
 app.use(injectAdmin);
@@ -116,6 +131,7 @@ app.use('/subscriptions', subscriptionsRoutes);
 app.use('/settings', settingsRoutes);
 app.use('/games', gamesRoutes);
 app.use('/ai-content', aiContentRoutes);
+app.use('/lookup', lookupRoutes);
 
 // API routes cho mobile app
 //Phase 1: auth

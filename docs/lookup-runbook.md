@@ -1,4 +1,4 @@
-# WordyGo · Sổ tay vận hành tra từ và làm giàu từ điển (P7)
+# WordyGo · Sổ tay vận hành tra từ và làm giàu từ điển (P7, P7b)
 
 Cập nhật 15/10/2026 · Dành cho người trực: khi tra từ chậm, báo 503, hàng đợi đứng, hết ngân sách. Thiết kế: `docs/lookup-spec.md` · Hàng đợi: `docs/lookup-queue.md` · Kiểm toán và rủi ro: `docs/lookup-audit.md` · Đo tải: `docs/lookup-loadtest.md`.
 
@@ -6,13 +6,16 @@ Cập nhật 15/10/2026 · Dành cho người trực: khi tra từ chậm, báo 
 
 Cấu hình được đọc và **đóng băng một lần khi khởi động** (`config/lookup.ts`): đổi biến môi trường xong phải **khởi động lại** tiến trình (Railway: đổi biến rồi redeploy).
 
-| Muốn | Đặt | Hiệu lực |
-|---|---|---|
-| Tắt đường tra qua dịch vụ ngoài (Google, Free Dictionary, Haiku) | `TRANSLATION_FALLBACK_ENABLED=false` | Từ không có trong từ điển: `404 ENTRY_NOT_FOUND`, **0 request ra ngoài**. Từ có trong từ điển vẫn trả bình thường |
-| Ngừng gửi job làm giàu mới | `ENRICHMENT_ENABLED=false` | Phản hồi tra từ có `enrichment.status = "disabled"`. Job đang chờ vẫn nằm trong hàng đợi. Worker riêng vẫn xử lý (cờ này chỉ chặn việc gửi) |
-| Ngừng xử lý job | `ENRICHMENT_WORKER_ENABLED=false` (ở dịch vụ chạy worker) | Worker không đăng ký; job nằm yên. Dịch vụ API không tự chạy worker nữa |
-| Tắt Google nhưng giữ Free Dictionary | để trống `GOOGLE_TRANSLATE_API_KEY` | Google coi như tắt: bản tạm thiếu nghĩa tiếng Việt (`partial`, `missing: ["translation_vi"]`). Cảnh báo một lần khi khởi động |
-| Ngừng chi tiêu Anthropic ngay | xóa hoặc thu hồi `ANTHROPIC_API_KEY` ở bảng điều khiển Anthropic | Job dừng với `failed / config_error` (không thử lại). Khi nhà cung cấp tự chặn vì hết hạn mức: `skipped / budget` |
+| Muốn | Đặt | Hậu quả | Khởi động lại? |
+|---|---|---|---|
+| Tắt đường tra qua dịch vụ ngoài (Google, Free Dictionary, Haiku) | `TRANSLATION_FALLBACK_ENABLED=false` | Từ không có trong từ điển: `404 ENTRY_NOT_FOUND`, **0 request ra ngoài**. Từ có trong từ điển vẫn trả bình thường. Không còn bản tạm, nên cũng không còn job mới (job được gửi từ đường tra) | **Có**, dịch vụ API |
+| Ngừng gửi job làm giàu mới | `ENRICHMENT_ENABLED=false` | Phản hồi tra từ có `enrichment.status = "disabled"`. Job đang chờ vẫn nằm trong hàng đợi và vẫn được worker xử lý (cờ này chỉ chặn việc **gửi**). `enrich:enqueue` và `enrich:redrive --confirm` cũng từ chối | **Có**, dịch vụ API |
+| Ngừng xử lý job | `ENRICHMENT_WORKER_ENABLED=false` (ở **mọi** dịch vụ chạy worker) | Worker không đăng ký; job nằm yên trong hàng đợi, không mất; việc gửi job vẫn tiếp tục nếu `ENRICHMENT_ENABLED=true`. Dịch vụ API không tự chạy worker nữa. Dùng khi nạp lại Wiktionary (mục 11.1) | **Có**, từng dịch vụ có worker |
+| Chặn việc tự công khai mục từ mới | `ENRICHMENT_PUBLISH_POLICY=review` | Mục từ do job tạo luôn `published = false`, chờ duyệt (`npm run enrich:review`). `auto` (**mặc định khi không đặt biến**) công khai ngay mục từ đủ tầng A. Giá trị có hiệu lực là của **tiến trình worker thực hiện job**, không phải của dịch vụ gửi job | **Có**, worker |
+| Tắt Google nhưng giữ Free Dictionary | để trống `GOOGLE_TRANSLATE_API_KEY` | Google coi như tắt: bản tạm thiếu nghĩa tiếng Việt (`partial`, `missing: ["translation_vi"]`). Cảnh báo một lần khi khởi động | **Có**, dịch vụ API |
+| Ngừng chi tiêu Anthropic ngay | xóa hoặc thu hồi `ANTHROPIC_API_KEY` ở bảng điều khiển Anthropic | Job dừng với `failed / config_error` (không thử lại). Khi nhà cung cấp tự chặn vì hết hạn mức: `skipped / budget`. Thu hồi ở nhà cung cấp có hiệu lực **ngay**, không cần khởi động lại; xóa biến thì cần | Thu hồi: **không**. Xóa biến: **có**, worker |
+
+Mọi biến trên đều đóng băng lúc khởi động, nên cột cuối luôn là "có" cho thay đổi bằng biến môi trường; chỉ việc thu hồi khóa ở phía nhà cung cấp là tức thì. **Nhiều tiến trình dùng chung một DB thì mỗi tiến trình có cấu hình riêng**: kiểm danh sách worker đang nối vào (`pgboss.instance`, mục 10.4) trước khi tin rằng một công tắc đã có tác dụng.
 
 ## 2. Quan sát
 
@@ -22,7 +25,7 @@ Cấu hình được đọc và **đóng băng một lần khi khởi động** 
 npm run health:snapshot        # JSON, chỉ đọc
 ```
 
-Trả về (`services/lookup/health.ts`, `LookupHealthService.getSnapshot()`; chưa mở qua HTTP, P8 làm):
+Trả về (`services/lookup/health.ts`, `LookupHealthService.getSnapshot()`; từ P8 cũng có ở `GET /lookup/api/health` và trang `/lookup/health`, xem `docs/lookup-admin.md`):
 
 | Trường | Ý nghĩa |
 |---|---|
@@ -64,8 +67,8 @@ Một dòng JSON mỗi sự kiện (`console.*`). Khóa API được che trướ
 | Free Dictionary `local_rate_limit` | log `fd: error:local_rate_limit` | Hết `FREE_DICTIONARY_MAX_REQUESTS_PER_5MIN` (bucket nội bộ, mỗi tiến trình một bucket) |
 | `429 LOOKUP_RATE_LIMITED` | phản hồi có `Retry-After` | Một người dùng tra quá `LOOKUP_MISS_RATE_LIMIT_PER_MIN` từ chưa có trong từ điển mỗi phút (bộ nhớ từng tiến trình: nhiều bản sao thì giới hạn nhân lên) |
 | Job không chạy | `queue.main.waiting` tăng, `active` 0 | Không có worker: kiểm tra `ENRICHMENT_WORKER_ENABLED`, tiến trình `npm run worker`; worker từ chối khởi động nếu thiếu 30 chủ đề (`topics_not_seeded`, chạy `docs/seed-topics.sql`) |
-| `skipped / budget` | `recentFailures`; log `upstream_budget_exceeded` | Anthropic báo hết hạn mức chi tiêu. Nâng hạn mức ở Anthropic; job bị bỏ qua **không tự thử lại**: gửi lại bằng `enrich:redrive` (mục 4) |
-| `failed / config_error` | log `enrich` | Sai khóa Anthropic (401/403) hoặc cấu hình. Sửa rồi redrive |
+| `skipped / budget` | `recentFailures`; log `upstream_budget_exceeded` | Anthropic báo hết hạn mức chi tiêu. Nâng hạn mức ở Anthropic; job bị bỏ qua **không tự thử lại** và **không nằm trong hàng chết**, nên `enrich:redrive` không thấy nó: gửi lại từng từ bằng `enrich:enqueue` (mục 10.3) |
+| `failed / config_error` | log `enrich` | Sai khóa Anthropic (401/403) hoặc cấu hình. Sửa rồi gửi lại bằng `enrich:enqueue` (job này cũng không vào hàng chết) |
 | `failed / upstream_error` kèm `dead_letter` | `queue.deadLetter` | Hết lần thử (mặc định 4 lần chạy). Xem mục 4 |
 | Hàng `queued`/`running` quá 30 phút mà không có job | `enrich:status` | Tiến trình chết giữa chừng. Bộ dọn chạy **mỗi 10 phút** trên worker đặt chúng thành `failed / stale` (mục 5) |
 | `pg_pool_error` / `pg_client_error` | `code`, `error` | DB (Neon) cắt kết nối. **Không làm sập tiến trình**; câu truy vấn đang chạy lỗi một lần rồi kết nối mới được mở. Nếu dồn dập: kiểm tra Neon (đang ngủ/khởi động lại, hết kết nối) |
@@ -136,6 +139,11 @@ Chỉ một worker dùng **đúng schema pg-boss mà job được gửi vào** (
 | `npx tsx scripts/loadtest/explain-lookup.ts --scale 200000` | EXPLAIN các truy vấn trên đường tra |
 | `npm run health:snapshot` | ảnh chụp sức khỏe |
 | `npm run enrich:status / enqueue / redrive / run / review` | xem hàng sổ / gửi một từ / gửi lại hàng chết / chạy đường ống / duyệt mục từ tự tạo |
+| `npm run enrich:draft -- --word <từ>` | chạy S1 đến S4, in bản nháp, **không ghi DB** (xem nguồn nào nhận ra từ) |
+| `npm run refdata:wiktionary / refdata:verify` | nạp lại và kiểm dữ liệu tham chiếu (mục 11.1) |
+| `npm run check:env-example` | kiểm `.env.example` khớp schema `config/lookup.ts` (cũng chạy đầu `npm test`, nên `npm test` đỏ ngay nếu thêm biến mà quên ghi vào ví dụ) |
+| `npm run seed:lookup-test -- --staging` | dữ liệu thử cho nghiệm thu (mục 12) |
+| `npm run acceptance:lookup -- --staging` | nghiệm thu 30 từ, ghi `docs/lookup-acceptance-report.md` (mục 12) |
 
 Các test và công cụ trên **không gọi dịch vụ thật** (máy chủ giả trên 127.0.0.1; khóa giả; trong test, `fetch` toàn cục từ chối mọi máy chủ không phải loopback) nhưng dùng **DB dev trong `.env`**. Dữ liệu thử đặt tên `qzq<mã>…` / `e2e-<mã>-…` / `lt-<mã>-…` và được xóa khi xong; bộ đếm ký tự Google thật được khôi phục. Một lần chạy hỏng giữa chừng có thể để lại dòng `qzq%`, người dùng `e2e-%` / `lt-%` hoặc schema `pgboss_test_*`: xóa tay.
 
@@ -145,3 +153,228 @@ Các test và công cụ trên **không gọi dịch vụ thật** (máy chủ g
 * Không có giới hạn đồng thời ở đường tra: dưới tải quá mức, DB chậm làm cả hàng đợi chờ rồi đồng loạt 503 (`docs/lookup-loadtest.md` mục 2.1).
 * `Retry-After` của nhà cung cấp chỉ được chờ tối đa 60 s trong worker; lâu hơn thì phần còn lại do backoff của pg-boss (30 s, gấp đôi) đảm nhận.
 * Số đếm trong `queue` của ảnh chụp sức khỏe là đếm trực tiếp trong bảng `pgboss.job`, gồm cả job đã hoàn tất còn lưu (`byState`).
+
+
+---
+
+## 10. Triệu chứng, nguyên nhân, cách xử lý (P7b)
+
+Cách xem nhanh trước khi làm bất cứ việc gì: `npm run health:snapshot` (mạch ngắt, ký tự Google, token, job, độ sâu hàng đợi, 20 lỗi job gần nhất), rồi log JSON (mục 2.2). Mọi thay đổi biến môi trường cần **khởi động lại** (mục 1).
+
+### 10.1 Google 403 hoặc hết hạn mức
+
+| | |
+|---|---|
+| **Dấu hiệu** | Log `upstream_config_error` với `provider: "google_translate"` và `http_status` 403 (khóa sai trả **400**, đã kiểm chứng ở `docs/lookup-api-notes.md` mục 2). `health:snapshot`: mạch `google_translate` **open** ngay từ lỗi đầu tiên (lỗi cấu hình mở mạch tức thì). Người dùng: bản tạm `partial` với `missing: ["translation_vi"]`; nếu Free Dictionary cũng không biết từ thì 503. Không có dòng nào để lại trong từ điển (bản tạm không bao giờ được ghi) |
+| **Nguyên nhân thường gặp** | Khóa sai, bị thu hồi hoặc hết hạn; Cloud Translation API chưa bật cho dự án; dự án chưa bật thanh toán; khóa bị giới hạn theo API hoặc theo IP / referrer không khớp máy chủ. Hết quota của Google: thân và mã `reason` thật **chưa kiểm chứng** (không có bằng chứng thật), nên chưa biết nó trông thế nào ở log; cứ thấy 403 thì xử lý như trên |
+| **Xử lý** | (1) Mở Google Cloud Console → *APIs & Services*: Cloud Translation API phải *Enabled*; *Credentials*: kiểm tra khóa và các giới hạn của nó; *Billing*: dự án phải gắn tài khoản thanh toán. (2) Nếu đã xoay khóa: mục 11.3. (3) Sau khi sửa phía Google, mạch chỉ tự đóng sau `UPSTREAM_BREAKER_RESET_MS` (mặc định 30 s) và một request thử thành công; muốn đóng ngay thì khởi động lại tiến trình. (4) Kiểm: tra một từ chưa có trong từ điển, phản hồi phải có `translation_vi` |
+| **Hết trần nội bộ** (khác với trên) | `GOOGLE_TRANSLATE_MONTHLY_CHAR_LIMIT`: log `google: error:budget_monthly_chars`, `health:snapshot` `google.remaining = 0`. Google **không được gọi**, mạch **không** mở. Nâng trần (cần khởi động lại) hoặc đợi sang tháng UTC mới. Xem số đã dùng: SQL ở 11.4 |
+| **Tắt Google chủ động** | để trống `GOOGLE_TRANSLATE_API_KEY` (mục 1) |
+
+### 10.2 Free Dictionary: 429, treo, trang HTML 404
+
+| | |
+|---|---|
+| **Dấu hiệu** | Trong log `lookup`, trường `fd`: `error:rate_limited` (429 từ nhà cung cấp), `error:local_rate_limit` (hết bucket nội bộ `FREE_DICTIONARY_MAX_REQUESTS_PER_5MIN`), `error:timeout`, `error:bad_response` (trang HTML 404), `error:breaker_open`. Người dùng thấy bản tạm `partial` với `missing` có `pos, definition_en, ipa, audio_url`; nhóm từ nhiều nghĩa mất `senses` và nghĩa thứ hai, thứ ba |
+| **Quan sát thật** | Dịch vụ rất kém ổn định. Từ lúc làm P2 (`docs/lookup-api-notes.md` mục 1.3): từ có thật như `run`, `ran` nhận **404 là trang HTML** (Cloudflare cache một trang 404 sai, `Age` khoảng 10 ngày) và từ rác nhận 522; coi 404 thân HTML là `bad_response`, không phải "từ không có". Trong nghiệm thu 15/10/2026: 8 trong 9 từ thử trực tiếp treo quá 8 s, `london` trả trang HTML 404. Trong lần nghiệm thu, 11 trên 16 lần tra từ chưa có trong từ điển bị `error:timeout` (2,5 đến 2,9 s). **Năm lần lỗi liên tiếp mở mạch `free_dictionary` trong 30 s**, và trong 30 s đó mọi từ mới đều thành `partial` mà không hỏi Free Dictionary nữa (log `fd: error:breaker_open`). Từ rác (`asdfghjk`) cũng treo, nên theo ma trận §6 (không G, FDerr) trả **503**, không phải 404 |
+| **Nguyên nhân** | Phía dịch vụ ngoài. Header giới hạn tốc độ của nó không đáng tin (`docs/lookup-api-notes.md` mục 1.4). 429 thật **chưa từng gặp** nên thân và `Retry-After` thật chưa kiểm chứng |
+| **Xử lý** | Không có gì phải sửa nếu chỉ vài từ: bản tạm vẫn có nghĩa tiếng Việt từ Google và job nền vẫn chạy (job dùng Wiktionary cục bộ trước, chỉ hỏi Free Dictionary khi Wiktionary không có dòng nào; lỗi tạm của nó làm job thử lại). Nếu kéo dài nhiều giờ: (a) đừng chỉnh `UPSTREAM_BREAKER_*` để "cho nó chịu lỗi", vì mạch mở là hành vi đúng; (b) báo cáo cho nhà cung cấp; (c) cân nhắc chấp nhận bản tạm thiếu `senses` trong lúc chờ. `local_rate_limit`: nâng `FREE_DICTIONARY_MAX_REQUESTS_PER_5MIN` (mỗi tiến trình có một bucket riêng) |
+
+### 10.3 Anthropic hết ngân sách
+
+| | |
+|---|---|
+| **Dấu hiệu** | Log `upstream_budget_exceeded` với `provider: "anthropic"` và `reason: "spend_limit"` (mức error); hàng job `skipped / budget`; mạch `anthropic` **open** ngay. Các job sau trong lúc mạch mở nhận `breaker_open` và được thử lại theo backoff (30 s, 60 s, 120 s...), cuối cùng `failed / upstream_error` nếu nhà cung cấp vẫn chưa mở lại |
+| **Nguyên nhân** | Anthropic từ chối vì hết hạn mức chi tiêu: `enforced_spend_limit_reached` (429) hoặc HTTP 400 "You have reached your specified API usage limits" |
+| **Xử lý** | (1) Nâng giới hạn hoặc nạp tiền ở console Anthropic. (2) Đợi mạch tự thử lại (≤ `UPSTREAM_BREAKER_RESET_MS`) hoặc khởi động lại worker. (3) **Gửi lại các từ bị `skipped / budget`** (job đó đã hoàn tất, không nằm trong hàng chết, nên `enrich:redrive` **không** thấy nó): lấy danh sách rồi gửi từng từ bằng `enrich:enqueue`: |
+
+```sql
+SELECT DISTINCT word FROM word_enrichment_jobs w
+ WHERE status = 'skipped' AND reason = 'budget'
+   AND NOT EXISTS (SELECT 1 FROM dictionary_entries e WHERE lower(e.headword) = w.word OR lower(e.lemma) = w.word)
+ ORDER BY word;
+```
+```bash
+npm run enrich:enqueue -- --word <từ>      # lặp cho từng từ; bỏ qua từ đã có mục từ, đã có job, hoặc chạm trần ngày
+```
+Chi phí để biết trước khi gửi lại hàng loạt: khoảng $0,0007 đến $0,0015 mỗi từ (mục 11.4 và `docs/lookup-enrichment.md` mục 17).
+
+### 10.4 Hàng đợi ứ
+
+| | |
+|---|---|
+| **Dấu hiệu** | `health:snapshot` → `queue.main.waiting` tăng mà `active` bằng 0 hoặc đứng yên; `enrich:status` có nhiều hàng `queued` cũ |
+| **Kiểm theo thứ tự** | (1) **Có worker nào đang chạy không, và của ai?** `SELECT name, host, pid, started_on, heartbeat_on, stopped_on FROM pgboss.instance ORDER BY started_on DESC LIMIT 8;` (`stopped_on` có giá trị = đã dừng gọn; `heartbeat_on` cũ hơn vài phút mà `stopped_on` trống = tiến trình bị giết). **Mọi worker nối vào cùng DB đều nhận job**, kể cả bản triển khai trên máy chủ khác: cấu hình (nhất là `ENRICHMENT_PUBLISH_POLICY`) và phiên bản mã của worker nào nhận job quyết định kết quả, không phải của máy bạn đang gõ lệnh. Cột `host` cho biết máy. Kiểm tra `ENRICHMENT_WORKER_ENABLED` (mục 1) và log khởi động của worker (`topics_not_seeded` làm worker thoát mã 1: chạy `docs/seed-topics.sql`). (2) **Mạch `anthropic` có mở không?** (mục 10.3); job `breaker_open` quay lại hàng chờ với backoff. (3) **Có job `startAfter` chưa tới giờ không?** Job gửi sau lỗi 503 được hoãn 60 s: `SELECT min(start_after) AS som_nhat, count(*) FROM pgboss.job WHERE name = 'dictionary.enrich_word' AND state IN ('created','retry') AND start_after <= now();` cho số job đã đến giờ nhưng chưa ai nhận. (4) **Trần ngày** `ENRICHMENT_MAX_JOBS_PER_DAY`: SQL ở 11.4, mục `jobs/ngày`; chạm trần thì job mới không được tạo (`daily_cap`), không ứ |
+| **Xử lý** | Worker chết: khởi động lại; job `active` mồ côi tự được pg-boss thử lại sau `expireInSeconds` (tối thiểu 300 s). Hàng sổ `queued`/`running` quá 30 phút mà pg-boss không còn job sống: bộ dọn 10 phút đặt `failed / stale` (mục 5). Ứ vì chậm: tăng `ENRICHMENT_WORKER_CONCURRENCY` (mặc định 2; mỗi job ~10 s, hai job song song ≈ 12 job/phút) hoặc chạy thêm tiến trình worker (an toàn, pg-boss dùng `SKIP LOCKED`). Tăng đồng thời cũng tăng chi tiêu Anthropic theo cùng tỉ lệ |
+
+### 10.5 Job vào hàng lỗi chết (DLQ)
+
+| | |
+|---|---|
+| **Cách xem** | trang `/lookup/health` (20 lỗi gần nhất, hàng lỗi chết) và `/lookup/jobs` (lọc theo trạng thái, lý do; nút **Thử lại** cho `upstream_error`, `budget`, `dead_letter`, `stale`, `queue_error`, `daily_cap`: `docs/lookup-admin.md` mục 2.3); hoặc `npm run health:snapshot` → `queue.deadLetter` và `recentFailures`; hoặc SQL: |
+
+```sql
+-- job trong hàng chết (mới nhất trước)
+SELECT id, data->>'word' AS tu, source_retry_count, source_output, created_on
+  FROM pgboss.job WHERE name = 'dictionary.enrich_word.dlq' ORDER BY created_on DESC LIMIT 20;
+-- hàng sổ tương ứng
+SELECT word, status, reason, attempts, finished_at FROM word_enrichment_jobs WHERE status = 'failed' ORDER BY finished_at DESC LIMIT 20;
+```
+Worker của hàng chết ghi log `enrich_dead_letter` và đặt hàng sổ còn hoạt động thành `failed / dead_letter`. Lý do thường gặp: `upstream_error` sau 4 lần chạy (Free Dictionary treo với từ lạ, Anthropic 5xx/529 kéo dài, DB bị ngắt).
+
+| | |
+|---|---|
+| **Chạy lại** | (1) **Tìm nguyên nhân gốc và sửa trước** (mục 3 và 10.1 đến 10.3), nếu không job sẽ chết lại. (2) Một từ: `npm run enrich:enqueue -- --word <từ>` (cần `ENRICHMENT_ENABLED=true`; qua đúng enqueuer của đường tra, nên từ đã có mục từ, đã có job hoạt động hoặc chạm trần ngày thì được bỏ qua và nói rõ). (3) Nhiều từ: `npm run enrich:redrive` (chạy thử là mặc định, `--confirm` mới gửi; mục 4). (4) Xem kết quả: `npm run enrich:status -- --word <từ>` |
+| **Lưu ý** | Hàng `failed` cũ giữ làm lịch sử; gửi lại tạo hàng mới. Chỉ `enrich:redrive` đọc hàng chết; **job `skipped / budget` và `failed / config_error` không nằm ở đó** (worker đã hoàn tất chúng): dùng `enrich:enqueue` (mục 10.3) |
+
+### 10.6 Mục từ tự tạo bị sai
+
+Mục từ do job tạo có `admin_note` bắt đầu bằng `[auto]` (nguồn, model, id job, tầng B còn thiếu, ghi chú của Haiku). Duyệt: `npm run enrich:review -- --unpublished` hoặc `-- --word <từ>`.
+
+| Việc | Cách làm |
+|---|---|
+| **Ẩn** (nhanh nhất, đảo ngược được) | Đặt `published = false` **và ghi `entry_edit_history`** để biết ai ẩn và vì sao. Trang `/lookup/review` (P8) làm việc này bằng nút **Ẩn** và ghi lịch sử giúp bạn (`docs/lookup-admin.md` mục 3.3); SQL dưới đây là cách làm tay tương đương (một giao dịch): |
+
+```sql
+BEGIN;
+UPDATE dictionary_entries SET published = FALSE
+ WHERE id = '<id mục từ>' AND published = TRUE;
+INSERT INTO entry_edit_history (entry_id, admin_id, field_name, old_value, new_value)
+VALUES ('<id mục từ>', NULL, 'published', 'true', 'false');
+COMMIT;
+```
+Sau khi ẩn, đường tra không còn trả mục từ đó: nó quay về bản tạm, và job gửi cho từ đó dừng ở S0 (`skipped / exists`, vì mục từ vẫn tồn tại). Bật lại bằng SQL tương tự (đảo `true` / `false`).
+
+| Việc | Cách làm |
+|---|---|
+| **Xóa hẳn để làm lại** | Chỉ mục từ do job tạo: `DELETE FROM dictionary_entries WHERE id = '<id>' AND admin_note LIKE '[auto]%';` (mọi bảng con xóa theo; `word_enrichment_jobs.entry_id` thành NULL). Rồi `npm run enrich:enqueue -- --word <từ>` hoặc `npm run enrich:run -- --word <từ>`. Chi tiết: `docs/lookup-enrichment.md` mục 15 |
+| **Sửa một trường** | `UPDATE` trực tiếp rồi ghi `entry_edit_history` với `field_name` là tên cột, `old_value`, `new_value`. Không sửa `admin_note` (nó là dấu vết của job) |
+
+## 11. Quy trình
+
+### 11.1 Nạp lại Wiktionary (`ref_wiktionary_en`)
+
+Khi nào: dump mới, đổi `--top-n`, hoặc dữ liệu hỏng. **Tại sao phải dừng worker:** `--reset` làm `TRUNCATE ref_wiktionary_en` rồi nạp dần trong 15 đến 30 phút. Trong lúc đó bảng chỉ có một phần dữ liệu: một job đọc nó sẽ thấy "không có dòng Wiktionary" cho từ thật (bỏ qua bước dạng biến, quyết định `variant_form` / dạng biến sai, hoặc đi hỏi Free Dictionary vô ích), và đường tra mất bước F4b cho các dạng biến chưa nạp tới.
+
+1. **Dừng worker.** Đặt `ENRICHMENT_WORKER_ENABLED=false` ở **mọi** dịch vụ đang chạy worker (dịch vụ worker riêng, và dịch vụ API nếu nó tự chạy worker), khởi động lại. Job mới vẫn được gửi và nằm trong hàng đợi (nếu muốn ngừng cả việc gửi: `ENRICHMENT_ENABLED=false`).
+2. **Đợi job đang chạy xong:** `npm run enrich:status` → `running = 0`.
+3. **Chạy ngoài giờ cao điểm**, từ máy có `.env` trỏ đúng DB (các lệnh `refdata:*` **từ chối chạy khi `NODE_ENV=production`**; dòng `target:` in `host/tên database` để kiểm):
+   ```bash
+   # chỉ khi muốn nạp lại tần suất (thường không cần): npm run refdata:wordfreq:export && npm run refdata:wordfreq
+   npm run refdata:wiktionary -- --top-n 150000 --reset      # ~15 đến 30 phút; Ctrl-C dừng gọn, rồi chạy lại với --reset
+   npm run refdata:verify                                    # phải 11/11 PASS (WARN chỉ cảnh báo)
+   ```
+   Nạp bản thử trước nếu đổi tham số: `-- --dry-run`. Chi tiết: `docs/lookup-refdata.md` mục 3.
+4. **Bật lại worker:** `ENRICHMENT_WORKER_ENABLED=true`, khởi động lại.
+5. **Kiểm:** `npm run enrich:status` (hàng `queued` bắt đầu chạy), `npm run enrich:draft -- --word ran` (S1 cho `ran` phải ra `onlyFormRows`, `expectedLemma run`), và một lần tra dạng biến (`ran`) trả `matched_form`.
+
+### 11.2 Datamuse yêu cầu khóa từ 2027
+
+Điều đọc được trên `https://www.datamuse.com/api/` (15/10/2026): phần đầu trang nói từ **1/2/2027** mọi request cần khóa, tối đa 100.000 request mỗi ngày mỗi khóa; mục *Usage limits* của chính trang đó lại nói đến **1/1/2027**; cách gửi khóa (header hay tham số, tên gì) **không được nêu**. Trang cũng dặn: ứng dụng công khai nên ghi nhận Datamuse trong tài liệu của ứng dụng (xem `docs/lookup-attribution.md`).
+
+Hiện trạng trong mã:
+* `DATAMUSE_API_KEY` được đọc, nhưng hàm `applyDatamuseAuth` (`services/upstream/datamuseClient.ts`) **cố ý rỗng**: chưa có tài liệu nên chưa đoán tên tham số. Có khóa trong biến môi trường **chưa** làm khóa được gửi đi.
+* Từ 1/1/2027 mỗi lần khởi động có cảnh báo `DATAMUSE_API_KEY is empty and today is on/after 2027-01-01`.
+* Datamuse chỉ cho **ứng viên** đồng / trái nghĩa. Datamuse lỗi hoặc từ chối thì `relations()` không ném lỗi: job vẫn `succeeded`, chỉ thiếu ứng viên (đã chứng minh bằng chaos test `upstream.chaos.test.ts`).
+
+Việc cần làm trước 1/1/2027:
+1. Xin khóa qua biểu mẫu liên hệ trên trang Datamuse (trang ghi người dùng hiện tại cần liên hệ; mô tả ứng dụng).
+2. Khi Datamuse công bố cách gửi khóa: viết vào `applyDatamuseAuth` (nơi duy nhất), sửa `tests/lookup/datamuseClient.test.ts`, đặt `DATAMUSE_API_KEY`, triển khai lại.
+3. Nếu chưa có khóa kịp: đặt `DATAMUSE_ENABLED=false` để ngừng gọi (không lỗi, không mở mạch); chất lượng đồng / trái nghĩa chỉ còn từ Wiktionary và Haiku.
+
+### 11.3 Xoay khóa API
+
+Khóa chỉ nằm trong biến môi trường, được đọc một lần khi khởi động: **đổi xong phải khởi động lại mọi dịch vụ dùng khóa đó** (API và worker; Railway: đổi biến rồi redeploy cả hai). Không dán khóa vào chat, log hay `admin_note`; khi cần in thì chỉ 4 ký tự cuối (`maskKey`).
+
+| Khóa | Dùng ở đâu | Các bước |
+|---|---|---|
+| `GOOGLE_TRANSLATE_API_KEY` | đường tra nhanh (dịch từ, dịch định nghĩa) của dịch vụ API | (1) Tạo khóa mới ở Google Cloud Console → *Credentials*, giới hạn theo *Cloud Translation API*. (2) Đặt biến, redeploy. (3) Tra một từ chưa có trong từ điển: phải có `translation_vi`; `npm run health:snapshot` mạch `google_translate` `closed`. (4) **Sau cùng** mới thu hồi khóa cũ. Nếu mạch đã mở vì khóa cũ bị thu hồi trước: khởi động lại để đóng ngay |
+| `ANTHROPIC_API_KEY` | worker (làm giàu) và API nếu `LOOKUP_FAST_TRANSLATOR=haiku` | (1) Tạo khóa mới ở console Anthropic. (2) Đặt biến ở dịch vụ worker (và API nếu dùng chế độ haiku), redeploy. (3) `npm run enrich:run -- --word <từ> --dry-run` (tốn vài phần trăm xu) hoặc đợi job kế tiếp: phải không có `config_error`. (4) Thu hồi khóa cũ. Thu hồi khóa cũ **trước** là cách ngừng chi tiêu ngay (mục 1) nhưng job đang chạy sẽ `failed / config_error` |
+| `DATAMUSE_API_KEY` | worker (ứng viên đồng / trái nghĩa) | chưa dùng được (mục 11.2) |
+| `JWT_SECRET`, `SESSION_SECRET` | ngoài tra từ | đổi `JWT_SECRET` làm mọi token đang cấp mất hiệu lực; không thuộc quy trình này |
+
+Thấy khóa trong log: xoay ngay, rồi báo để thêm mẫu che vào `utils/redact.ts` (mục 7).
+
+### 11.4 SQL theo dõi chi phí
+
+Mọi kỳ trong `api_usage_counters` tính theo **UTC**. Chạy bằng `psql "$DATABASE_URL"`. Mọi câu dưới đây đã chạy thử trên DB dev (15/10/2026).
+
+```sql
+-- Token Anthropic của job làm giàu theo THÁNG (input gồm cả token ghi và đọc cache)
+SELECT period AS thang, unit, used FROM api_usage_counters
+ WHERE provider = 'anthropic' ORDER BY period DESC, unit;
+
+-- Token Anthropic của đường tra nhanh (chế độ haiku) theo NGÀY
+SELECT period AS ngay, unit, used FROM api_usage_counters
+ WHERE provider = 'anthropic_fast' ORDER BY period DESC, unit LIMIT 14;
+
+-- Ký tự Google theo THÁNG và phần trăm so với trần (đổi 450000 nếu đã đổi GOOGLE_TRANSLATE_MONTHLY_CHAR_LIMIT)
+SELECT period AS thang, used AS ky_tu, round(used * 100.0 / 450000, 1) AS phan_tram_tran
+  FROM api_usage_counters WHERE provider = 'google_translate' AND unit = 'chars' ORDER BY period DESC;
+
+-- Job đã gửi theo NGÀY so với trần ENRICHMENT_MAX_JOBS_PER_DAY
+SELECT period AS ngay, used AS job_da_gui FROM api_usage_counters
+ WHERE provider = 'enrichment' AND unit = 'jobs' ORDER BY period DESC LIMIT 14;
+
+-- Kết quả job 7 ngày gần nhất
+SELECT (created_at AT TIME ZONE 'UTC')::date AS ngay, status, coalesce(reason, '-') AS reason, count(*) AS so_job
+  FROM word_enrichment_jobs WHERE created_at > now() - interval '7 days'
+ GROUP BY 1, 2, 3 ORDER BY 1 DESC, 4 DESC;
+
+-- Token và chi phí ƯỚC TÍNH theo ngày, từ hàng job (giả định 7.859 token system prompt được ĐỌC từ cache mỗi job;
+-- giá $0,10 vào / $0,50 ra / $0,01 đọc cache mỗi triệu token, xem services/enrichment/pricing.ts và PHẢI xác minh lại)
+SELECT (finished_at AT TIME ZONE 'UTC')::date AS ngay,
+       count(*) FILTER (WHERE input_tokens > 0) AS job_goi_haiku,
+       sum(input_tokens) AS vao, sum(output_tokens) AS ra,
+       round(((sum(input_tokens) - 7859.0 * count(*) FILTER (WHERE input_tokens > 0)) * 0.10
+              + sum(output_tokens) * 0.50
+              + 7859.0 * count(*) FILTER (WHERE input_tokens > 0) * 0.01) / 1000000, 5) AS usd_uoc_tinh
+  FROM word_enrichment_jobs WHERE finished_at IS NOT NULL GROUP BY 1 ORDER BY 1 DESC LIMIT 14;
+
+-- Mục từ tự tạo: đã duyệt (published) và chưa
+SELECT published, count(*) FROM dictionary_entries WHERE admin_note LIKE '[auto]%' GROUP BY 1;
+```
+Đối chiếu: tổng `sum(input_tokens)` theo ngày từ hàng job phải khớp mức tăng của `api_usage_counters` cùng kỳ (nghiệm thu 15/10: 140.284 vào, 16.672 ra, hai nguồn trùng nhau). Google chỉ có số ký tự; số tiền xem ở bảng thanh toán của Google Cloud.
+
+## 12. Nghiệm thu 30 từ (`npm run acceptance:lookup`)
+
+Một lệnh chạy 30 từ thử qua máy chủ thật, chờ các job nền, và in bảng **đạt / không đạt / bỏ qua** (báo cáo lưu ở `docs/lookup-acceptance-report.md`). Chỉ chạy trên staging, là **DB dev duy nhất trong `.env`** (chưa có người dùng thật). Các bước:
+
+1. **Chuẩn bị dữ liệu** (một lần, chạy lại được): `npm run seed:lookup-test -- --staging`. Từ chối chạy nếu thiếu `--staging` hoặc `NODE_ENV=production`; in tên DB (host / database / user, không có mật khẩu) để bạn xác nhận. Việc nó làm: người dùng thử `lookup-acceptance@example.com` với mật khẩu ngẫu nhiên, một ebook có một chương và một đoạn văn; ghi `.acceptance.local.json` (**git-ignored**, giữ mật khẩu thử; chạy seed lần nữa thì đổi mật khẩu và ghi lại); tạo các mục từ gốc còn thiếu cho nhóm A và B (`run`, `go`, `child`, `light`, `bank`) bằng đúng đường ống `enrich:run`, rồi đặt `published = true` **chỉ cho những từ đó** và ghi `entry_edit_history`; mục từ có sẵn nhưng `published = false` mà không do job tạo thì **không đụng tới**. Cuối cùng in bảng tiền đề của từng từ và kế hoạch chạy.
+2. **Khởi động ứng dụng** với `ENRICHMENT_ENABLED=true` (cùng tiến trình xử lý job khi `ENRICHMENT_WORKER_ENABLED=true`, hoặc chạy thêm `npm run worker`), `ENRICHMENT_PUBLISH_POLICY=review`, đủ `GOOGLE_TRANSLATE_API_KEY` và `ANTHROPIC_API_KEY`: `npm run dev` (hoặc `npx tsx app.ts`). Script nghiệm thu đọc cùng `.env` nên hai bên phải cùng cấu hình.
+3. **Giữ staging yên lặng** trong lúc chạy: nhóm A và B được chấm bằng "bộ đếm ký tự Google không đổi", mọi lần tra khác trên DB này làm nhiễu. **Xem ai đang nối vào DB**: `SELECT name, host, started_on, heartbeat_on, stopped_on FROM pgboss.instance ORDER BY started_on DESC LIMIT 8;`. Mọi worker còn sống (`stopped_on` trống, `heartbeat_on` mới) đều nhận job của lần nghiệm thu, kể cả một bản triển khai trên máy chủ khác, và dùng cấu hình riêng của nó (`ENRICHMENT_PUBLISH_POLICY` mặc định là `auto` khi không đặt). Lần nghiệm thu 15/10/2026 chạy khi có một worker từ xa như vậy cùng nối vào DB dev (xem mục 7 của báo cáo).
+4. **Chạy:**
+   ```bash
+   npm run acceptance:lookup -- --staging --base-url http://localhost:3000
+   npm run acceptance:lookup -- --staging --only C,H --wait-minutes 15     # chỉ một số nhóm (A B C D E F H)
+   ```
+   `--wait-minutes` (mặc định 10) là thời gian chờ job nền. Mã thoát 0 khi không có "không đạt". Mất khoảng 2 phút cộng thời gian job (~10 s mỗi job, hai job song song). Đăng nhập chỉ một lần (giới hạn 5 lần mỗi 15 phút mỗi IP). Script tự giãn các lần tra từ chưa có trong từ điển để không chạm `LOOKUP_MISS_RATE_LIMIT_PER_MIN` (gặp 429 thì chờ `Retry-After` rồi thử lại một lần và ghi chú).
+5. **Đọc kết quả.** *Bỏ qua* = tiền đề sai (ví dụ nhóm C, D, H mà từ đã có mục từ, kể cả mục từ `published = false`; xem mục 5 của báo cáo), **không phải lỗi**; nhóm C và H có từ dự phòng thay (nostalgia, gregarious, lucid; trunk, rack, pawn). *Không đạt* kèm nguyên nhân từng dòng ở mục 4 của báo cáo.
+6. **Dọn dẹp** (tùy chọn): `npm run acceptance:lookup -- --staging --cleanup` (thêm `--dry-run` để chỉ liệt kê). Nó **in tên DB và bắt gõ lại đúng tên database** mới xóa; gõ sai thì không xóa gì. Chỉ xóa mục từ có `admin_note` bắt đầu `[auto]`, `headword` là một trong các từ đã chạy và **tạo sau khi lần chạy bắt đầu** (`.acceptance.state.json`), cùng các hàng job của những từ đó từ thời điểm ấy. Mục từ cũ hơn lần chạy (kể cả mục từ seed tạo cho nhóm A và B) và các dòng `word_forms` thêm vào mục từ có sẵn thì giữ lại. Từ chối nếu còn job `queued` / `running`.
+
+Kỳ vọng từng nhóm (cũng là bảng trong `tests/acceptance/evaluate.test.ts`):
+
+| Nhóm | Từ | Đường nhanh | Job nền |
+|---|---|---|---|
+| A, có sẵn | run, bank, light | 200, `source=dictionary`, không có `temporary` | không có job |
+| B, dạng biến | ran, running, went, children, banks, lights | 200, `source=dictionary`, `matched_form` là chính từ gõ; ký tự Google không đổi trên A và B | không có job; sau vài giây có dòng `word_forms` cho dạng đó |
+| C, từ mới phổ biến | serendipity, ubiquitous, ephemeral, podcast, quarantine, procrastinate | 200, `translation`, `temporary`, `translation_vi` khác null và khác từ gốc, `enrichment.status=queued` | `succeeded`; có mục từ; tầng A đủ; `meaning_vi` không rỗng; `published` theo chính sách |
+| D, vay mượn | karaoke, sushi, tsunami | 200, `translation` (không phải 404), `translation_vi` khác null | `succeeded` |
+| E, tên riêng | london, microsoft, shakespeare | 200, `translation` | `rejected / proper_noun`; không có mục từ |
+| F | asdfghjk, xinchao | 404 `ENTRY_NOT_FOUND` | không có job |
+| F | recieve | 200 hoặc 404 | không có mục từ `recieve`; job nếu có thì `skipped / variant_form` |
+| H, nhiều nghĩa | batter, mole, sage, tick, bass, fawn | 200, `translation`, `senses` có từ 2 phần tử khác loại từ hoặc khác `gloss_vi`, `meanings_vi` từ 3 phần tử | `succeeded`; mục từ có từ 2 sense; `meaning_vi` có từ 2 nghĩa |
+| Chung | | p95 của C, D, E, H không quá `LOOKUP_TOTAL_DEADLINE_MS` + 500 ms | |
+
+### 12.1 Kết quả lần chạy đầu (15/10/2026, DB dev, `ENRICHMENT_PUBLISH_POLICY=review`)
+
+**18 đạt, 10 không đạt, 6 bỏ qua** (28 từ chạy). Chi tiết từng từ: `docs/lookup-acceptance-report.md`. Mười dòng không đạt, và vì sao:
+
+| Từ | Nguyên nhân (đã đối chiếu với log máy chủ `lookup`) | Loại |
+|---|---|---|
+| microsoft, shakespeare | 503. Google trả bản dịch giống hệt từ gốc (không dùng được) và Free Dictionary **treo** (`fd: error:timeout`), nên ma trận §6 "không G, FDerr" cho 503. Kỳ vọng "partial vì Free Dictionary 404" không xảy ra vì dịch vụ này không trả 404 JSON. Job vẫn `rejected / proper_noun` đúng | dịch vụ ngoài, khác kỳ vọng |
+| asdfghjk, xinchao | 503 thay vì 404, cùng nguyên nhân: Free Dictionary treo với từ rác (`docs/lookup-api-notes.md` mục 1.3). Không job, đúng | dịch vụ ngoài, khác kỳ vọng |
+| batter, mole, sage, tick, trunk, fawn (nhóm H, 6 từ) | `senses = 0`, `meanings_vi` có 1 phần tử: Free Dictionary không trả dữ liệu. Sáu từ này tra liền sau nhóm E và F, nơi 5 lần treo liên tiếp (microsoft, shakespeare, asdfghjk, xinchao, recieve) **đã mở mạch `free_dictionary`**, nên cả sáu ghi `fd: error:breaker_open`. Chạy riêng lại nhóm H sau khi mạch đóng (rack, pawn): vẫn không đạt (`rack`: timeout 2,5 s; `pawn`: mạch mở lại). Job nền của cả 6 từ H **đạt** (mục từ có 3 đến 6 sense). Chưa chứng minh được điều kiện H đạt khi Free Dictionary khỏe | dịch vụ ngoài (và thứ tự nhóm) |
+| p95 nhóm C, D, E, H = 3.756 ms (> 3.500) | Hạn chót 3.000 ms chỉ bao các cuộc gọi ra ngoài. Sau đó còn gửi job (F11: giao dịch pg-boss, ~0,5 s với DB ở Singapore) rồi ghi `word_lookups`, và request HTTP còn qua xác thực + kiểm tra đoạn văn (~0,15 s). Log: `latency_ms` của dịch vụ lên 3.600 (local 154 + chờ Free Dictionary 2.857 + ~0,6 s phần sau hạn chót), thêm ~0,15 s ở HTTP. Chỉ xảy ra khi Free Dictionary treo hết hạn chót; lúc nó trả lời, các nhóm này mất 1,0 đến 1,7 s | thiết kế hiện tại; cần bạn quyết (xem báo cáo cuối của P7b) |
+
+Điều đạt: A và B (9/9, mỗi lần tra ~0,2 s, **ký tự Google không đổi: 2.883 trước và sau**, mọi dạng biến đã có dòng `word_forms`), C, D (7/7 job), E (3/3 `rejected / proper_noun`), `recieve` (`skipped / variant_form`, không mục từ), 12/12 job nhóm C, D, H `succeeded` và `published = false`.

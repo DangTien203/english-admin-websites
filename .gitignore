@@ -7,3 +7,7 @@ node_modules/
 dist/
 *.tsbuildinfo
 data
+# P7b: acceptance tools (test-user password, state of the last run)
+.acceptance.local.json
+.acceptance.state.json
+.claude/worktrees

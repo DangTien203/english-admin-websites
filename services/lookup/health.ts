@@ -10,8 +10,8 @@ import type { Db } from './types';
 
 /**
  * LookupHealthService (docs/lookup-spec.md §12.2): one read-only snapshot of everything an operator wants to know when the
- * word lookup or the background enrichment misbehaves. NOT exposed over HTTP yet (P8); callers are tests and, until then,
- * `npm run health:snapshot`-style scripts.
+ * word lookup or the background enrichment misbehaves. Exposed to the admins by GET /lookup/api/health and the page
+ * /lookup/health (P8, docs/lookup-admin.md); also used by tests and by `npm run health:snapshot`.
  *
  * Every section is independent: if one query fails the section becomes { error } and the rest is still returned, because a
  * health view that dies with the thing it is watching is worth nothing. It reads, it never writes, and it never starts

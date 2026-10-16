@@ -127,10 +127,17 @@ const DictionaryEntry = {
     }
   },
 
-  async update(id: string, data: any, tagIds: string[] = []) {
+  /**
+   * `adminId` (optional) is who saves the form: a change of `published` is then written to entry_edit_history in the same
+   * transaction, like the publish / hide buttons of the review pages (/lookup/review).
+   * `published` is the checkbox of the form: ticked → true; unticked (the field is absent) → false.
+   */
+  async update(id: string, data: any, tagIds: string[] = [], adminId?: string) {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      const published = data.published === true || data.published === 'true' || data.published === 'on';
+      const before = await client.query('SELECT published FROM dictionary_entries WHERE id = $1 FOR UPDATE', [id]);
       await client.query(`
         UPDATE dictionary_entries SET
           headword       = $1,
@@ -167,10 +174,17 @@ const DictionaryEntry = {
           data.frequency_rank ? parseInt(data.frequency_rank) : null,
           data.source || 'manual',
           data.admin_note || null,
-          data.published !== false && data.published !== 'false',
+          published,
           id,
         ]
       );
+      if (before.rows[0] && before.rows[0].published !== published) {
+        await client.query(
+          `INSERT INTO entry_edit_history (entry_id, admin_id, field_name, old_value, new_value)
+           VALUES ($1, $2, 'published', $3, $4)`,
+          [id, adminId ?? null, String(before.rows[0].published), String(published)]
+        );
+      }
       await client.query('DELETE FROM entry_tags WHERE entry_id = $1', [id]);
       for (const tid of tagIds) {
         await client.query(
