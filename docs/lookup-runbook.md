@@ -147,6 +147,8 @@ Chỉ một worker dùng **đúng schema pg-boss mà job được gửi vào** (
 | `npm run check:env-example` | kiểm `.env.example` khớp schema `config/lookup.ts` (cũng chạy đầu `npm test`, nên `npm test` đỏ ngay nếu thêm biến mà quên ghi vào ví dụ) |
 | `npm run seed:lookup-test -- --staging` | dữ liệu thử cho nghiệm thu (mục 12) |
 | `npm run acceptance:lookup -- --staging` | nghiệm thu 30 từ, ghi `docs/lookup-acceptance-report.md` (mục 12) |
+| `npx tsx scripts/dev/cleanup-auto-entries.ts` | **chạy thử**: liệt kê các mục từ `[auto]` (đúng tiêu chí màn `/lookup/review`), số hàng sẽ xóa ở từng bảng liên quan, số mục đang published, mục bị bỏ qua vì còn bài học / từ đồng nghĩa của mục khác / từ đã lưu… trỏ tới. Chỉ thêm `--confirm` mới xóa (một giao dịch, in số hàng đã xóa); không bao giờ đụng mục không phải `[auto]`. Chi tiết: `docs/lookup-admin-notes.md` mục 12 |
+| `npm run admin:create -- --email <e> --name <n>` | thêm MỘT `super_admin` với mật khẩu ngẫu nhiên in ra một lần (hoặc `ADMIN_PASSWORD`); không xóa gì, từ chối e-mail đã có |
 
 Các test và công cụ trên **không gọi dịch vụ thật** (máy chủ giả trên 127.0.0.1; khóa giả; trong test, `fetch` toàn cục từ chối mọi máy chủ không phải loopback) nhưng dùng **DB dev trong `.env`**. Dữ liệu thử đặt tên `qzq<mã>…` / `e2e-<mã>-…` / `lt-<mã>-…` và được xóa khi xong; bộ đếm ký tự Google thật được khôi phục. Một lần chạy hỏng giữa chừng có thể để lại dòng `qzq%`, người dùng `e2e-%` / `lt-%` hoặc schema `pgboss_test_*`: xóa tay.
 

@@ -63,21 +63,21 @@ Kết quả thành công:
 [Migrate] ✅ Tạo thành công 10 bảng + indexes!
 ```
 
-### 5. Seed dữ liệu mẫu
+### 5. Tạo tài khoản admin
+
+```bash
+npm run admin:create -- --email you@example.com --name "Tên của bạn"
+```
+
+Script tạo **một** tài khoản `super_admin` và in ra mật khẩu ngẫu nhiên **đúng một lần** (hãy lưu ngay, không có cách xem lại). Muốn tự đặt mật khẩu thì đặt biến môi trường `ADMIN_PASSWORD` (ít nhất 12 ký tự) trước khi chạy; khi đó mật khẩu không được in. Mật khẩu không bao giờ nhận qua dòng lệnh. Script chỉ **thêm** một dòng: không xóa bảng nào, không đổi tài khoản nào, và từ chối nếu e-mail đã có.
+
+### 5b. Dữ liệu mẫu (tùy chọn, chỉ trên máy bạn)
 
 ```bash
 npm run db:seed
 ```
 
-Kết quả:
-```
-[✓] Admin: admin@english-app.com (super_admin)
-[✓] 8 tags
-────────────────────────────
-📧 Email:    admin@english-app.com
-🔑 Password: admin123
-────────────────────────────
-```
+⚠ `db:seed` **XÓA SẠCH** nhiều bảng (người dùng, tài khoản admin, gói đăng ký, bài học, ebook…) trước khi ghi dữ liệu mẫu, và in danh sách bảng đó trước khi làm. Nó từ chối chạy khi `NODE_ENV=production` hoặc khi cơ sở dữ liệu không nằm trên máy này, trừ khi bạn thêm `-- --i-know-this-wipes-tables`. Tài khoản và mật khẩu mẫu nằm trong `scripts/seed.ts`, không chép lại ở đây; nếu cần đăng nhập vào cơ sở dữ liệu thật thì dùng `npm run admin:create` ở bước 5.
 
 ### 6. Chạy server
 
@@ -141,8 +141,6 @@ english-admin-websites/
 | 9 | lesson_entries | Junction: lesson ↔ entries |
 | 10 | user_lesson_progress | Tiến độ học bài |
 
-## Tài khoản mặc định
+## Tài khoản admin
 
-| Email | Password | Role |
-|-------|----------|------|
-| admin@english-app.com | admin123 | super_admin |
+Repo không ghi sẵn thông tin đăng nhập nào. Tạo tài khoản bằng `npm run admin:create` (mục 5 ở trên).

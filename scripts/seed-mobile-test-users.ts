@@ -4,6 +4,10 @@
  * Run:
  *   npx tsx scripts/seed-mobile-test-users.ts
  *
+ * Safety latch (scripts/seedGuard.ts): the accounts get ONE fixed password that is written in this file, and their study data is
+ * deleted before they are written. So it refuses to start when NODE_ENV=production or when the database is not on this machine,
+ * unless the command line has --i-know-this-sets-a-known-password. It always prints the database and the accounts first.
+ *
  * Scope:
  * - Creates/updates 6 fixed Gmail accounts for mobile testing.
  * - Does not create dictionary entries, ebooks, system flashcard decks, or game configs.
@@ -13,6 +17,7 @@ import 'dotenv/config';
 import bcrypt from 'bcryptjs';
 import type { PoolClient } from 'pg';
 import pool from '../config/db';
+import { guardTestUsers } from './seedGuard';
 
 type Tier = 'free' | 'premium' | 'pro';
 type Level = 'beginner' | 'intermediate' | 'advanced';
@@ -1026,6 +1031,12 @@ async function seedForUser(
 }
 
 async function main(): Promise<void> {
+  // The safety latch comes FIRST: before a connection is taken and before anything is deleted or written (scripts/seedGuard.ts).
+  if (!guardTestUsers(process.argv.slice(2), process.env, TEST_USERS.map((u) => u.email), (line) => console.log(line))) {
+    await pool.end().catch(() => undefined);
+    process.exit(1);
+  }
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');

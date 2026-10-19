@@ -16,6 +16,7 @@
     "enrich:backfill-ipa": "tsx scripts/enrichment/backfill-ipa.ts",
     "enrich:run": "tsx scripts/enrichment/run.ts",
     "check:env-example": "tsx scripts/check-env-example.ts",
+    "admin:create": "tsx scripts/admin/create-admin.ts",
     "seed:lookup-test": "tsx scripts/dev/seed-lookup-test-data.ts",
     "acceptance:lookup": "tsx scripts/acceptance/lookup-acceptance.ts",
     "enrich:redrive": "tsx scripts/enrichment/redrive.ts",

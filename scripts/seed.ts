@@ -7,11 +7,16 @@
  * KHÔNG seed dictionary — dùng import-enriched.mts
  * KHÔNG seed flashcards — dùng seed-flashcards.ts
  * KHÔNG seed games — dùng seed-games.ts
+ *
+ * ⚠ XÓA SẠCH một danh sách bảng (CLEANUP_TABLES bên dưới) trước khi ghi dữ liệu mẫu. Chốt an toàn (scripts/seedGuard.ts): từ chối
+ * chạy khi NODE_ENV=production hoặc cơ sở dữ liệu không nằm trên máy này, trừ khi có --i-know-this-wipes-tables. Luôn in danh sách
+ * bảng và cơ sở dữ liệu trước khi làm.
  */
 import 'dotenv/config';
 import bcrypt from 'bcryptjs';
 import type { PoolClient } from 'pg';
 import pool from '../config/db';
+import { guardSeed } from './seedGuard';
 
 async function ins(client: PoolClient, sql: string, params?: any[]): Promise<any> {
   const { rows } = await client.query(sql, params || []);
@@ -94,10 +99,43 @@ function generateUsers(count: number) {
   return users;
 }
 
+/**
+ * The tables the seed EMPTIES (a delete with no WHERE), children before parents (FK order). The only place that lists them: the guard
+ * prints this list before anything happens, and tests/scripts/seedGuard.test.ts checks that no other DELETE exists in this file.
+ */
+export const CLEANUP_TABLES: readonly string[] = [
+  // User activity & progress
+  'user_activity_log', 'reviews', 'user_card_progress',
+  'retrieval_sessions', 'user_reading_progress',
+  'word_lookups', 'user_lesson_progress',
+  'user_saved_words', 'user_deck_favorites', 'user_ebook_favorites',
+  // Commerce
+  'transactions', 'user_subscriptions', 'plan_features', 'subscription_plans',
+  // Content references (NOT dictionary — keep that!)
+  'lesson_entries', 'lesson_tags', 'lessons',
+  'ebook_glossary', 'chapters', 'ebooks',
+  // Games (cleaned by seed-games.ts, but also clean here to be safe)
+  'game_runs',
+  // AI & System
+  'batch_entries', 'micro_delta_batches',
+  'moderation_logs', 'translation_cache',
+  'translation_glossary', 'prompt_templates',
+  'notifications', 'audit_logs',
+  'system_configs',
+  // Users & Admins (last — everything above depends on them)
+  'users', 'admin_accounts',
+];
+
 // ═══════════════════════════════════════════════
 //  SEED FUNCTION
 // ═══════════════════════════════════════════════
 const seed = async () => {
+  // The safety latch comes FIRST: before a connection is taken and before anything is deleted.
+  if (!guardSeed(process.argv.slice(2), process.env, CLEANUP_TABLES, (line) => console.log(line))) {
+    await pool.end().catch(() => undefined);
+    process.exit(1);
+  }
+
   const client = await pool.connect();
 
   try {
@@ -109,30 +147,8 @@ const seed = async () => {
 
     // ── 0. CLEANUP — Xóa dữ liệu seed cũ ──
     console.log('\n── 0. Cleanup old seed data ──');
-    // Thứ tự: con trước, cha sau (FK constraints)
-    const cleanupTables = [
-      // User activity & progress
-      'user_activity_log', 'reviews', 'user_card_progress',
-      'retrieval_sessions', 'user_reading_progress',
-      'word_lookups', 'user_lesson_progress',
-      'user_saved_words', 'user_deck_favorites', 'user_ebook_favorites',
-      // Commerce
-      'transactions', 'user_subscriptions', 'plan_features', 'subscription_plans',
-      // Content references (NOT dictionary — keep that!)
-      'lesson_entries', 'lesson_tags', 'lessons',
-      'ebook_glossary', 'chapters', 'ebooks',
-      // Games (cleaned by seed-games.ts, but also clean here to be safe)
-      'game_runs',
-      // AI & System
-      'batch_entries', 'micro_delta_batches',
-      'moderation_logs', 'translation_cache',
-      'translation_glossary', 'prompt_templates',
-      'notifications', 'audit_logs',
-      'system_configs',
-      // Users & Admins (last — everything above depends on them)
-      'users', 'admin_accounts',
-    ];
-    for (const table of cleanupTables) {
+    // Thứ tự: con trước, cha sau (FK constraints): xem CLEANUP_TABLES ở đầu tệp
+    for (const table of CLEANUP_TABLES) {
       try {
         const { rowCount } = await client.query(`DELETE FROM ${table}`);
         if (rowCount && rowCount > 0) process.stdout.write(`  ${table}(${rowCount}) `);
@@ -369,4 +385,5 @@ const seed = async () => {
   }
 };
 
-seed();
+// Chỉ chạy khi được gọi trực tiếp (npm run db:seed): import tệp này (test) không được xóa gì.
+if (require.main === module) void seed();
