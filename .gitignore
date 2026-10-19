@@ -11,3 +11,5 @@ data
 .acceptance.local.json
 .acceptance.state.json
 .claude/worktrees/
+# P7: scratch folder (one-off scripts, run logs, reports). Removed from the repo; never commit it again
+.p7tmp/
