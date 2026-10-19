@@ -12,6 +12,10 @@ import { RUN, cleanup as cleanupFixtures, createEntry, createJob } from '../help
 
 const MANUAL_NOTE = 'tạo tay, không phải của job';
 
+// The dev database is a remote serverless one: a plan alone is about sixty queries, so a test that makes a plan, or a connection that
+// is reset and re-opened in the middle of one, can take longer than the 20 s of the other suites.
+jest.setTimeout(120_000);
+
 beforeAll(async () => {
   // a serverless database may be asleep: the first connection of a run can be cut while TLS starts
   for (let attempt = 1; ; attempt++) {
