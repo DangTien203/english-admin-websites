@@ -25,6 +25,7 @@ apiRouter.post('/auto-entries/bulk-publish', write, api.bulkPublish);
 apiRouter.get('/auto-entries/:id',              api.getAutoEntry);
 apiRouter.post('/auto-entries/:id/publish', write, api.publishEntry);
 apiRouter.post('/auto-entries/:id/hide',    write, api.hideEntry);
+apiRouter.patch('/auto-entries/:id/senses/:senseId', write, api.editSense);
 
 apiRouter.get('/health',                        api.getHealth);
 apiRouter.get('/missing-words',                 api.getMissingWords);

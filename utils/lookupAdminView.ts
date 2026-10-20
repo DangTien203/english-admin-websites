@@ -1,4 +1,13 @@
-import { breakerLevel, usageLevel, type BreakerLevel, type UsageLevel } from '../services/lookup/adminRules';
+import {
+  EXAMPLE_VI_MAX_CHARS,
+  SENSE_MEANING_MAX_CHARS,
+  SENSE_VI_MAX_CHARS,
+  SENSE_VI_MAX_MEANINGS,
+  breakerLevel,
+  usageLevel,
+  type BreakerLevel,
+  type UsageLevel,
+} from '../services/lookup/adminRules';
 
 /**
  * Small helpers for the views of the lookup / enrichment admin (views/lookup/*.ejs): Vietnamese labels for the codes the job
@@ -76,6 +85,25 @@ const LEVEL_CLASS: Record<UsageLevel | BreakerLevel, string> = {
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
+/**
+ * The field_name of an entry_edit_history line, in words. The edits of a sense are named after the sense
+ * ("sense:<sense id>:definition_vi", "sense:<sense id>:example_vi:<example id>"); the full name stays in the title of the cell.
+ */
+export function historyField(name: string | null | undefined): string {
+  const field = String(name ?? '');
+  const sense = /^sense:([0-9a-f]{8})-[0-9a-f-]{27}:(definition_vi|example_vi)(?::([0-9a-f]{8})-[0-9a-f-]{27})?$/i.exec(field);
+  if (!sense) return field;
+  return sense[2] === 'definition_vi' ? `nghĩa tiếng Việt của sense …${sense[1]}` : `dịch ví dụ của sense …${sense[1]}`;
+}
+
+/** Limits the edit form of a sense tells the admin about (the same numbers the API enforces). */
+const limits = {
+  senseViMax: SENSE_VI_MAX_CHARS,
+  senseViMaxMeanings: SENSE_VI_MAX_MEANINGS,
+  senseMeaningMax: SENSE_MEANING_MAX_CHARS,
+  exampleViMax: EXAMPLE_VI_MAX_CHARS,
+};
+
 export const lk = {
   /** every code the job can write, for the filter */
   reasonCodes: Object.keys(REASON_LABELS),
@@ -87,6 +115,8 @@ export const lk = {
   skipLabel: (r: string) => SKIP_LABELS[r] ?? r,
   usageLevel,
   breakerLevel,
+  historyField,
+  limits,
   levelClass: (level: UsageLevel | BreakerLevel) => LEVEL_CLASS[level] ?? 'lk-unknown',
   /** 12.345.678 (vi-VN grouping, fixed so the page does not depend on the server's locale) */
   num: (n: number | string | null | undefined) => (n === null || n === undefined || n === '' ? '—' : Math.round(Number(n)).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.')),

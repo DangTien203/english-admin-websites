@@ -1,7 +1,13 @@
 import pool from '../config/db';
 import { paginate } from '../helpers/pagination';
 
+/** The "Published" checkbox of a form: ticked → true. An unticked box sends no field at all, so absent means false. */
+const isTicked = (value: unknown): boolean => value === true || value === 'true' || value === 'on';
+
 const DictionaryEntry = {
+  /** The "Published" checkbox of a form: ticked → true. Exposed so that a controller can tell what the form ASKED for. */
+  isTicked,
+
   async getAll({ search = '', pos = '', cefrLevel = '', source = '', published = '', page = 1, limit = 20 }: { search?: string; pos?: string; cefrLevel?: string; source?: string; published?: string; page?: number; limit?: number } = {}) {
     const conditions: string[] = [];
     const params: any[] = [];
@@ -79,7 +85,11 @@ const DictionaryEntry = {
     return rows[0] || null;
   },
 
-  async create(data: any, tagIds: string[] = []) {
+  /**
+   * `published` is the checkbox of the form (ticked → true, absent → false). `options.published = false` OVERRIDES it: the entry is
+   * created hidden whatever the form said (the creator is a role that may not publish, canChangePublished).
+   */
+  async create(data: any, tagIds: string[] = [], options: { published?: false } = {}) {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -106,7 +116,7 @@ const DictionaryEntry = {
           data.frequency_rank ? parseInt(data.frequency_rank) : null,
           data.source || 'manual',
           data.admin_note || null,
-          data.published !== false && data.published !== 'false',
+          options.published === false ? false : isTicked(data.published),
           data.created_by || null,
         ]
       );
@@ -131,13 +141,20 @@ const DictionaryEntry = {
    * `adminId` (optional) is who saves the form: a change of `published` is then written to entry_edit_history in the same
    * transaction, like the publish / hide buttons of the review pages (/lookup/review).
    * `published` is the checkbox of the form: ticked → true; unticked (the field is absent) → false.
+   * `keepPublished` (the editor is a role that may not change `published`, canChangePublished): the field of the form is ignored,
+   * the stored value stays and no history line is written. The result says when something was asked that this ignored.
    */
-  async update(id: string, data: any, tagIds: string[] = [], adminId?: string) {
+  async update(id: string, data: any, tagIds: string[] = [], adminId?: string, options: { keepPublished?: boolean } = {}): Promise<{ ignoredPublished: { requested: boolean; stored: boolean } | null }> {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      const published = data.published === true || data.published === 'true' || data.published === 'on';
       const before = await client.query('SELECT published FROM dictionary_entries WHERE id = $1 FOR UPDATE', [id]);
+      const stored: boolean | undefined = before.rows[0]?.published;
+      const published = options.keepPublished && stored !== undefined ? stored : isTicked(data.published);
+      const ignoredPublished =
+        options.keepPublished && stored !== undefined && data.published !== undefined && isTicked(data.published) !== stored
+          ? { requested: isTicked(data.published), stored }
+          : null;
       await client.query(`
         UPDATE dictionary_entries SET
           headword       = $1,
@@ -193,6 +210,7 @@ const DictionaryEntry = {
         );
       }
       await client.query('COMMIT');
+      return { ignoredPublished };
     } catch (err) {
       await client.query('ROLLBACK');
       throw err;

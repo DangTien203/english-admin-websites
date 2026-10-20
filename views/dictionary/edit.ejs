@@ -133,9 +133,12 @@
           </div>
           <div>
             <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:14px">
-              <input type="checkbox" name="published" value="true" <%= entry.published ? 'checked' : '' %>>
+              <input type="checkbox" name="published" value="true" <%= entry.published ? 'checked' : '' %> <%= canPublish ? '' : 'disabled' %>>
               Published
             </label>
+            <% if (!canPublish) { %>
+              <div style="font-size:12px;color:var(--text-secondary);margin-top:4px">Chỉ super_admin và content_editor đổi được trạng thái xuất bản. Các trường khác lưu bình thường.</div>
+            <% } %>
           </div>
         </div>
       </div>

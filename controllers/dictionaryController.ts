@@ -1,6 +1,8 @@
 import multer from 'multer';
 import type { Request, Response } from 'express';
 import DictionaryEntry from '../models/DictionaryEntry';
+import { canChangePublished } from '../services/lookup/adminRules';
+import { logAdminAction } from '../utils/adminAudit';
 
 // Multer for JSON import (memory storage — no disk write)
 const uploadJson = multer({
@@ -61,6 +63,7 @@ const dictionaryController = {
       res.render('dictionary/create', {
         title: 'Add New Word',
         active: 'dictionary',
+        canPublish: canChangePublished(req.session.admin.role),
         tags,
         VALID_POS,
         VALID_CEFR,
@@ -100,8 +103,14 @@ const dictionaryController = {
       const pos = Array.isArray(req.body.pos) ? req.body.pos : (req.body.pos ? [req.body.pos] : []);
       const tagIds = Array.isArray(req.body.tagIds) ? req.body.tagIds : (req.body.tagIds ? [req.body.tagIds] : []);
 
-      const entry = await DictionaryEntry.create({ ...req.body, pos, created_by: req.session.admin.id }, tagIds);
-      req.flash('success', `Word "${entry.headword}" added successfully`);
+      // Same rule as the editor (postEdit): only super_admin and content_editor decide `published`. For the others the new entry is
+      // ALWAYS created hidden, whatever the box said, and a request that asked to publish is logged.
+      const mayPublish = canChangePublished(req.session.admin.role);
+      const entry = await DictionaryEntry.create({ ...req.body, pos, created_by: req.session.admin.id }, tagIds, mayPublish ? {} : { published: false });
+      if (!mayPublish && DictionaryEntry.isTicked(req.body.published)) {
+        logAdminAction({ adminId: req.session.admin.id, action: 'dictionary.create.published', target: { type: 'entry', id: entry.id }, result: 'forbidden', extra: { requested: true, kept: false } });
+      }
+      req.flash('success', `Word "${entry.headword}" added successfully${mayPublish ? '' : ' (hidden: only super_admin and content_editor can publish it)'}`);
       return res.redirect(`/dictionary/${entry.id}`);
     } catch (err) {
       console.error('[Dictionary] postCreate error:', err);
@@ -192,6 +201,7 @@ const dictionaryController = {
         title: `Edit — ${entry.headword}`,
         active: 'dictionary',
         entry,
+        canPublish: canChangePublished(req.session.admin.role),
         tags,
         VALID_POS,
         VALID_CEFR,
@@ -233,7 +243,13 @@ const dictionaryController = {
       const pos = Array.isArray(req.body.pos) ? req.body.pos : (req.body.pos ? [req.body.pos] : []);
       const tagIds = Array.isArray(req.body.tagIds) ? req.body.tagIds : (req.body.tagIds ? [req.body.tagIds] : []);
 
-      await DictionaryEntry.update(id, { ...req.body, pos }, tagIds, req.session.admin.id);
+      // Only super_admin and content_editor change `published` (the same roles as the publish / hide buttons of /lookup/review):
+      // for the others the field of the form is ignored, and a try to change it is logged.
+      const mayPublish = canChangePublished(req.session.admin.role);
+      const { ignoredPublished } = await DictionaryEntry.update(id, { ...req.body, pos }, tagIds, req.session.admin.id, { keepPublished: !mayPublish });
+      if (ignoredPublished) {
+        logAdminAction({ adminId: req.session.admin.id, action: 'dictionary.edit.published', target: { type: 'entry', id }, result: 'forbidden', extra: { requested: ignoredPublished.requested, kept: ignoredPublished.stored } });
+      }
       req.flash('success', 'Word updated successfully');
       return res.redirect(`/dictionary/${id}`);
     } catch (err) {

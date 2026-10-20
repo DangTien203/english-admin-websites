@@ -27,9 +27,10 @@ npm test -- -t "login happy path"        # by test name
 npm run test:watch
 
 npm run db:migrate    # run all 32 migrations (idempotent, tracked in schema_migrations)
-npm run db:seed       # seed admin + sample data (scripts/seed.ts)
-npm run db:reset      # drop-all then migrate
-npm run db:fresh      # reset + seed
+npm run admin:create -- --email <e> --name <n>   # insert ONE super_admin; random password printed once (or ADMIN_PASSWORD from the environment); never deletes, refuses an existing e-mail
+npm run db:seed       # seed admin + sample data (scripts/seed.ts). WIPES ~32 tables first: lists them, refuses NODE_ENV=production or a non-local database unless --i-know-this-wipes-tables
+npm run db:reset      # drop tables (all but the dictionary content; `-- --all`: everything) then migrate. Same latch as db:seed: prints the database and what it drops, refuses NODE_ENV=production or a non-local database unless --i-know-this-wipes-tables
+npm run db:fresh      # reset + seed. npm hands extra arguments to the LAST command only, so the flag never reaches the reset half: on a non-local database run db:reset and db:seed as two commands
 npm run db:backup     # dump SQL to file
 npm run db:restore    # restore from SQL file
 
@@ -123,9 +124,13 @@ Railway (`railway.json`): build `npm run build`, start `node dist/database/migra
 
 > The codebase currently uses `('super_admin', 'moderator')` for content gates — `content_editor` is defined but not granted access on most routes. If you intend to add `content_editor`, update `requireRole(...)` lists explicitly.
 
-### Default local admin
+### Admin accounts
 
-`admin@english-app.com` / `admin123` (super_admin) — created by `npm run db:seed`.
+No admin credentials are recorded in this repo (not here, not in README.md).
+
+- **Create an admin**: `npm run admin:create -- --email <e> --name <n>` (`scripts/admin/create-admin.ts`). Inserts one `super_admin`; the password is random and printed exactly once, or taken from `ADMIN_PASSWORD` (then never printed). It never deletes or updates anything and refuses an e-mail that already exists. It does not accept a password on the command line.
+- **`npm run db:seed`** (`scripts/seed.ts`) creates the demo admins listed there (with the demo password set in that script) and **wipes ~32 tables first**. It prints which database it is about to use and the table list, and refuses to start when `NODE_ENV=production` or when the database is not on this machine (`scripts/seedGuard.ts`), unless the command line has `--i-know-this-wipes-tables`. `db:reset` / `db:fresh` (`database/reset.ts`, which DROPs tables) and `scripts/seed-mobile-test-users.ts` (a fixed password for 6 accounts, written in the source, after deleting their study data) use the same latch: `guardReset` / `guardTestUsers` in `scripts/seedGuard.ts`, called before a connection is taken. The test-users script has its own flag, `--i-know-this-sets-a-known-password`. On a non-local database run `db:reset` and `db:seed` separately, each with its flag (`db:fresh` cannot pass it to the reset half).
+- Tests make their own admin accounts with random names and delete them (`tests/helpers/lookupAdminFixtures.ts`).
 
 ### Views (EJS + express-ejs-layouts)
 

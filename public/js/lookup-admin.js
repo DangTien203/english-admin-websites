@@ -231,7 +231,76 @@
       }).catch(function () { button.disabled = false; showNotice('error', 'Không kết nối được máy chủ.'); });
     });
 
+    // edit the Vietnamese of one sense in place (the form is in the detail, which is replaced on every selection)
+    pane.addEventListener('click', function (event) {
+      var open = event.target.closest('[data-lk-edit-sense]');
+      var cancel = event.target.closest('[data-lk-cancel-sense]');
+      if (!open && !cancel) return;
+      var senseId = (open || cancel).getAttribute(open ? 'data-lk-edit-sense' : 'data-lk-cancel-sense');
+      var sense = event.target.closest('.lk-sense');
+      var form = $('[data-lk-sense-form="' + senseId + '"]', sense);
+      var button = $('[data-lk-edit-sense="' + senseId + '"]', sense);
+      if (!form || !button) return;
+      form.hidden = !open;
+      button.hidden = !!open;
+      if (open) { var area = $('textarea', form); if (area) area.focus(); }
+    });
+
+    pane.addEventListener('submit', function (event) {
+      var form = event.target.closest('[data-lk-sense-form]');
+      if (!form) return;
+      event.preventDefault();
+      var entryId = form.getAttribute('data-entry-id');
+      var senseId = form.getAttribute('data-lk-sense-form');
+      var body = {
+        definition_vi: $('textarea[name=definition_vi]', form).value,
+        examples: $all('input[name=example_vi]', form).map(function (input) {
+          return { id: input.getAttribute('data-example-id'), example_vi: input.value };
+        })
+      };
+      if (body.examples.length === 0) delete body.examples;
+      var submit = $('button[type=submit]', form);
+      submit.disabled = true;
+      request('PATCH', API + '/auto-entries/' + encodeURIComponent(entryId) + '/senses/' + encodeURIComponent(senseId), body).then(function (r) {
+        submit.disabled = false;
+        if (!r.ok) { showNotice('error', errorText(r)); return; }
+        if (r.json.data.changed) {
+          select(entryId); // draw the stored text, with its flags, and the new line of the history
+          showNotice('success', 'Đã lưu nghĩa tiếng Việt của sense.');
+        } else {
+          showNotice('warning', 'Nội dung không thay đổi nên chưa ghi gì.');
+        }
+      }).catch(function () { submit.disabled = false; showNotice('error', 'Không kết nối được máy chủ.'); });
+    });
+
     initBulk(rows);
+  }
+
+  // The confirmation box of a bulk publish: how many entries, and 5 of them picked at random (public/js/lookup-bulk-confirm.js).
+  // Resolves true when the admin confirms. A browser without <dialog> gets a plain confirm() with the same facts.
+  function confirmBulk(chosen) {
+    var d = window.LookupBulk.describeSelection(chosen);
+    var dialog = $('#lk-bulk-dialog');
+    if (!dialog || typeof dialog.showModal !== 'function') return Promise.resolve(window.confirm(d.plain));
+
+    $('#lk-bulk-title').textContent = d.title;
+    $('#lk-bulk-lead').textContent = d.lead;
+    $('#lk-bulk-more').textContent = d.more;
+    var list = $('#lk-bulk-sample');
+    list.textContent = '';
+    d.sample.forEach(function (headword) {
+      var li = document.createElement('li');
+      li.textContent = headword;
+      list.appendChild(li);
+    });
+    return new Promise(function (resolve) {
+      dialog.addEventListener('close', function onClose() {
+        dialog.removeEventListener('close', onClose);
+        resolve(dialog.returnValue === 'confirm');
+      });
+      dialog.returnValue = '';
+      dialog.showModal();
+    });
   }
 
   function initBulk(rows) {
@@ -255,9 +324,14 @@
     update();
 
     button.addEventListener('click', function () {
-      var ids = selected().map(function (b) { return b.value; });
-      if (ids.length === 0) return;
-      if (!window.confirm('Xuất bản ' + ids.length + ' mục từ đã chọn?')) return;
+      var chosen = selected().map(function (b) { return { id: b.value, headword: b.getAttribute('data-headword') || b.value }; });
+      if (chosen.length === 0) return;
+      confirmBulk(chosen).then(function (yes) {
+        if (yes) publishAll(chosen.map(function (c) { return c.id; }));
+      });
+    });
+
+    function publishAll(ids) {
       button.disabled = true;
       request('POST', API + '/auto-entries/bulk-publish', { entry_ids: ids }).then(function (r) {
         if (!r.ok) { button.disabled = false; showNotice('error', errorText(r)); return; }
@@ -270,7 +344,7 @@
         }
         reloadWithNotice(d.skipped.length > 0 ? 'warning' : 'success', text);
       }).catch(function () { button.disabled = false; showNotice('error', 'Không kết nối được máy chủ.'); });
-    });
+    }
   }
 
   document.addEventListener('DOMContentLoaded', function () {

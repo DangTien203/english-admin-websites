@@ -47,7 +47,7 @@
     </div>
     <% if (canWrite) { %>
       <div class="lk-muted" style="padding:0 20px 8px">
-        Chỉ chọn được mục từ chưa xuất bản, đủ trường bắt buộc và không có ghi chú cần xem của Haiku (tối đa <%= maxBulk %> mục mỗi lần). Mục khác: mở chi tiết rồi xuất bản từng mục.
+        Chỉ chọn được mục từ chưa xuất bản, đủ trường bắt buộc và <strong>không có ghi chú cần xem</strong> của Haiku (nghi ngờ nghĩa, từ nhạy cảm, tên riêng, bộ kiểm tra báo lỗi…), tối đa <%= maxBulk %> mục mỗi lần. Lưu ý nhẹ (CEFR ước tính, nghĩa đã bỏ có chủ ý…) không chặn. Mục khác: mở chi tiết rồi xuất bản từng mục.
       </div>
     <% } %>
     <div class="table-wrapper">
@@ -68,9 +68,9 @@
               <% if (canWrite) { %>
                 <td>
                   <% if (e.eligible_for_bulk_publish) { %>
-                    <input type="checkbox" class="lk-select" value="<%= e.id %>" aria-label="Chọn <%= e.headword %>">
+                    <input type="checkbox" class="lk-select" value="<%= e.id %>" data-headword="<%= e.headword %>" aria-label="Chọn <%= e.headword %>">
                   <% } else { %>
-                    <span class="lk-muted" title="<%= e.published ? 'Đã xuất bản' : (!e.tier_a_complete ? 'Thiếu trường bắt buộc (tầng A)' : 'Có ghi chú cần xem của Haiku') %>">—</span>
+                    <span class="lk-muted" title="<%= e.published ? 'Đã xuất bản' : (!e.tier_a_complete ? 'Thiếu trường bắt buộc (tầng A)' : 'Có ghi chú cần xem của Haiku, mở chi tiết để đọc') %>">—</span>
                   <% } %>
                 </td>
               <% } %>
@@ -82,7 +82,8 @@
                 <div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap">
                   <% if (filters.status === 'all') { %><span class="badge <%= e.published ? 'badge-success' : 'badge-warning' %>" style="font-size:11px"><%= e.published ? 'Đã xuất bản' : 'Chờ duyệt' %></span><% } %>
                   <% if (!e.tier_a_complete) { %><span class="badge badge-danger" style="font-size:11px" title="Thiếu: <%= e.tier_a_missing.join(', ') %>">thiếu tầng A</span><% } %>
-                  <% if (e.review_note_count > 0) { %><span class="badge badge-warning" style="font-size:11px" title="Ghi chú cần xem của Haiku"><%= e.review_note_count %> ghi chú</span><% } %>
+                  <% if (e.blocking_note_count > 0) { %><span class="badge badge-warning" style="font-size:11px" title="Ghi chú cần xem của Haiku: chặn xuất bản hàng loạt"><%= e.blocking_note_count %> cần xem</span><% } %>
+                  <% if (e.review_note_count > e.blocking_note_count) { %><span class="badge badge-secondary" style="font-size:11px" title="Lưu ý nhẹ của Haiku: không chặn"><%= e.review_note_count - e.blocking_note_count %> lưu ý nhẹ</span><% } %>
                 </div>
               </td>
               <td style="font-size:13px"><%= e.meaning_vi %></td>
@@ -104,4 +105,21 @@
   </div>
 </div>
 
+<% if (canWrite) { %>
+  <!-- Confirmation of a bulk publish: how many, and 5 of them picked at random (public/js/lookup-bulk-confirm.js) -->
+  <dialog id="lk-bulk-dialog" class="lk-dialog" aria-labelledby="lk-bulk-title">
+    <form method="dialog">
+      <h3 id="lk-bulk-title">Xuất bản hàng loạt</h3>
+      <p id="lk-bulk-lead"></p>
+      <ul id="lk-bulk-sample"></ul>
+      <p id="lk-bulk-more" class="lk-muted"></p>
+      <p class="lk-muted">Các mục từ này sẽ hiện ngay trong từ điển của ứng dụng. Có thể ẩn lại từng mục ở màn chi tiết.</p>
+      <div class="lk-dialog-actions">
+        <button type="submit" value="cancel" class="btn btn-secondary" id="lk-bulk-cancel">Hủy</button>
+        <button type="submit" value="confirm" class="btn btn-primary" id="lk-bulk-confirm">Xuất bản</button>
+      </div>
+    </form>
+  </dialog>
+  <script src="/js/lookup-bulk-confirm.js"></script>
+<% } %>
 <script src="/js/lookup-admin.js"></script>

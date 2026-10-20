@@ -167,6 +167,63 @@ export async function lockEntries(db: Queryable, ids: string[]): Promise<LockedE
   return rows;
 }
 
+// ── editing a sense (P9) ───────────────────────────────────────────────────────────────────────────────────────────────
+
+export interface SenseRow {
+  id: string;
+  entry_id: string;
+  definition_vi: string | null;
+}
+
+export interface SenseExampleRow {
+  id: string;
+  sense_id: string;
+  example_en: string;
+  example_vi: string | null;
+}
+
+/** The sense of THIS entry (a sense id from another entry finds nothing), locked for the edit. Must run inside a transaction. */
+export async function lockSense(db: Queryable, entryId: string, senseId: string): Promise<SenseRow | null> {
+  const { rows } = await db.query(`SELECT id, entry_id, definition_vi FROM entry_senses WHERE id = $1 AND entry_id = $2 FOR UPDATE`, [senseId, entryId]);
+  return rows[0] ?? null;
+}
+
+/** The examples of the sense with these ids (ids of other senses are not returned), locked. */
+export async function lockExamples(db: Queryable, senseId: string, exampleIds: string[]): Promise<SenseExampleRow[]> {
+  if (exampleIds.length === 0) return [];
+  const { rows } = await db.query(
+    `SELECT id, sense_id, example_en, example_vi FROM sense_examples WHERE sense_id = $1 AND id = ANY($2::uuid[]) ORDER BY id FOR UPDATE`,
+    [senseId, exampleIds]
+  );
+  return rows;
+}
+
+/** Every example of the sense, in the order the pages show them. */
+export async function senseExamples(db: Queryable, senseId: string): Promise<SenseExampleRow[]> {
+  const { rows } = await db.query(`SELECT id, sense_id, example_en, example_vi FROM sense_examples WHERE sense_id = $1 ORDER BY sort_order, id`, [senseId]);
+  return rows;
+}
+
+export async function setSenseDefinitionVi(db: Queryable, senseId: string, value: string): Promise<void> {
+  await db.query(`UPDATE entry_senses SET definition_vi = $2 WHERE id = $1`, [senseId, value]);
+}
+
+export async function setExampleVi(db: Queryable, exampleId: string, value: string): Promise<void> {
+  await db.query(`UPDATE sense_examples SET example_vi = $2 WHERE id = $1`, [exampleId, value]);
+}
+
+export async function touchEntry(db: Queryable, entryId: string): Promise<void> {
+  await db.query(`UPDATE dictionary_entries SET updated_at = NOW() WHERE id = $1`, [entryId]);
+}
+
+/** One line of entry_edit_history. The admin is the one who saved the change. */
+export async function addHistory(db: Queryable, entryId: string, adminId: string, field: string, oldValue: string | null, newValue: string | null): Promise<void> {
+  await db.query(
+    `INSERT INTO entry_edit_history (entry_id, admin_id, field_name, old_value, new_value) VALUES ($1, $2, $3, $4, $5)`,
+    [entryId, adminId, field, oldValue, newValue]
+  );
+}
+
 /** Sets published for entries that currently have the opposite value, and writes one entry_edit_history line each. */
 export async function setPublished(db: Queryable, ids: string[], published: boolean, adminId: string): Promise<string[]> {
   if (ids.length === 0) return [];

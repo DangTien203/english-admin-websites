@@ -40,13 +40,32 @@
     </div>
   <% } %>
 
-  <% if (e.note.review_notes.length > 0) { %>
+  <%
+    var blockingNotes = e.note.review_notes_classified.filter(function(n) { return n.blocks; });
+    var lightNotes = e.note.review_notes_classified.filter(function(n) { return !n.blocks; });
+  %>
+  <% if (!e.published) { %>
+    <% if (e.eligible_for_bulk_publish) { %>
+      <div class="lk-muted" style="margin:6px 0"><span class="badge badge-success" style="font-size:11px">Đủ điều kiện xuất bản hàng loạt</span> tầng A đủ và không có ghi chú cần xem.</div>
+    <% } else if (e.tier_a_complete) { %>
+      <div class="lk-muted" style="margin:6px 0"><span class="badge badge-warning" style="font-size:11px">Chưa đủ điều kiện xuất bản hàng loạt</span> còn <%= blockingNotes.length %> ghi chú cần xem (bên dưới). Có thể vẫn xuất bản từng mục sau khi đọc.</div>
+    <% } %>
+  <% } %>
+  <% if (blockingNotes.length > 0) { %>
     <div class="lk-review-notes">
-      <strong>Haiku không chắc về các điểm sau (notes_for_review):</strong>
+      <strong>Cần xem trước khi xuất bản (<%= blockingNotes.length %>):</strong>
       <ul>
-        <% e.note.review_notes.forEach(function(n) { %><li><%= n %></li><% }) %>
+        <% blockingNotes.forEach(function(n) { %><li><span class="badge badge-warning" style="font-size:11px"><%= n.label %></span> <%= n.text %></li><% }) %>
       </ul>
     </div>
+  <% } %>
+  <% if (lightNotes.length > 0) { %>
+    <details class="lk-light-notes" <%= blockingNotes.length === 0 ? 'open' : '' %>>
+      <summary><strong>Lưu ý nhẹ của Haiku (<%= lightNotes.length %>)</strong> <span class="lk-muted">không chặn xuất bản hàng loạt</span></summary>
+      <ul>
+        <% lightNotes.forEach(function(n) { %><li><span class="badge badge-secondary" style="font-size:11px"><%= n.label %></span> <%= n.text %></li><% }) %>
+      </ul>
+    </details>
   <% } %>
 
   <h3>Nghĩa tiếng Việt của mục từ (hiển thị khi sense không có nghĩa)</h3>
@@ -66,7 +85,7 @@
   <h3>Các nghĩa (<%= e.senses.length %>)</h3>
   <% if (e.senses.length === 0) { %><div class="lk-muted">Chưa có nghĩa nào</div><% } %>
   <% e.senses.forEach(function(s, i) { %>
-    <div class="lk-sense">
+    <div class="lk-sense" data-sense-id="<%= s.id %>">
       <div class="lk-sense-head">
         <strong>#<%= i + 1 %></strong>
         <span class="badge badge-primary" style="font-size:11px"><%= s.pos %></span>
@@ -86,6 +105,22 @@
         </ul>
       <% } else { %>
         <div class="lk-muted" style="margin:6px 0">Chưa có nghĩa tiếng Việt</div>
+      <% } %>
+      <% if (canWrite) { %>
+        <button type="button" class="btn btn-sm btn-secondary" data-lk-edit-sense="<%= s.id %>">Sửa nghĩa tiếng Việt</button>
+        <form class="lk-sense-form" data-lk-sense-form="<%= s.id %>" data-entry-id="<%= e.id %>" hidden>
+          <label class="lk-muted" for="lk-def-<%= s.id %>">Nghĩa tiếng Việt, ngăn cách bằng dấu chấm phẩy (;)</label>
+          <textarea id="lk-def-<%= s.id %>" name="definition_vi" rows="2" maxlength="<%= lk.limits.senseViMax %>" required><%= s.definition_vi || '' %></textarea>
+          <% s.examples.filter(function(x) { return x.example_vi; }).forEach(function(x) { %>
+            <label class="lk-muted" for="lk-ex-<%= x.id %>">Dịch của ví dụ: “<%= x.example_en %>”</label>
+            <input type="text" id="lk-ex-<%= x.id %>" name="example_vi" data-example-id="<%= x.id %>" value="<%= x.example_vi %>" maxlength="<%= lk.limits.exampleViMax %>" required>
+          <% }) %>
+          <div class="lk-muted">Tối đa <%= lk.limits.senseViMaxMeanings %> nghĩa, mỗi nghĩa không quá <%= lk.limits.senseMeaningMax %> ký tự, tổng không quá <%= lk.limits.senseViMax %>. Không dùng &lt; hoặc &gt;. Lưu lại vết trong lịch sử thay đổi.</div>
+          <div class="lk-actions">
+            <button type="submit" class="btn btn-sm btn-primary">Lưu</button>
+            <button type="button" class="btn btn-sm btn-secondary" data-lk-cancel-sense="<%= s.id %>">Hủy</button>
+          </div>
+        </form>
       <% } %>
       <% if (s.grammar_note) { %><div class="lk-muted">Ngữ pháp: <%= s.grammar_note %></div><% } %>
       <% if (s.usage_note) { %><div class="lk-muted">Cách dùng: <%= s.usage_note %></div><% } %>
@@ -162,7 +197,7 @@
           <% e.history.forEach(function(h) { %>
             <tr>
               <td style="font-size:12px"><%= lk.date(h.created_at) %></td>
-              <td class="lk-mono"><%= h.field_name %></td>
+              <td class="lk-mono" title="<%= h.field_name %>"><%= lk.historyField(h.field_name) %></td>
               <td class="lk-mono"><%= h.old_value == null ? '—' : String(h.old_value).slice(0, 60) %></td>
               <td class="lk-mono"><%= h.new_value == null ? '—' : String(h.new_value).slice(0, 60) %></td>
               <td style="font-size:12px"><%= h.admin_name || 'hệ thống' %></td>

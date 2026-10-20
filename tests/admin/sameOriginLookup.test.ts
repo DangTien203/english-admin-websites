@@ -162,6 +162,25 @@ describe('every P8 write route refuses another site (and changes nothing)', () =
     expect(fake.calls).toHaveLength(0);
   });
 
+  it('P9: the sense editor (PATCH /auto-entries/:id/senses/:senseId) refuses another site too, before the login and role checks', async () => {
+    const id = await createEntry({ tag: 'allsense' });
+    const sense = (await pool.query('SELECT id, definition_vi FROM entry_senses WHERE entry_id = $1', [id])).rows[0];
+    const url = `${API}/auto-entries/${id}/senses/${sense.id}`;
+    const edit = { definition_vi: 'từ trang khác' };
+
+    const asEditor = await admins.super_admin.agent.patch(url).set('Host', HOST).set('Origin', EVIL).send(edit);
+    expect([asEditor.status, asEditor.body.error.code]).toEqual([403, 'FORBIDDEN']);
+    expect(asEditor.body.error.message).toContain('Request refused');
+    const anonymous = await request(app).patch(url).set('Host', HOST).set('Origin', EVIL).send(edit);
+    expect([anonymous.status, anonymous.body.error.message]).toEqual([403, expect.stringContaining('Request refused')]);
+
+    expect((await pool.query('SELECT definition_vi FROM entry_senses WHERE id = $1', [sense.id])).rows[0].definition_vi).toBe(sense.definition_vi);
+    expect((await pool.query('SELECT 1 FROM entry_edit_history WHERE entry_id = $1', [id])).rowCount).toBe(0);
+
+    const own = await admins.super_admin.agent.patch(url).set('Host', HOST).set('Origin', OWN_ORIGIN).send(edit);
+    expect(own.status).toBe(200);
+  });
+
   it('does not look at reads: a cross-site GET of every read endpoint still answers 200', async () => {
     for (const url of [`${API}/jobs`, `${API}/auto-entries`, `${API}/health`, `${API}/missing-words`]) {
       const res = await admins.super_admin.agent.get(url).set('Host', HOST).set('Origin', EVIL);

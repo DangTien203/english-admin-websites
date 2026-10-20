@@ -114,6 +114,16 @@ const lookupAdminApiController = {
     }
   ),
 
+  // PATCH /lookup/api/auto-entries/:id/senses/:senseId   { definition_vi?: string, examples?: [{ id, example_vi }] }
+  editSense: write(
+    'entry.edit_sense',
+    (req) => ({ type: 'entry', id: idParam(req) }),
+    async (req, adminId) => {
+      const out = await service().editSense(idParam(req), String(req.params.senseId ?? ''), req.body, adminId);
+      return { data: out, log: { changed: out.changed, fields: out.changes.length } };
+    }
+  ),
+
   // POST /lookup/api/auto-entries/bulk-publish   { entry_ids: string[] }
   bulkPublish: write(
     'entry.bulk_publish',

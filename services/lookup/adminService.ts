@@ -7,17 +7,23 @@ import {
   DEFAULT_PAGE_SIZE,
   JOB_STATUSES,
   MAX_BULK_PUBLISH,
+  MAX_EXAMPLES_PER_EDIT,
   MAX_PAGE_SIZE,
   MAX_WORDS_PER_REQUEST,
   RETRYABLE_REASONS,
+  exampleHistoryField,
   flagMeanings,
   retryBlock,
+  senseHistoryField,
   splitMeanings,
   tierAMissing,
   toWordList,
+  validateExampleVi,
+  validateSenseDefinitionVi,
   type MeaningView,
   type RetryBlock,
 } from './adminRules';
+import { blockingReviewNotes, classifyReviewNotes, type ClassifiedNote } from './reviewNotes';
 import { getEnrichmentEnqueuer } from './index';
 import { getLookupHealthService, type HealthSnapshot } from './health';
 
@@ -133,12 +139,27 @@ export interface AutoEntryItem {
   sense_count: number;
   tier_a_complete: boolean;
   tier_a_missing: string[];
+  /** all the notes of Haiku (notes_for_review), light ones included */
   review_note_count: number;
-  /** a bulk publish would publish it: not published yet, tier A complete, no notes_for_review */
+  /** the ones that hold the entry back ("cần xem", services/lookup/reviewNotes.ts) */
+  blocking_note_count: number;
+  /** a bulk publish would publish it: not published yet, tier A complete, no blocking note (light notes do not count) */
   eligible_for_bulk_publish: boolean;
 }
 
+/** has_review_notes: the entry has a note of Haiku that needs a look (a blocking one; light notes never skip an entry). */
 export type BulkSkipReason = 'not_found' | 'not_auto' | 'already_published' | 'tier_a_incomplete' | 'has_review_notes';
+
+export interface SenseEditOutcome {
+  entry_id: string;
+  sense_id: string;
+  /** false: the text sent is what was stored already (nothing written, no history) */
+  changed: boolean;
+  changes: Array<{ field: 'definition_vi' | 'example_vi'; example_id?: string }>;
+  definition_vi: string | null;
+  meanings_vi: MeaningView[];
+  examples: Array<{ id: string; example_en: string; example_vi: string | null }>;
+}
 
 export interface PublishOutcome {
   id: string;
@@ -260,6 +281,7 @@ export class LookupAdminService {
     const items = result.rows.map((r): AutoEntryItem => {
       const missing = facts.has(r.id) ? tierAMissing(facts.get(r.id) as any) : ['headword'];
       const notes = parseAutoNote(r.admin_note).review_notes;
+      const blocking = blockingReviewNotes(notes);
       return {
         id: r.id,
         headword: r.headword,
@@ -273,7 +295,8 @@ export class LookupAdminService {
         tier_a_complete: missing.length === 0,
         tier_a_missing: missing,
         review_note_count: notes.length,
-        eligible_for_bulk_publish: !r.published && missing.length === 0 && notes.length === 0,
+        blocking_note_count: blocking.length,
+        eligible_for_bulk_publish: !r.published && missing.length === 0 && blocking.length === 0,
       };
     });
     return { items, pagination: pageInfo(result) };
@@ -304,7 +327,7 @@ export class LookupAdminService {
         region: s.region,
         grammar_note: s.grammar_note,
         usage_note: s.usage_note,
-        examples: by(parts.examples, s.id).map((x) => ({ example_en: x.example_en, example_vi: x.example_vi })),
+        examples: by(parts.examples, s.id).map((x: any) => ({ id: x.id as string, example_en: x.example_en, example_vi: x.example_vi })),
         synonyms: by(parts.senseSynonyms, s.id).map((x: any) => x.synonym_text),
         antonyms: by(parts.senseAntonyms, s.id).map((x: any) => x.antonym_text),
       };
@@ -341,7 +364,8 @@ export class LookupAdminService {
       note: noteView(note),
       tier_a_complete: missing.length === 0,
       tier_a_missing: missing,
-      eligible_for_bulk_publish: !entry.published && missing.length === 0 && note.review_notes.length === 0,
+      blocking_note_count: blockingReviewNotes(note.review_notes).length,
+      eligible_for_bulk_publish: !entry.published && missing.length === 0 && blockingReviewNotes(note.review_notes).length === 0,
       has_flagged_meanings: hasFlags,
       senses,
       topics: parts.tags.map((t) => t.name),
@@ -370,7 +394,8 @@ export class LookupAdminService {
   }
 
   /**
-   * Publishes the entries that satisfy ALL of: made by the job ('[auto]'), tier A complete, no notes_for_review. The rest are
+   * Publishes the entries that satisfy ALL of: made by the job ('[auto]'), tier A complete, no note of Haiku that needs a look
+   * (services/lookup/reviewNotes.ts: light notes do not hold an entry back). The rest are
    * reported with the reason. One transaction, rows locked: either every eligible entry is published with its history line, or none.
    */
   async bulkPublish(ids: unknown, adminId: string) {
@@ -386,7 +411,7 @@ export class LookupAdminService {
       const facts = await AutoEntry.tierAFactsFor(tx, [...rows.keys()]);
 
       const eligible: string[] = [];
-      const skipped: Array<{ id: string; headword: string | null; reason: BulkSkipReason; tier_a_missing?: string[] }> = [];
+      const skipped: Array<{ id: string; headword: string | null; reason: BulkSkipReason; tier_a_missing?: string[]; blocking_notes?: Array<Pick<ClassifiedNote, 'text' | 'category' | 'label'>> }> = [];
       for (const id of wanted) {
         const row = rows.get(id);
         if (!row) {
@@ -398,8 +423,11 @@ export class LookupAdminService {
         } else {
           const missing = tierAMissing(facts.get(id) as any);
           if (missing.length > 0) skipped.push({ id, headword: row.headword, reason: 'tier_a_incomplete', tier_a_missing: missing });
-          else if (parseAutoNote(row.admin_note).review_notes.length > 0) skipped.push({ id, headword: row.headword, reason: 'has_review_notes' });
-          else eligible.push(id);
+          else {
+            const blocking = blockingReviewNotes(parseAutoNote(row.admin_note).review_notes);
+            if (blocking.length > 0) skipped.push({ id, headword: row.headword, reason: 'has_review_notes', blocking_notes: blocking.map(({ text, category, label }) => ({ text, category, label })) });
+            else eligible.push(id);
+          }
         }
       }
 
@@ -408,6 +436,83 @@ export class LookupAdminService {
         requested: wanted.length,
         published: eligible.filter((id) => changed.has(id)).map((id) => ({ id, headword: (rows.get(id) as any).headword as string })),
         skipped,
+      };
+    });
+  }
+
+  // ── the Vietnamese of a sense ──────────────────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Edits the Vietnamese text of ONE sense of an entry made by the job: its meanings (definition_vi) and/or the translation of
+   * some of its examples (example_vi). Nothing else of the entry or the sense can be changed here.
+   *
+   * The text is cleaned and checked (services/lookup/adminRules.ts), the rows are locked, and every text that really changed is
+   * written together with its entry_edit_history line (field_name names the sense, old and new value, the admin who saved it) in
+   * ONE transaction. Sending what is stored already writes nothing.
+   */
+  async editSense(entryId: string, senseId: string, raw: unknown, adminId: string): Promise<SenseEditOutcome> {
+    if (!isUuid(entryId)) throw new AdminHttpError(404, 'NOT_FOUND', 'Không tìm thấy mục từ tự tạo');
+    if (!isUuid(senseId)) throw new AdminHttpError(404, 'NOT_FOUND', 'Không tìm thấy nghĩa (sense) của mục từ này');
+
+    const body = raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+    const extra = Object.keys(body).filter((k) => k !== 'definition_vi' && k !== 'examples');
+    if (extra.length > 0) throw validationError(`Trường không được sửa: ${extra.slice(0, 5).join(', ')}`, { allowed: ['definition_vi', 'examples'] });
+    if (body.definition_vi === undefined && body.examples === undefined) throw validationError('Cần definition_vi hoặc examples');
+
+    let newDefinition: string | undefined;
+    if (body.definition_vi !== undefined) {
+      const v = validateSenseDefinitionVi(body.definition_vi);
+      if (!v.ok) throw validationError(v.error, { field: 'definition_vi' });
+      newDefinition = (v.value as { value: string }).value;
+    }
+
+    const newExamples = new Map<string, string>();
+    if (body.examples !== undefined) {
+      if (!Array.isArray(body.examples) || body.examples.length === 0) throw validationError('examples phải là danh sách không rỗng', { field: 'examples' });
+      if (body.examples.length > MAX_EXAMPLES_PER_EDIT) throw validationError(`Tối đa ${MAX_EXAMPLES_PER_EDIT} ví dụ mỗi lần`, { field: 'examples', max: MAX_EXAMPLES_PER_EDIT });
+      for (const item of body.examples) {
+        const id = item !== null && typeof item === 'object' ? (item as Record<string, unknown>).id : undefined;
+        if (!isUuid(id)) throw validationError('Mỗi ví dụ cần id (UUID)', { field: 'examples' });
+        const v = validateExampleVi((item as Record<string, unknown>).example_vi);
+        if (!v.ok) throw validationError(v.error, { field: 'examples', id });
+        if (newExamples.has(id.toLowerCase())) throw validationError('Một ví dụ xuất hiện hai lần trong yêu cầu', { field: 'examples', id });
+        newExamples.set(id.toLowerCase(), v.value as string);
+      }
+    }
+
+    return this.inTransaction(async (tx) => {
+      const [entry] = await AutoEntry.lockEntries(tx, [entryId]);
+      if (!entry || !isAutoNote(entry.admin_note)) throw new AdminHttpError(404, 'NOT_FOUND', 'Không tìm thấy mục từ tự tạo');
+      const sense = await AutoEntry.lockSense(tx, entryId, senseId);
+      if (!sense) throw new AdminHttpError(404, 'NOT_FOUND', 'Không tìm thấy nghĩa (sense) của mục từ này');
+      const locked = new Map((await AutoEntry.lockExamples(tx, senseId, [...newExamples.keys()])).map((x) => [x.id.toLowerCase(), x]));
+      const missing = [...newExamples.keys()].filter((id) => !locked.has(id));
+      if (missing.length > 0) throw new AdminHttpError(404, 'NOT_FOUND', 'Không tìm thấy ví dụ của nghĩa này', { example_ids: missing });
+
+      const changes: SenseEditOutcome['changes'] = [];
+      if (newDefinition !== undefined && newDefinition !== sense.definition_vi) {
+        await AutoEntry.setSenseDefinitionVi(tx, senseId, newDefinition);
+        await AutoEntry.addHistory(tx, entryId, adminId, senseHistoryField(senseId), sense.definition_vi, newDefinition);
+        changes.push({ field: 'definition_vi' });
+      }
+      for (const [id, text] of newExamples) {
+        const example = locked.get(id) as AutoEntry.SenseExampleRow;
+        if (text === example.example_vi) continue;
+        await AutoEntry.setExampleVi(tx, example.id, text);
+        await AutoEntry.addHistory(tx, entryId, adminId, exampleHistoryField(senseId, example.id), example.example_vi, text);
+        changes.push({ field: 'example_vi', example_id: example.id });
+      }
+      if (changes.length > 0) await AutoEntry.touchEntry(tx, entryId);
+
+      const definition = newDefinition !== undefined ? newDefinition : sense.definition_vi;
+      return {
+        entry_id: entryId,
+        sense_id: senseId,
+        changed: changes.length > 0,
+        changes,
+        definition_vi: definition,
+        meanings_vi: flagMeanings(splitMeanings(definition), parseAutoNote(entry.admin_note).review_notes),
+        examples: (await AutoEntry.senseExamples(tx, senseId)).map((x) => ({ id: x.id, example_en: x.example_en, example_vi: x.example_vi })),
       };
     });
   }
@@ -486,6 +591,8 @@ function noteView(n: ParsedAutoNote) {
     tier_b_missing: n.tier_b_missing,
     estimated: n.estimated,
     review_notes: n.review_notes,
+    /** the same notes with the category each belongs to and whether it holds the entry back */
+    review_notes_classified: classifyReviewNotes(n.review_notes),
     other: n.other,
   };
 }

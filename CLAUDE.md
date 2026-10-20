@@ -30,14 +30,17 @@ npm run mock:upstream # local fake Google / Free Dictionary / Datamuse (127.0.0.
 npm run loadtest:lookup  # burst load test of POST /api/v1/ebooks/:id/lookup (single-flight, per-user limit, latency, heap)
 npm run health:snapshot  # LookupHealthService.getSnapshot() as JSON (breakers, Google chars, tokens, jobs, queue depth)
 npm run enrich:redrive   # re-send dead-lettered enrichment jobs; dry-run unless --confirm — docs/lookup-runbook.md
+npx tsx scripts/dev/cleanup-auto-entries.ts   # dry run: lists the [auto] entries (the /lookup/review criterion) with rows per table; deletes ONLY with --confirm, in one transaction; skips [auto] entries that lessons / other entries' synonyms / saved words point at — docs/lookup-runbook.md §8
+npx tsx scripts/dev/classify-review-notes.ts  # read-only: how the notes of Haiku on the [auto] entries are classified, and which entries a bulk publish would take — docs/lookup-admin.md §3.4
 npm run check:env-example  # .env.example must match config/lookup.ts, and every example value must equal the schema default (also runs first in `npm test`)
 npm run seed:lookup-test -- --staging   # test user/ebook + prerequisite entries for the acceptance run; writes .acceptance.local.json (git-ignored)
 npm run acceptance:lookup -- --staging  # 30-word acceptance run against a running server on the dev DB (real network, spends tokens); report in docs/lookup-acceptance-report.md; probes Free Dictionary first (words it cannot judge are "không đánh giá được", exit code 3); --cleanup needs the DB name retyped — docs/lookup-runbook.md §12
 
 npm run db:migrate    # run all 32 migrations (idempotent, tracked in schema_migrations)
-npm run db:seed       # seed admin + sample data (scripts/seed.ts)
-npm run db:reset      # drop-all then migrate
-npm run db:fresh      # reset + seed
+npm run admin:create -- --email <e> --name <n>   # insert ONE super_admin; random password printed once (or ADMIN_PASSWORD from the environment); never deletes, refuses an existing e-mail
+npm run db:seed       # seed admin + sample data (scripts/seed.ts). WIPES ~32 tables first: lists them, refuses NODE_ENV=production or a non-local database unless --i-know-this-wipes-tables
+npm run db:reset      # drop tables (all but the dictionary content; `-- --all`: everything) then migrate. Same latch as db:seed: prints the database and what it drops, refuses NODE_ENV=production or a non-local database unless --i-know-this-wipes-tables
+npm run db:fresh      # reset + seed. npm hands extra arguments to the LAST command only, so the flag never reaches the reset half: on a non-local database run db:reset and db:seed as two commands
 npm run db:backup     # dump SQL to file
 npm run db:restore    # restore from SQL file
 
@@ -127,7 +130,8 @@ Railway (`railway.json`): build `npm run build`, start `node dist/database/migra
 | Dictionary, lessons, decks, games, ebooks, ai-content | ✅ | ✅ | ❌ (not currently gated to it) |
 | `/dictionary/:id` page and `/dictionary/:id/edit` editor | ✅ | ✅ | ✅ (opened for the review screen of `/lookup`; list / create / import / delete are not) |
 | `/lookup` pages and read API | ✅ | ✅ | ✅ |
-| `/lookup` writes (send words, retry, publish, hide, bulk publish) | ✅ | ❌ (403) | ✅ |
+| `/lookup` writes (send words, retry, publish, hide, bulk publish, edit the Vietnamese of a sense) | ✅ | ❌ (403) | ✅ |
+| Set `published` in the entry editor and on create (`POST /dictionary/:id/edit`, `POST /dictionary/create`; for other roles the value is ignored and logged as `forbidden`, and a moderator's new entry is always created hidden) | ✅ | ❌ | ✅ |
 | Users CRUD | ✅ | ✅ | ❌ |
 | Approvals (queue, approve/reject) | ✅ | ❌ | ❌ |
 | Subscriptions (plans, payment methods, transactions) | ✅ | ❌ | ❌ |
@@ -135,9 +139,13 @@ Railway (`railway.json`): build `npm run build`, start `node dist/database/migra
 
 > The codebase currently uses `('super_admin', 'moderator')` for content gates — `content_editor` is defined but not granted access on most routes. If you intend to add `content_editor`, update `requireRole(...)` lists explicitly.
 
-### Default local admin
+### Admin accounts
 
-`admin@english-app.com` / `admin123` (super_admin) — created by `npm run db:seed`.
+No admin credentials are recorded in this repo (not here, not in README.md).
+
+- **Create an admin**: `npm run admin:create -- --email <e> --name <n>` (`scripts/admin/create-admin.ts`). Inserts one `super_admin`; the password is random and printed exactly once, or taken from `ADMIN_PASSWORD` (then never printed). It never deletes or updates anything and refuses an e-mail that already exists. It does not accept a password on the command line.
+- **`npm run db:seed`** (`scripts/seed.ts`) creates the demo admins listed there (with the demo password set in that script) and **wipes ~32 tables first**. It prints which database it is about to use and the table list, and refuses to start when `NODE_ENV=production` or when the database is not on this machine (`scripts/seedGuard.ts`), unless the command line has `--i-know-this-wipes-tables`. `db:reset` / `db:fresh` (`database/reset.ts`, which DROPs tables) and `scripts/seed-mobile-test-users.ts` (a fixed password for 6 accounts, written in the source, after deleting their study data) use the same latch: `guardReset` / `guardTestUsers` in `scripts/seedGuard.ts`, called before a connection is taken. The test-users script has its own flag, `--i-know-this-sets-a-known-password`. On a non-local database run `db:reset` and `db:seed` separately, each with its flag (`db:fresh` cannot pass it to the reset half).
+- Tests make their own admin accounts with random names and delete them (`tests/helpers/lookupAdminFixtures.ts`).
 
 ### Views (EJS + express-ejs-layouts)
 

@@ -522,7 +522,7 @@ describe('GET /lookup/api/auto-entries/:id', () => {
     expect(d.senses).toHaveLength(2);
     expect(d.senses[0]).toMatchObject({ order: 0, pos: 'noun', definition_en: 'a small dark spot', synonyms: ['freckle'], antonyms: ['blank'] });
     expect(d.senses[0].meanings_vi.map((m: any) => m.text)).toEqual(['nốt ruồi', 'chắt rượu', long]);
-    expect(d.senses[0].examples).toEqual([{ example_en: 'She has a mole.', example_vi: 'Cô ấy có một nốt ruồi.' }]);
+    expect(d.senses[0].examples).toEqual([{ id: expect.any(String), example_en: 'She has a mole.', example_vi: 'Cô ấy có một nốt ruồi.' }]); // the id is what the sense editor sends back
     expect(d.senses[1].meanings_vi.map((m: any) => m.text)).toEqual(['đào']);
     expect(d.word_forms).toEqual([expect.objectContaining({ form_type: 'plural', form_value: 'moles' })]);
     expect(d.idioms).toEqual([expect.objectContaining({ idiom_text: 'a mole in the organisation' })]);
