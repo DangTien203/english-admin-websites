@@ -39,6 +39,11 @@ const ALLOWED: Record<string, Record<string, string>> = {
     where: 'either empty or the fixed text "WHERE word = $N"; the value itself is a bound parameter',
     'params.length': 'builds the placeholder number ($1, $2…)',
   },
+  'services/enrichment/oxford/send.ts': { schema: 'the pg-boss schema from PGBOSS_SCHEMA, checked against /^[a-z_][a-z0-9_]{0,62}$/i on the line before it is used (liveWorkers)' },
+  'services/enrichment/oxford/publish.ts': {
+    cefrSql: 'either empty or the fixed text "AND cefr_level = ANY($2::text[])", chosen by whether --cefr was given; the levels themselves are the bound parameter $2',
+    LEVEL_ORDER_SQL: 'a constant CASE expression written in the same file (A1 … C2 → 1 … 6)',
+  },
   'scripts/enrichment/review.ts': { "onlyUnpublished ? 'AND e.published = FALSE' : ''": 'a fixed fragment chosen by a boolean command-line flag' },
 };
 

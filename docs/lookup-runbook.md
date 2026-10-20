@@ -148,6 +148,9 @@ Chỉ một worker dùng **đúng schema pg-boss mà job được gửi vào** (
 | `npm run seed:lookup-test -- --staging` | dữ liệu thử cho nghiệm thu (mục 12) |
 | `npm run acceptance:lookup -- --staging` | nghiệm thu 30 từ, ghi `docs/lookup-acceptance-report.md` (mục 12) |
 | `npx tsx scripts/dev/cleanup-auto-entries.ts` | **chạy thử**: liệt kê các mục từ `[auto]` (đúng tiêu chí màn `/lookup/review`), số hàng sẽ xóa ở từng bảng liên quan, số mục đang published, mục bị bỏ qua vì còn bài học / từ đồng nghĩa của mục khác / từ đã lưu… trỏ tới. Chỉ thêm `--confirm` mới xóa (một giao dịch, in số hàng đã xóa); không bao giờ đụng mục không phải `[auto]`. Chi tiết: `docs/lookup-admin-notes.md` mục 12 |
+| `npm run enrich:seed-oxford -- --file <tệp> [--sample N] [--limit N] [--confirm]` | nạp từ Oxford 5000 chưa có qua đường ống làm giàu; chạy thử là mặc định (mục 13.3) |
+| `npm run enrich:publish -- [--cefr A1,A2] [--limit 500] [--confirm]` | xuất bản mục từ `[auto]` đủ điều kiện bằng dòng lệnh; chạy thử là mặc định (mục 13.7) |
+| `npm run oxford:apply-cefr -- --file <tệp> [--dry-run]` | đặt `cefr_level` của mục từ `[auto]` theo mức thấp nhất của Oxford (mục 13.6); **áp dụng ngay nếu không có `--dry-run`** |
 | `npm run admin:create -- --email <e> --name <n>` | thêm MỘT `super_admin` với mật khẩu ngẫu nhiên in ra một lần (hoặc `ADMIN_PASSWORD`); không xóa gì, từ chối e-mail đã có |
 
 Các test và công cụ trên **không gọi dịch vụ thật** (máy chủ giả trên 127.0.0.1; khóa giả; trong test, `fetch` toàn cục từ chối mọi máy chủ không phải loopback) nhưng dùng **DB dev trong `.env`**. Dữ liệu thử đặt tên `qzq<mã>…` / `e2e-<mã>-…` / `lt-<mã>-…` và được xóa khi xong; bộ đếm ký tự Google thật được khôi phục. Một lần chạy hỏng giữa chừng có thể để lại dòng `qzq%`, người dùng `e2e-%` / `lt-%` hoặc schema `pgboss_test_*`: xóa tay.
@@ -409,3 +412,105 @@ Ba lần chạy liên tiếp với mã mới (gửi job và ghi `word_lookups` s
 * **Free Dictionary hỏng thật** (`curl` trực tiếp: `hello` và `house` nhanh nhờ CDN, mọi từ khác treo hoặc trả 404). Vì thế nhóm H và 503 của E, F là "không đánh giá được: nguồn ngoài lỗi"; 503 của từ rác là hành vi đúng của mục 6 (đạt có ghi chú).
 * Đã sửa công cụ qua ba lần chạy: lần 1 cho thấy thăm dò bằng `hello` gọi một dịch vụ đã chết là khỏe, nên nay thăm dò bằng ba từ khác nhau, hỏi lại đúng từ H không có sense, và không chạy H khi nguồn không khỏe.
 * Còn thiếu để chạy đủ 30 từ (cần bạn quyết, mục 7 của báo cáo): nhóm C, D đã có mục từ từ lần 15/10 (cần `--cleanup`, bị cấm ở đợt này); `run`, `go`, `light` đang `published = false` (cần `seed:lookup-test`, sẽ xuất bản lại chúng); nhóm H dùng hết 6 từ mỗi lần chạy.
+
+## 13. Nạp Oxford 5000 (`enrich:seed-oxford`, `oxford:apply-cefr`, `enrich:publish`)
+
+Mục tiêu: mọi từ của danh sách Oxford 5000 chưa có trong từ điển đi qua đường ống làm giàu P6 **như một job bình thường** (cùng enqueuer, cùng trần ngày, cùng worker). Báo cáo của đợt nạp: `docs/lookup-oxford-seed-report.md` (sinh bằng `--report`).
+
+**Quy tắc cứng.**
+
+* Oxford chỉ cho **danh sách từ, loại từ và mức CEFR**. Định nghĩa và ví dụ của Oxford là tài sản của OUP và **không được đưa vào** (trình đọc không giữ chúng, có test). IPA và audio của Oxford cũng không được đưa vào; chúng chỉ được ĐẾM để báo cáo độ phủ.
+* Không sửa, không xóa mục từ nào đã có (845 mục không phải `[auto]` và 3 mục `[auto]` cũ). Từ đã có trong `dictionary_entries` (kể cả `published = false`), trong `word_forms` hoặc đang trong hàng đợi thì không gửi.
+* Không tự đặt `ENRICHMENT_PUBLISH_POLICY=auto`, không tự xuất bản. Mục từ mới luôn chờ duyệt.
+* Mỗi giai đoạn dừng và chờ người dùng xem báo cáo.
+
+### 13.1 File Oxford
+
+`P:\Personal\WordyGo_Full\oxford_5000.json` có dạng `{ id, value: { word, type, level, phonetics: { us, uk }, us: { mp3, ogg }, uk: { mp3, ogg }, examples } }` (không có `definition`, mức CEFR nằm ở `level`). Dạng phẳng của `docs/reference/import-oxford.mjs` (`word, type, cefr, phon_br, phon_n_am`) cũng được đọc. Trình đọc (`services/enrichment/oxford/list.ts`) lấy **chỉ** `word`, `type`, `level`:
+
+* chữ thường; các dòng trùng gộp thành MỘT từ với tập loại từ và mức CEFR **thấp nhất** (5.948 dòng, 4.958 từ khác nhau, 990 dòng thừa của 883 từ, 343 từ có nhiều mức); dòng có mức trống không tính là một mức;
+* chạy bộ làm sạch của đường tra cứu (`normalizeWord`): 9 cụm nhiều từ (`according to`, `ice cream`, `used to`…) bị từ chối và được liệt kê; từ có gạch nối hoặc dấu nháy (`well-being`, `o'clock`) hợp lệ.
+
+### 13.2 Trước khi nạp
+
+| Việc | Cách kiểm | Ghi chú |
+|---|---|---|
+| `ENRICHMENT_ENABLED=true` | `--confirm` tự kiểm | Đặt trong môi trường **của lệnh** và của worker. `.env` của dự án đang là `false` |
+| 30 chủ đề trong `tags` | `--confirm` tự kiểm (`loadTopicIds`) | Thiếu thì chạy `docs/seed-topics.sql` |
+| `ENRICHMENT_PUBLISH_POLICY=review` | `--confirm` tự kiểm | `auto` bị từ chối trừ khi có thêm `--allow-auto`. `.env` của dự án đang là `auto`: **ghi đè bằng biến môi trường của lệnh và của worker, không sửa `.env`** |
+| Có đúng một worker, của máy bạn | `--confirm` tự kiểm bảng `pgboss.instance` (không dừng, nhịp tim trong 3 phút) | Có worker của máy khác (kể cả máy chủ triển khai) thì từ chối: worker đó cũng nhận job, với cấu hình và mã của nó |
+| So chi phí ước tính với trần chi tiêu hằng tháng của Anthropic | bạn tự làm | Lệnh nhắc trước khi gửi |
+| Bảng giá còn đúng | `services/enrichment/pricing.ts` (`PRICING_CHECKED_ON`) | Là bảng nhập tay, ước tính chứ không phải hóa đơn |
+
+### 13.3 Công cụ 1: `enrich:seed-oxford`
+
+```bash
+# chạy thử (MẶC ĐỊNH): in số từ, nguồn loại, ước tính chi phí / thời gian / số ngày, các kiểm tra
+npm run enrich:seed-oxford -- --file "P:\Personal\WordyGo_Full\oxford_5000.json" --sample 50
+npm run enrich:seed-oxford -- --file "<file>" --only-cefr A1,A2 --offset 0 --limit 500
+# gửi thật (chỉ khi có --confirm; kiểm tra trước, một kiểm tra hỏng thì không gửi gì)
+ENRICHMENT_ENABLED=true ENRICHMENT_PUBLISH_POLICY=review npm run enrich:seed-oxford -- --file "<file>" --sample 50 --confirm
+# báo cáo (đọc DB, trạng thái local, log của worker); ghi docs/lookup-oxford-seed-report.md
+npm run enrich:seed-oxford -- --file "<file>" --report --worker-log <log của worker>
+```
+
+Tùy chọn: `--limit N`, `--offset N`, `--only-cefr A1,A2`, `--sample N` (mẫu phân tầng, thay `--limit`/`--offset`), `--dry-run`, `--confirm`, `--report`, `--worker-log <tệp>`, `--allow-auto`. **Tùy chọn lạ bị từ chối với mã 2** (gõ nhầm `--confirmed` không chạy thành xác nhận); `--dry-run` cùng `--confirm` bị từ chối.
+
+* **Loại**: từ đã có mục từ (headword hoặc lemma), đã là dạng biến trong `word_forms`, đang `queued`/`running`; và từ mà job gần nhất đã **kết thúc hẳn không để lại mục từ** (`rejected`, `skipped` với `variant_form` hoặc `lemma_mismatch`, `failed` với `invalid_output`) để không tốn token cho cùng một kết quả. Job `succeeded` mà mục từ đã bị xóa (ví dụ bởi `scripts/dev/cleanup-auto-entries.ts`) thì từ được gửi lại. Job `failed` vì `upstream_error`, `budget`, `config_error`, `dead_letter`, `stale` cũng được gửi lại.
+* **Thứ tự gửi**: mức CEFR tăng dần, rồi tần suất (`ref_word_frequency.rank`, hạng 1 trước, thiếu hạng sau), rồi chữ cái. `--only-cefr` giữ một số mức; `--offset` và `--limit` cắt danh sách đã sắp.
+* **Mẫu phân tầng** (`--sample 50`): mỗi mức có từ nhận phần bằng nhau (50 từ, 5 mức = 10 từ mỗi mức), phần dư cho mức thấp, mức thiếu từ nhường phần cho mức khác; trong một mức các loại từ lần lượt (loại lớn nhất trước), trong một loại từ chọn theo băm cố định (cùng kết quả mọi lần chạy, không phải `Math.random`). Từ không có mức CEFR không nằm trong mẫu.
+* **Dừng và chạy tiếp**: gặp `daily_cap` thì dừng ngay và nói còn bao nhiêu từ; chạy lại lệnh vào ngày UTC sau (hoặc sau khi nâng `ENRICHMENT_MAX_JOBS_PER_DAY`) thì tiếp tục từ chỗ dừng, không tạo job trùng (từ đã gửi nằm trong hàng đợi hoặc đã thành mục từ nên bị loại). Ba lỗi liên tiếp của enqueuer (hàng đợi hoặc DB hỏng) cũng dừng.
+* **Ước tính**: chi phí = trung bình thật của các hàng `word_enrichment_jobs` đã gọi Haiku (từ 5 hàng trở lên; giả định 7.859 token system prompt đọc từ cache mỗi job, công thức ở mục 11.4), nếu chưa đủ thì **0,00085 USD/từ và ghi rõ là ước tính**; thời gian = trung vị thật của job `succeeded` chia cho `ENRICHMENT_WORKER_CONCURRENCY` (chưa có lịch sử thì 10 giây/từ); số ngày theo `ENRICHMENT_MAX_JOBS_PER_DAY` trừ số đã dùng hôm nay (UTC). Không tính lần thử lại: số thật ở báo cáo.
+* **Trạng thái local**: mỗi lần `--confirm` ghi `.oxford-seed.local.json` (git bỏ qua): các từ đã gửi, cách chọn, kích thước DB và bộ đếm token **trước khi gửi**, ước tính. `--report` cần tệp này để biết đợt nạp nào thuộc về mình. Không chứa khóa hay đường dẫn.
+
+### 13.4 Ba giai đoạn
+
+| Giai đoạn | Lệnh | Dừng và hỏi bạn khi |
+|---|---|---|
+| 1. Thử 50 từ phân tầng | `--sample 50 --confirm` | luôn dừng sau đợt này và báo cáo |
+| 2. 500 từ | `--limit 500 --confirm` (sau khi giai đoạn 1 được duyệt). Nâng `ENRICHMENT_MAX_JOBS_PER_DAY` (ví dụ 1500) ở lệnh gửi **và trả lại sau**; `ENRICHMENT_WORKER_CONCURRENCY=4` ở worker (tăng nếu không có 429). Thêm 30 từ ngẫu nhiên để xem | `invalid_output` quá 5%, chi phí trung bình quá 2 lần ước tính, hoặc quá 3 lỗi 429 / hết ngân sách liên tiếp |
+| 3. Phần còn lại | mỗi lệnh tối đa 1000 từ (`--limit 1000 --confirm`), sau mỗi lô một báo cáo ngắn | cùng tiêu chí |
+
+`--report` in ba chỉ số dừng khẩn cấp ở mục 2 và 4 của báo cáo. Hàng `skipped / budget` không nằm trong hàng chết: xem mục 10.3.
+
+### 13.5 Bật và tắt worker trong lúc nạp
+
+Worker thăm dò hàng đợi mỗi 5 giây nên giữ Neon thức và tốn giờ CU: **chỉ bật trong lúc nạp, tắt khi xong**.
+
+```bash
+# bật (cửa sổ riêng; ghi đè cấu hình của .env bằng biến môi trường của tiến trình)
+ENRICHMENT_ENABLED=true ENRICHMENT_PUBLISH_POLICY=review npm run worker > worker.log 2>&1
+# xong khi không còn job: npm run enrich:status  (hoặc SELECT … FROM word_enrichment_jobs WHERE status IN ('queued','running'))
+```
+
+Tắt: `Ctrl+C` (tắt gọn: chờ job đang chạy, SHUTDOWN_GRACE_MS 30 giây). Nếu tiến trình chạy nền và không có cửa sổ, trên Windows `taskkill /PID <pid> /T /F` là **tắt cứng** (không có SIGTERM): chỉ làm khi hàng đợi đã trống, và chỉ với PID **của chính bạn** (tìm bằng dòng lệnh chứa `worker.ts`); dòng `pgboss.instance` của nó vẫn có `stopped_on` trống nhưng nhịp tim cũ, nên sau 3 phút không còn được coi là đang chạy. Kiểm tra: `SELECT name, host, pid, heartbeat_on, stopped_on FROM pgboss.instance ORDER BY started_on DESC LIMIT 5;`.
+
+### 13.6 Công cụ 2: `oxford:apply-cefr`
+
+```bash
+npm run oxford:apply-cefr -- --file "<file>" --dry-run    # xem trước: số mục sẽ đổi và ma trận Haiku × Oxford
+npm run oxford:apply-cefr -- --file "<file>"              # áp dụng
+```
+
+Khác hai công cụ kia, lệnh này **áp dụng ngay khi không có `--dry-run`**. Chỉ đụng mục từ có `admin_note` bắt đầu bằng `[auto]` mà headword nằm trong file; mức mới là mức **thấp nhất** của từ trong Oxford. Mỗi mục đổi mức được ghi một dòng `entry_edit_history` (`field_name = 'cefr_level'`, `admin_id` NULL, giá trị cũ và mới) và được nối ` · [oxford-cefr]` vào `admin_note`; mục Haiku đã trùng mức chỉ được đánh dấu (không có gì để ghi lịch sử). Mục đã có dấu thì bị bỏ qua: **chạy lại không đổi gì**. Toàn bộ trong một giao dịch, các hàng được khóa và kiểm lại. `[oxford-cefr]` là một phần riêng của `admin_note` (`utils/autoEntryNote.ts`), không bị đọc nhầm thành ghi chú của Haiku nên không đổi kết quả xuất bản hàng loạt. Ma trận đọc mức Haiku từ lịch sử nên vẫn đúng sau khi đã áp.
+
+### 13.7 Công cụ 3: `enrich:publish`
+
+```bash
+npm run enrich:publish                                   # chạy thử (MẶC ĐỊNH): ai sẽ được xuất bản, ai bị giữ và vì sao
+npm run enrich:publish -- --cefr A1,A2 --limit 500       # chạy thử một lát cắt
+npm run enrich:publish -- --cefr A1,A2 --limit 500 --confirm
+```
+
+Dùng đúng tiêu chí của nút xuất bản hàng loạt ở `/lookup/review` (`docs/lookup-admin.md` mục 3.4): mục từ `[auto]`, chưa xuất bản, đủ tầng A, không có ghi chú của Haiku thuộc nhóm "cần xem". Không sao chép luật: dùng chính `tierAMissing`, `tierAFactsFor`, `parseAutoNote`, `blockingReviewNotes`, và có test đối chiếu với `eligible_for_bulk_publish` của API. Thứ tự: mức CEFR rồi chữ cái; `--cefr` lọc theo `cefr_level` của mục từ (nên chạy `oxford:apply-cefr` trước); `--limit` mặc định 500. Mỗi mục xuất bản được ghi `entry_edit_history` (`field_name = 'published'`, `admin_id` NULL, `old_value` `false`, `new_value` `true (cli)`). Một giao dịch; các hàng được khóa và luật được áp lại lên đúng những hàng đã khóa, nên mục từ vừa bị sửa hoặc vừa được người khác xuất bản bị bỏ qua và được báo. **Không bao giờ tự xuất bản**: không có `--confirm` thì không có gì được ghi. Công cụ này dùng `services/lookup/reviewNotes.ts` (nhóm ghi chú của P9).
+
+### 13.8 Báo cáo và câu SQL tự kiểm tra
+
+`docs/lookup-oxford-seed-report.md`: kết quả theo trạng thái / lý do; từ bị bỏ qua; token và chi phí thực (hàng sổ và bộ đếm, kể cả lần thử lại) so với ước tính; thời gian (từ log worker nếu có `--worker-log`); phân bố CEFR (ma trận Oxford × Haiku); phân bố chủ đề; mục thiếu IPA, audio, ví dụ; dung lượng DB trước và sau, kèm kích thước dữ liệu thật của các hàng mới (dung lượng trên đĩa không tăng khi hàng mới dùng lại chỗ trống); 30 từ ngẫu nhiên kèm nghĩa; 10 mục từ đầy đủ; các câu SQL. Phần giữa hai dấu `BEGIN GENERATED` / `END GENERATED` được ghi lại mỗi lần; phần "Ghi chú các giai đoạn" viết tay sau dấu kết thúc được giữ.
+
+### 13.9 Giới hạn đã biết
+
+* `ought` bị `skipped / variant_form` vì các dòng Wiktionary của nghĩa trợ động từ mang thẻ `dialectal`/`formal`, và quy tắc "mọi dòng là phi chuẩn thì bỏ" coi cả từ là phi chuẩn (dương tính giả của quy tắc ở S2, không phải của công cụ nạp). Từ như vậy cần tạo tay hoặc sửa quy tắc.
+* `invalid_output` (bản nháp vẫn sai sau một lần sửa) xảy ra ở khoảng 4% số từ của giai đoạn 1 (`into`, `theirs`), sát ngưỡng dừng 5%. Haiku không tất định: cùng từ có thể qua ở lần chạy khác (`into` qua khi chạy lại bằng `enrich:run --dry-run`). Công cụ không gửi lại các từ này tự động (mục 13.3); gửi từng từ bằng `enrich:enqueue`.
+* Ước tính chi phí giả định 7.859 token system prompt được đọc từ cache và dùng bảng giá nhập tay; hàng sổ chỉ lưu token của lần chạy cuối của mỗi job. Số tiền đúng là hóa đơn của Anthropic.
+* Mỗi từ gửi qua enqueuer thật mất khoảng 0,6 giây với DB ở xa (50 từ trong 29 giây); một lệnh 1000 từ cỡ 10 phút.

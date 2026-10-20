@@ -1,0 +1,18 @@
+[
+  { "id": 0, "value": { "word": "apple", "href": "https://example.invalid/apple", "type": "noun", "level": "B1", "us": { "mp3": "https://example.invalid/us/apple.mp3", "ogg": "" }, "uk": { "mp3": "https://example.invalid/uk/apple.mp3", "ogg": "" }, "phonetics": { "us": "/a/", "uk": "/b/" }, "examples": ["FIXTURE-EXAMPLE-NOT-FOR-USE apple"], "definition": "FIXTURE-DEFINITION-NOT-FOR-USE apple" } },
+  { "id": 1, "value": { "word": "Apple", "type": "noun", "level": "A1", "us": { "mp3": "https://example.invalid/us/apple2.mp3" }, "uk": {}, "phonetics": { "us": "/a/", "uk": "" }, "examples": ["FIXTURE-EXAMPLE-NOT-FOR-USE apple 2"] } },
+  { "id": 2, "value": { "word": "run", "type": "verb", "level": "A1", "us": { "mp3": "https://example.invalid/us/run.mp3" }, "uk": { "mp3": "https://example.invalid/uk/run.mp3" }, "phonetics": { "us": "/r/", "uk": "/r/" }, "examples": [] } },
+  { "id": 3, "value": { "word": "run", "type": "noun", "level": "B1", "us": {}, "uk": {}, "phonetics": {}, "examples": [] } },
+  { "id": 4, "value": { "word": "run", "type": "verb", "level": "C1", "us": {}, "uk": {}, "phonetics": {}, "examples": [] } },
+  { "id": 5, "value": { "word": "bank", "type": "noun", "level": "B1", "us": { "mp3": "https://example.invalid/us/bank.mp3" }, "uk": { "mp3": "https://example.invalid/uk/bank.mp3" }, "phonetics": { "us": "/b/", "uk": "/b/" }, "examples": [] } },
+  { "id": 6, "value": { "word": "ice cream", "type": "noun", "level": "A1", "us": {}, "uk": {}, "phonetics": {}, "examples": [] } },
+  { "id": 7, "value": { "word": "Well-Being", "type": "noun", "level": "C1", "us": {}, "uk": {}, "phonetics": { "us": "/w/", "uk": "/w/" }, "examples": [] } },
+  { "id": 8, "value": { "word": "o'clock", "type": "adverb", "level": "A1", "us": {}, "uk": {}, "phonetics": {}, "examples": [] } },
+  { "id": 9, "value": { "word": "major", "type": "noun", "level": " ", "us": {}, "uk": {}, "phonetics": {}, "examples": [] } },
+  { "id": 10, "value": { "word": "major", "type": "adjective", "level": "B2", "us": {}, "uk": {}, "phonetics": {}, "examples": [] } },
+  { "id": 11, "value": { "word": "accounting", "type": "noun", "level": " ", "us": {}, "uk": {}, "phonetics": {}, "examples": [] } },
+  { "id": 12, "value": { "word": "x1y", "type": "noun", "level": "A2", "us": {}, "uk": {}, "phonetics": {}, "examples": [] } },
+  { "id": 13, "value": { "word": "  ", "type": "noun", "level": "A2" } },
+  { "id": 14, "value": { "word": "dog", "type": "noun", "level": "a1", "us": { "mp3": "https://example.invalid/us/dog.mp3" }, "uk": {}, "phonetics": { "us": "/d/", "uk": "/d/" }, "examples": [] } },
+  { "id": 15, "value": { "word": "zebra", "type": "noun", "level": "C2", "us": {}, "uk": {}, "phonetics": {}, "examples": [] } }
+]

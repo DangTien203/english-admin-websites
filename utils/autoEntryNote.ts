@@ -13,6 +13,8 @@ import { IPA_UNTAGGED_MARK } from '../services/enrichment/assemble';
  */
 
 export const AUTO_NOTE_PREFIX = '[auto]';
+/** Appended to admin_note by `oxford:apply-cefr` (scripts/enrichment/oxford-apply-cefr.ts): cefr_level now comes from the Oxford list. */
+export const OXFORD_CEFR_MARK = '[oxford-cefr]';
 const SEP = ' · ';
 const NOTES_PREFIX = 'ghi chú của Haiku: ';
 
@@ -33,7 +35,7 @@ export interface ParsedAutoNote {
 }
 
 /** Parts the job writes itself. After the notes of Haiku, only a part with one of these starts something new. */
-const KNOWN_PARTS = ['nguồn: ', 'model: ', 'job: ', 'published=', 'thiếu tầng A: ', 'thiếu tầng B: ', 'ước tính: ', IPA_UNTAGGED_MARK, 'ipa_us lấy từ Free Dictionary', 'loại từ của Wiktionary'];
+const KNOWN_PARTS = ['nguồn: ', 'model: ', 'job: ', 'published=', 'thiếu tầng A: ', 'thiếu tầng B: ', 'ước tính: ', IPA_UNTAGGED_MARK, OXFORD_CEFR_MARK, 'ipa_us lấy từ Free Dictionary', 'loại từ của Wiktionary'];
 
 const list = (text: string, sep = ', ') =>
   text
