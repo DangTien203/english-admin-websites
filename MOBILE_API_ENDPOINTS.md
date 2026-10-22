@@ -517,7 +517,7 @@ If a session has fewer than 3 words and contains a box 4/5 word, the gap cannot 
 - Body: `{ limit?: 1-100, box_number?: 1-5 }`
   - `limit`: number of **words** (default 20), not steps. The server takes the first `limit` cards by `due_at` (most overdue / closest to due first), then shuffles them.
   - `box_number` omitted: **"Review due now"** - due cards only.
-  - `box_number` 1-5: **study one box on demand** - cards of that box, due or not (closest to due first). Same rules apply: box 1-3 = one Vietnamese check per word; box 4/5 = English + Vietnamese check per word (2 steps, summary still 1 word; both right -> next box, either wrong -> box 1). If the box has fewer than `limit` cards, all of them are used. "All cards" in a box = `limit: min(cards in box, 100)`; per-box counts come from `GET /leitner/overview` (`boxes[].total_cards`).
+  - `box_number` 1-5: **study one box on demand** - cards of that box, due or not (closest to due first). Same rules apply: box 1-3 = one Vietnamese check per word; box 4/5 = English + Vietnamese check per word (2 steps, summary still 1 word; both right -> next box, exactly one right -> stays in the same box, both wrong -> box 1). If the box has fewer than `limit` cards, all of them are used. "All cards" in a box = `limit: min(cards in box, 100)`; per-box counts come from `GET /leitner/overview` (`boxes[].total_cards`).
   - Box 4/5 with fewer than 3 words cannot keep the 2-step gap between the two checks; they are then spread as far apart as possible.
 - Returns: `{ session_id, box_number (null for "due now"), total_words, total_steps, completed, min_steps_between_checks, progress, steps }`; each step: `{ step_index, leitner_card_id, entry_id, check: "en"|"vi", check_number, checks_total, box_number, typed_answer_required, answered, correct, entry }`. `entry` never contains the meaning.
 - Errors: `400 NO_DUE_CARDS` (due-now session), `400 NO_CARDS_IN_BOX` (`details.box_number`)
@@ -529,8 +529,12 @@ If a session has fewer than 3 words and contains a box 4/5 word, the gap cannot 
   - `user_answer` is the meaning asked by the step's `check`; the server grades it.
   - `correct` (client-graded, e.g. swift-choice) is only accepted for single-check words (`typed_answer_required: false`).
 - Steps must be answered **in order** (`step_index` = `progress.next_step_index`).
-- Behavior: a word's Leitner box moves **once**, when its last step is answered - up one box if every check was right, otherwise back to box 1. If the card was already reviewed elsewhere in the meantime, its box is left alone (`word.applied: false`).
-- Returns: `{ step_index, check, grading, word: { checks_total, checks_done, checks_correct, resolved, correct, applied, new_box_number, next_due_at, mastered_now }, progress: { answered_steps, total_steps, resolved_words, total_words, next_step_index } }`
+- Behavior: a word's Leitner box moves **once**, when its last step is answered (`word.result`):
+  - `advance`: every check right (box 4/5: English **and** Vietnamese) -> up one box (box 5 stays 5).
+  - `hold`: box 4/5 word with **exactly one** of its two meanings right (either one) -> stays in its current box; the due date is rescheduled with that box's interval.
+  - `reset`: no check right (box 4/5: both wrong; box 1-3: the single check wrong) -> back to box 1.
+  If the card was already reviewed elsewhere in the meantime, its box is left alone (`word.applied: false`).
+- Returns: `{ step_index, check, grading, word: { checks_total, checks_done, checks_correct, resolved, correct, result, applied, new_box_number, next_due_at, mastered_now }, progress: { answered_steps, total_steps, resolved_words, total_words, next_step_index } }`
 - Errors:
   - `400 VALIDATION_ERROR`, `400 TYPED_ANSWER_REQUIRED`, `400 SESSION_ALREADY_COMPLETED`
   - `404 SESSION_NOT_FOUND`, `404 STEP_NOT_FOUND`, `404 CARD_NOT_FOUND`
@@ -540,7 +544,7 @@ If a session has fewer than 3 words and contains a box 4/5 word, the gap cannot 
 
 - Auth: Auth
 - Body: `{ session_id }`
-- Returns: `{ session_id, summary: { total_words, correct_words, wrong_words, skipped_words, accuracy, mastered_now, time_total_ms }, words }`. `words` has one entry per original word (status `correct` | `wrong` | `skipped` when its steps were not all answered). A word counts as correct only if every one of its checks was right.
+- Returns: `{ session_id, summary: { total_words, correct_words, partial_words, wrong_words, skipped_words, accuracy, mastered_now, time_total_ms }, words }`. `words` has one entry per original word, with `status` `correct` (every check right, box up) | `partial` (box 4/5 word with exactly one meaning right, box kept) | `wrong` (nothing right, back to box 1) | `skipped` (its steps were not all answered), plus `result` (`advance` | `hold` | `reset` | null). `correct` is true only when every check was right. `accuracy` = `correct_words` / answered words (`correct + partial + wrong`).
 - Errors: `400 SESSION_ALREADY_COMPLETED`, `404 SESSION_NOT_FOUND`
 
 #### `GET /api/v1/leitner/session/:id`

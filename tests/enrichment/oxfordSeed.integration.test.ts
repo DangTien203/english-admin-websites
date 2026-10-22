@@ -134,6 +134,8 @@ describe('the dry run (the default)', () => {
   it('prints the cost, the time and the days, saying whether they are a real average or an estimate', async () => {
     const file = oxfordFile('est', [['est1', 'A1', 'noun'], ['est2', 'A2', 'noun']]);
     const h = harness();
+    // a day nobody has sent anything on: the real counter of today (hundreds of jobs after a real run) does not belong in this test
+    h.deps.now = () => new Date('2099-01-01T12:00:00Z');
     await runSeed(['--file', file], h.deps);
     expect(h.text()).toMatch(/chi phí: +\$[\d.]+/);
     expect(h.text()).toMatch(/trung bình thật của \d+ job|ƯỚC TÍNH/);
@@ -155,6 +157,7 @@ describe('who is left out, and why', () => {
     await job('exQueued', 'queued', null);
     await job('exRejected', 'rejected', 'proper_noun');
     await job('exVariant', 'skipped', 'variant_form');
+    await job('exInvalid', 'failed', 'invalid_output'); // two runs that ended invalid: final
     await job('exInvalid', 'failed', 'invalid_output');
     await job('exUpstream', 'failed', 'upstream_error');
     await job('exSucceeded', 'succeeded', null); // its entry was deleted since: the word is eligible again
@@ -469,6 +472,189 @@ describe('--report', () => {
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
+describe('a second pass: invalid_output is tried once more, and --retry-last-run sends only the words of the last run', () => {
+  const addJob = (tag: string, status: string, reason: string | null, ageSeconds = 0) =>
+    pool.query(
+      `INSERT INTO word_enrichment_jobs (word, status, reason, created_at, finished_at) VALUES ($1, $2::varchar, $3, NOW() - ($4::int * INTERVAL '1 second'), NOW() - ($4::int * INTERVAL '1 second'))`,
+      [word(tag), status, reason, ageSeconds]
+    );
+  const setLatest = (tag: string, status: string, reason: string | null) =>
+    pool.query(`UPDATE word_enrichment_jobs SET status = $2::varchar, reason = $3, finished_at = NOW() WHERE word = $1 AND status IN ('queued', 'running')`, [word(tag), status, reason]);
+
+  it('the first invalid_output does not close a word (it is a retry); the second does', async () => {
+    const tags = ['inv0', 'inv1', 'inv2'];
+    const file = oxfordFile('invalid', tags.map((t) => [t, 'A1', 'noun'] as [string, string, string]));
+    await addJob('inv1', 'failed', 'invalid_output', 60); // one earlier failure
+    await addJob('inv2', 'failed', 'invalid_output', 120); // two earlier failures
+    await addJob('inv2', 'failed', 'invalid_output', 60);
+    const parsed = parseOxford(JSON.parse(fs.readFileSync(file, 'utf8')));
+    const { eligible, excluded, retries } = await classifyWords(pool as any, parsed.words);
+    expect(eligible.map((w) => w.word).sort()).toEqual([word('inv0'), word('inv1')].sort());
+    expect(excluded).toEqual([{ word: word('inv2'), reason: 'done_before', detail: 'failed / invalid_output (2 lượt)' }]);
+    expect([...retries.entries()]).toEqual([[word('inv1'), 'failed / invalid_output (1 lượt)']]);
+  });
+
+  it('the dry run says how many words are SENT AGAIN and why', async () => {
+    const file = oxfordFile('retryfmt', [['rf1', 'A1', 'noun'], ['rf2', 'A1', 'noun'], ['rf3', 'A1', 'noun']]);
+    await addJob('rf1', 'failed', 'invalid_output');
+    await addJob('rf2', 'failed', 'upstream_error');
+    const h = harness();
+    expect(await runSeed(['--file', file], h.deps)).toBe(0);
+    expect(h.text()).toContain('trong đó GỬI LẠI 2 từ vì job trước chưa thành mục từ');
+    expect(h.text()).toContain('failed / invalid_output (1 lượt) 1');
+    expect(h.text()).toContain('failed / upstream_error 1');
+    expect(h.boss.send).not.toHaveBeenCalled();
+  });
+
+  it('--retry-last-run: the dry run lists them and sends nothing; --confirm sends them and NOTHING else; no active word gets a second job', async () => {
+    const tags = ['rl1', 'rl2', 'rl3', 'rl4', 'rl5'];
+    const file = oxfordFile('retrylast', tags.map((t) => [t, 'A1', 'noun'] as [string, string, string]));
+    const ranks = Object.fromEntries(tags.map((t, i) => [word(t), i + 1]));
+    const counter = `${PROVIDER}-retrylast`;
+    const stateFile = path.join(TMP, 'retry-state.json');
+
+    // pass 1: the first three words
+    const first = harness({ ranks, counter });
+    first.deps.stateFile = stateFile;
+    expect(await runSeed(['--file', file, '--confirm', '--limit', '3'], first.deps)).toBe(0);
+    expect(first.sent.map((s) => s.data.word)).toEqual(tags.slice(0, 3).map(word));
+
+    // the worker's verdicts: rl1 made an entry, rl2 failed on the validator, rl3 on the network
+    await createEntry({ tag: L('rl1') });
+    await setLatest('rl1', 'succeeded', null);
+    await setLatest('rl2', 'failed', 'invalid_output');
+    await setLatest('rl3', 'failed', 'upstream_error');
+
+    // dry run
+    const dry = harness({ ranks, counter });
+    dry.deps.stateFile = stateFile;
+    expect(await runSeed(['--file', file, '--retry-last-run'], dry.deps)).toBe(0);
+    expect(dry.text()).toContain('Lần gửi gần nhất');
+    expect(dry.text()).toContain('3 từ');
+    expect(dry.text()).toContain('trong đó GỬI LẠI 2 từ');
+    expect(dry.text()).toContain('CHƯA GỬI GÌ');
+    expect(dry.boss.send).not.toHaveBeenCalled();
+
+    // for real: only rl2 and rl3 — not rl4, rl5 (new words), not rl1 (has its entry)
+    const again = harness({ ranks, counter });
+    again.deps.stateFile = stateFile;
+    expect(await runSeed(['--file', file, '--retry-last-run', '--confirm'], again.deps)).toBe(0);
+    expect(again.sent.map((s) => s.data.word).sort()).toEqual([word('rl2'), word('rl3')].sort());
+    expect(readState(stateFile).runs).toHaveLength(2);
+    expect(readState(stateFile).runs[1].options.retryLastRun).toBe(true);
+
+    // the history of the old rows is kept, the new rows are the active ones, and no word has two active rows
+    const rows = (await pool.query(`SELECT word, status FROM word_enrichment_jobs WHERE word = ANY($1::text[]) ORDER BY word, created_at`, [tags.map(word)])).rows;
+    expect(rows.filter((r) => r.word === word('rl2')).map((r) => r.status)).toEqual(['failed', 'queued']);
+    expect(rows.filter((r) => r.word === word('rl4'))).toEqual([]);
+    const active = (await pool.query(`SELECT word, count(*)::int AS n FROM word_enrichment_jobs WHERE word = ANY($1::text[]) AND status IN ('queued','running') GROUP BY word HAVING count(*) > 1`, [tags.map(word)])).rows;
+    expect(active).toEqual([]);
+
+    // the same command again, before the worker has answered: nothing more to send
+    const third = harness({ ranks, counter });
+    third.deps.stateFile = stateFile;
+    expect(await runSeed(['--file', file, '--retry-last-run', '--confirm'], third.deps)).toBe(0);
+    expect(third.text()).toContain('Không có từ nào để gửi');
+    expect(third.boss.send).not.toHaveBeenCalled();
+
+    // the second answer: rl2 fails on the validator AGAIN (now final), rl3 on the network again (still may pass)
+    await setLatest('rl2', 'failed', 'invalid_output');
+    await setLatest('rl3', 'failed', 'upstream_error');
+    const fourth = harness({ ranks, counter });
+    fourth.deps.stateFile = stateFile;
+    expect(await runSeed(['--file', file, '--retry-last-run', '--confirm'], fourth.deps)).toBe(0);
+    expect(fourth.sent.map((s) => s.data.word)).toEqual([word('rl3')]);
+    expect(fourth.text()).toContain('failed / invalid_output (2 lượt)');
+  });
+
+  it('--retry-last-run without any earlier run says so, and combined with a selection option is refused', async () => {
+    const file = oxfordFile('retrynone', [['rn1', 'A1', 'noun']]);
+    const h = harness();
+    h.deps.stateFile = path.join(TMP, 'does-not-exist.json');
+    expect(await runSeed(['--file', file, '--retry-last-run'], h.deps)).toBe(1);
+    expect(h.err.join('\n')).toContain('chưa có lần gửi nào');
+    for (const extra of [['--limit', '5'], ['--offset', '1'], ['--sample', '5'], ['--only-cefr', 'A1']]) {
+      const x = harness();
+      expect(await runSeed(['--file', file, '--retry-last-run', ...extra], x.deps)).toBe(2);
+      expect(x.err.join('\n')).toContain('--retry-last-run cannot be combined');
+    }
+  });
+});
+
+describe('--report scoped to the runs from N', () => {
+  it('reports only the words of those runs, counts rows per run, explains invalid_output from the worker log, and lists entries that pass the publish rule', async () => {
+    const tags = ['sc1', 'sc2', 'sc3', 'sc4'];
+    const file = oxfordFile('scoped', tags.map((t, i) => [t, i < 2 ? 'A1' : 'B1', i === 3 ? 'verb' : 'noun'] as [string, string, string]));
+    const ranks = Object.fromEntries(tags.map((t, i) => [word(t), i + 1]));
+    const stateFile = path.join(TMP, 'scoped-state.json');
+    const counter = `${PROVIDER}-scoped`;
+
+    const one = harness({ ranks, counter });
+    one.deps.stateFile = stateFile;
+    await runSeed(['--file', file, '--confirm', '--limit', '1'], one.deps); // run 1: sc1
+    const two = harness({ ranks, counter });
+    two.deps.stateFile = stateFile;
+    await runSeed(['--file', file, '--confirm', '--limit', '3'], two.deps); // run 2: sc2 sc3 sc4
+
+    // verdicts: sc1 made an entry; sc2 made an entry; sc3 failed on the validator; sc4 made an entry with a blocking note
+    const e1 = await createEntry({ tag: L('sc1') });
+    const e2 = await createEntry({ tag: L('sc2') });
+    const e4 = await createEntry({ tag: L('sc4'), adminNote: `${'[auto] nguồn: wiktionary, haiku · model: m · job: j'} · ghi chú của Haiku: Nghĩa 'phố' và 'dãy nhà' có thể gộp, cần kiểm tra lại.` });
+    await pool.query(`UPDATE word_enrichment_jobs SET status = 'succeeded', entry_id = $2, finished_at = NOW() WHERE word = $1 AND status = 'queued'`, [word('sc1'), e1]);
+    await pool.query(`UPDATE word_enrichment_jobs SET status = 'succeeded', entry_id = $2, finished_at = NOW() WHERE word = $1 AND status = 'queued'`, [word('sc2'), e2]);
+    await pool.query(`UPDATE word_enrichment_jobs SET status = 'succeeded', entry_id = $2, finished_at = NOW() WHERE word = $1 AND status = 'queued'`, [word('sc4'), e4]);
+    await pool.query(`UPDATE word_enrichment_jobs SET status = 'failed', reason = 'invalid_output', finished_at = NOW() WHERE word = $1 AND status = 'queued'`, [word('sc3')]);
+
+    const log = path.join(TMP, 'worker.log');
+    const sc3Job = (await pool.query(`SELECT id FROM word_enrichment_jobs WHERE word = $1 AND status = 'failed'`, [word('sc3')])).rows[0].id;
+    fs.writeFileSync(
+      log,
+      [
+        'Enrichment worker running',
+        JSON.stringify({ evt: 'enrich', word: word('sc3'), job_id: sc3Job, output_tokens: 4300, status: 'failed', reason: 'invalid_output', attempt: 1, duration_ms: 9000, issues: [{ path: 'senses[2].meanings_vi[1]', code: 'parenthesis' }], first_issues: [{ path: 'senses[0].examples[1].example_vi', code: 'same_as_english' }, { path: 'senses[2].meanings_vi[1]', code: 'parenthesis' }] }),
+        JSON.stringify({ evt: 'enrich', word: word('sc1'), status: 'succeeded', attempt: 1, duration_ms: 8000, stages_ms: { s3_haiku: 6000 } }),
+      ].join('\n')
+    );
+
+    const h = harness();
+    h.deps.stateFile = stateFile;
+    const target = path.join(TMP, 'scoped-report.md');
+    h.deps.reportFile = target;
+    expect(await runSeed(['--file', file, '--report', '--from-run', '2', '--worker-log', log], h.deps)).toBe(0);
+    const text = fs.readFileSync(target, 'utf8');
+
+    expect(text).toContain('các lần gửi #2 đến #2');
+    expect(text).toContain('Tổng 3 từ đã gửi'); // sc2 sc3 sc4: sc1 belongs to run 1
+    expect(text).toMatch(/failed \/ invalid_output \| 1/);
+    // why
+    expect(text).toContain('*Lần #2* (3 từ): 1 job `invalid_output`');
+    expect(text).toContain('Token ra của các job hỏng: trung vị 4,300');
+    expect(text).toContain('ở LƯỢT ĐẦU (lần #2, 3 từ) `invalid_output` là 1 (33.3%');
+    expect(text).toContain('parenthesis @ senses[].meanings_vi[]'); // indexes taken out
+    expect(text).toContain('same_as_english @ senses[].examples[].example_vi');
+    // by part of speech: sc3 is a noun, sc4 a verb
+    expect(text).toMatch(/\| noun \| 2 \| 1 \| 50\.0% \|/);
+    // eligible for the bulk publish: sc2 only (sc4 has a blocking note, sc3 has no entry, sc1 is not in the scope)
+    expect(text).toContain('## 10b.');
+    expect(text).toContain('1/2 mục từ mới đủ điều kiện');
+    expect(text).toContain(word('sc2'));
+    expect(text).not.toMatch(new RegExp(`\\| ${word('sc4')} \\|.*\\(noun\\)`));
+
+    // without --from-run it covers every run, with --from-run 3 there is nothing
+    expect(await runSeed(['--file', file, '--report', '--worker-log', log], h.deps)).toBe(0);
+    expect(fs.readFileSync(target, 'utf8')).toContain('Tổng 4 từ đã gửi');
+    expect(await runSeed(['--file', file, '--report', '--from-run', '3'], h.deps)).toBe(0);
+    expect(fs.readFileSync(target, 'utf8')).toContain('Chưa có lần gửi nào');
+  });
+
+  it('--from-run without --report is refused', async () => {
+    const file = oxfordFile('fromrun', [['fr1', 'A1', 'noun']]);
+    const h = harness();
+    expect(await runSeed(['--file', file, '--from-run', '2'], h.deps)).toBe(2);
+    expect(h.err.join('\n')).toContain('--from-run only goes with --report');
+  });
+});
+
 describe('sizes', () => {
   it('payloadBytes adds up the data of an entry and of what hangs on it (indexes not included), and is 0 for no entry', async () => {
     const { payloadBytes, measureDb } = await import('../../services/enrichment/oxford/measure');

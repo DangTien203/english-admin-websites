@@ -13,7 +13,7 @@ export interface RunRecord {
   startedAt: string;
   finishedAt: string | null;
   /** how the words were chosen, as typed (no file path is stored) */
-  options: { sample?: number; limit?: number; offset?: number; onlyCefr?: string[] };
+  options: { sample?: number; limit?: number; offset?: number; onlyCefr?: string[]; retryLastRun?: boolean };
   model: string;
   publishPolicy: string;
   concurrency: number;

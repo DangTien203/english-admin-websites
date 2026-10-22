@@ -24,21 +24,27 @@ export interface Exclusion {
 export interface Classified {
   eligible: OxfordWord[];
   excluded: Exclusion[];
+  /** eligible words whose latest earlier job did not make an entry and may be tried again: "failed / invalid_output (1 lượt)", … */
+  retries: Map<string, string>;
 }
+
+/** A draft that stays invalid after its own repair is tried again ONCE (Haiku is not deterministic); after this many such runs it is final. */
+export const MAX_INVALID_OUTPUT_RUNS = 2;
 
 /**
  * A job row that closes the matter: sending the word again would spend tokens to get the same answer. Only outcomes that do not leave an
  * entry behind can close it: the word was refused (rejected: unknown word, proper noun, not English), is a variant of another word
- * (skipped: variant_form, lemma_mismatch), or its draft stayed invalid after the correction (failed: invalid_output).
+ * (skipped: variant_form, lemma_mismatch), or its draft stayed invalid (failed: invalid_output) in `invalidRuns` runs, at least
+ * MAX_INVALID_OUTPUT_RUNS. The first invalid_output is NOT final: the word is sent once more.
  *
  * A job that SUCCEEDED, or was skipped as "exists", is not final: the entry it made (or found) is checked directly, and if it has been
  * deleted since (for example by scripts/dev/cleanup-auto-entries.ts) the word is eligible again. Rows that failed for a reason that
  * may pass (upstream error, budget, daily cap, stale, dead letter, queue error, config error) do not close it either.
  */
-export function isFinalOutcome(status: string, reason: string | null): boolean {
+export function isFinalOutcome(status: string, reason: string | null, invalidRuns = 1): boolean {
   if (status === 'rejected') return true;
   if (status === 'skipped') return ['variant_form', 'lemma_mismatch'].includes(reason ?? '');
-  if (status === 'failed') return reason === 'invalid_output';
+  if (status === 'failed') return reason === 'invalid_output' && invalidRuns >= MAX_INVALID_OUTPUT_RUNS;
   return false;
 }
 
@@ -60,6 +66,7 @@ export async function classifyWords(db: Queryable, words: readonly OxfordWord[])
   const inForms = new Set<string>();
   const inQueue = new Set<string>();
   const doneBefore = new Map<string, string>();
+  const earlier = new Map<string, string>();
 
   for (const part of chunks(names)) {
     const entries = await db.query(
@@ -76,12 +83,18 @@ export async function classifyWords(db: Queryable, words: readonly OxfordWord[])
     for (const r of active.rows) inQueue.add(r.w);
 
     const latest = await db.query(
-      `SELECT DISTINCT ON (word) word AS w, status, reason FROM word_enrichment_jobs
-        WHERE word = ANY($1::text[]) AND status NOT IN ('queued', 'running')
-        ORDER BY word, created_at DESC`,
+      `SELECT DISTINCT ON (j.word) j.word AS w, j.status, j.reason,
+              (SELECT count(*)::int FROM word_enrichment_jobs k WHERE k.word = j.word AND k.status = 'failed' AND k.reason = 'invalid_output') AS invalid_runs
+         FROM word_enrichment_jobs j
+        WHERE j.word = ANY($1::text[]) AND j.status NOT IN ('queued', 'running')
+        ORDER BY j.word, j.created_at DESC`,
       [part]
     );
-    for (const r of latest.rows) if (isFinalOutcome(r.status, r.reason)) doneBefore.set(r.w, `${r.status} / ${r.reason ?? '-'}`);
+    for (const r of latest.rows) {
+      const label = r.reason === 'invalid_output' ? `${r.status} / invalid_output (${r.invalid_runs} lượt)` : `${r.status} / ${r.reason ?? '-'}`;
+      if (isFinalOutcome(r.status, r.reason, Number(r.invalid_runs))) doneBefore.set(r.w, label);
+      else earlier.set(r.w, label);
+    }
   }
 
   const eligible: OxfordWord[] = [];
@@ -93,7 +106,9 @@ export async function classifyWords(db: Queryable, words: readonly OxfordWord[])
     else if (doneBefore.has(w.word)) excluded.push({ word: w.word, reason: 'done_before', detail: doneBefore.get(w.word) });
     else eligible.push(w);
   }
-  return { eligible, excluded };
+  const retries = new Map<string, string>();
+  for (const w of eligible) if (earlier.has(w.word)) retries.set(w.word, earlier.get(w.word) as string);
+  return { eligible, excluded, retries };
 }
 
 /** ref_word_frequency.rank of each word (rank 1 = most common); words that are not in the table are absent from the map. */
@@ -118,14 +133,19 @@ export interface SeedPlan {
   eligible: SeedWord[];
   /** what this run sends (selection options applied), in sending order */
   selected: SeedWord[];
+  /** of `selected`: the words that are SENT AGAIN because an earlier job did not make an entry, with that job's "status / reason" */
+  retries: Array<{ word: string; detail: string }>;
 }
 
 /** Everything the dry run prints, and the words a confirmed run sends. Reads the database; writes nothing. */
-export async function buildSeedPlan(db: Queryable, refDb: Queryable, parsed: ParsedOxford, options: SelectionOptions = {}): Promise<SeedPlan> {
-  const { eligible, excluded } = await classifyWords(db, parsed.words);
+export async function buildSeedPlan(db: Queryable, refDb: Queryable, parsed: ParsedOxford, options: SelectionOptions = {}, only?: ReadonlySet<string>): Promise<SeedPlan> {
+  // `only` (--retry-last-run): look at these words and no others
+  const words = only ? parsed.words.filter((w) => only.has(w.word)) : parsed.words;
+  const { eligible, excluded, retries } = await classifyWords(db, words);
   const ranks = await loadRanks(refDb, eligible.map((w) => w.word));
   const ranked = withRanks(eligible, ranks).sort(bySendOrder);
-  return { parsed, excluded, eligible: ranked, selected: selectWords(ranked, options) };
+  const selected = selectWords(ranked, options);
+  return { parsed, excluded, eligible: ranked, selected, retries: selected.filter((w) => retries.has(w.word)).map((w) => ({ word: w.word, detail: retries.get(w.word) as string })) };
 }
 
 // ── estimates ──────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -142,8 +162,13 @@ export interface HistoryStats {
   jobsWithTokens: number;
   inputTokens: number;
   outputTokens: number;
-  /** median seconds between created_at and finished_at of succeeded jobs that ended within 5 minutes; null if none */
-  medianSeconds: number | null;
+  /**
+   * WALL-CLOCK seconds per word while the worker was busy: the median gap between two succeeded jobs finishing one after the other
+   * (gaps over a minute are idle time and left out), last 30 days; null if there is none. It is what the worker really achieved at the
+   * concurrency it ran with; the time from created_at to finished_at is NOT used (it includes the wait in the queue: a batch of 50
+   * queued at once made it look like 130 seconds per word).
+   */
+  wallSecondsPerWord: number | null;
   avgAttempts: number | null;
 }
 
@@ -154,16 +179,19 @@ export async function loadHistory(db: Queryable): Promise<HistoryStats> {
        FROM word_enrichment_jobs WHERE input_tokens > 0`
   );
   const time = await db.query(
-    `SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (finished_at - created_at)))::float AS median
-       FROM word_enrichment_jobs
-      WHERE status = 'succeeded' AND finished_at IS NOT NULL AND finished_at - created_at < interval '5 minutes'`
+    `WITH f AS (
+        SELECT finished_at, lag(finished_at) OVER (ORDER BY finished_at) AS prev
+          FROM word_enrichment_jobs
+         WHERE status = 'succeeded' AND finished_at IS NOT NULL AND finished_at > now() - interval '30 days')
+      SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (finished_at - prev)))::float AS median
+        FROM f WHERE prev IS NOT NULL AND finished_at - prev < interval '60 seconds' AND finished_at > prev`
   );
   const t = tokens.rows[0];
   return {
     jobsWithTokens: Number(t.n),
     inputTokens: Number(t.inp),
     outputTokens: Number(t.outp),
-    medianSeconds: time.rows[0]?.median === null || time.rows[0]?.median === undefined ? null : Number(time.rows[0].median),
+    wallSecondsPerWord: time.rows[0]?.median === null || time.rows[0]?.median === undefined ? null : Number(time.rows[0].median),
     avgAttempts: t.attempts === null || t.attempts === undefined ? null : Number(t.attempts),
   };
 }
@@ -185,10 +213,11 @@ export interface Estimate {
   /** "history" = average of the job rows in the database; "default" = the figure of the runbook, an estimate */
   costSource: 'history' | 'default';
   historyJobs: number;
+  /** WALL-CLOCK seconds per word (not per job): see HistoryStats.wallSecondsPerWord */
   secondsPerWord: number;
   timeSource: 'history' | 'default';
   concurrency: number;
-  /** wall-clock seconds of the worker for all the words at `concurrency` */
+  /** wall-clock seconds of the worker for all the words */
   workerSeconds: number;
   /** days needed with the daily cap, counting what today's counter already used */
   days: number;
@@ -200,8 +229,9 @@ export function estimateRun(o: { words: number; model: string; history: HistoryS
   const perHistory = costFromTotals(o.model, o.history.jobsWithTokens, o.history.inputTokens, o.history.outputTokens);
   const costSource = perHistory !== null && o.history.jobsWithTokens >= 5 ? 'history' : 'default';
   const costPerWordUsd = costSource === 'history' ? (perHistory as number) / o.history.jobsWithTokens : DEFAULT_COST_PER_WORD_USD;
-  const timeSource = o.history.medianSeconds !== null && o.history.medianSeconds > 0 ? 'history' : 'default';
-  const secondsPerWord = timeSource === 'history' ? (o.history.medianSeconds as number) : DEFAULT_SECONDS_PER_WORD;
+  const timeSource = o.history.wallSecondsPerWord !== null && o.history.wallSecondsPerWord > 0 ? 'history' : 'default';
+  // wall-clock seconds per word: measured (at the concurrency of the earlier batches), or 10 seconds of work shared by the workers
+  const secondsPerWord = timeSource === 'history' ? (o.history.wallSecondsPerWord as number) : DEFAULT_SECONDS_PER_WORD / Math.max(1, o.concurrency);
   const remainingToday = Math.max(0, o.dailyCap - o.usedToday);
   let days = 0;
   if (o.words > 0) days = o.words <= remainingToday ? 1 : o.dailyCap > 0 ? 1 + Math.ceil((o.words - remainingToday) / o.dailyCap) : Infinity;
@@ -214,7 +244,7 @@ export function estimateRun(o: { words: number; model: string; history: HistoryS
     secondsPerWord,
     timeSource,
     concurrency: o.concurrency,
-    workerSeconds: Math.ceil((o.words * secondsPerWord) / Math.max(1, o.concurrency)),
+    workerSeconds: Math.ceil(o.words * secondsPerWord),
     days,
     usedToday: o.usedToday,
     dailyCap: o.dailyCap,

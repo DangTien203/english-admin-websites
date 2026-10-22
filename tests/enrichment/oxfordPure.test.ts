@@ -6,8 +6,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parseApplyCefrArgs, parsePublishArgs, parseSeedArgs, selectionFromArgs } from '../../services/enrichment/oxford/args';
 import { readOxfordFile, parseOxford, coverageOf, cefrRank, type OxfordWord } from '../../services/enrichment/oxford/list';
-import { estimateRun, isFinalOutcome, DEFAULT_COST_PER_WORD_USD, costFromTotals, formatDuration } from '../../services/enrichment/oxford/plan';
-import { parseWorkerLog, percentile } from '../../services/enrichment/oxford/report';
+import { estimateRun, isFinalOutcome, DEFAULT_COST_PER_WORD_USD, MAX_INVALID_OUTPUT_RUNS, costFromTotals, formatDuration } from '../../services/enrichment/oxford/plan';
+import { parseInvalidOutputs, parseWorkerLog, percentile } from '../../services/enrichment/oxford/report';
 import { bySendOrder, fnv1a, parseCefrList, selectWords, stratifiedSample, type SeedWord } from '../../services/enrichment/oxford/selection';
 import { parseAutoNote, OXFORD_CEFR_MARK } from '../../utils/autoEntryNote';
 
@@ -236,24 +236,24 @@ describe('command-line parsing', () => {
 // ── estimates ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 describe('estimates', () => {
-  const noHistory = { jobsWithTokens: 0, inputTokens: 0, outputTokens: 0, medianSeconds: null, avgAttempts: null };
+  const noHistory = { jobsWithTokens: 0, inputTokens: 0, outputTokens: 0, wallSecondsPerWord: null, avgAttempts: null };
 
   it('without history it says so and uses 0.00085 USD a word and 10 seconds a word', () => {
     const e = estimateRun({ words: 1000, model: 'claude-haiku-5-5', history: noHistory, concurrency: 4, dailyCap: 500, usedToday: 0 });
-    expect(e).toMatchObject({ costSource: 'default', timeSource: 'default', costPerWordUsd: DEFAULT_COST_PER_WORD_USD, secondsPerWord: 10 });
+    expect(e).toMatchObject({ costSource: 'default', timeSource: 'default', costPerWordUsd: DEFAULT_COST_PER_WORD_USD, secondsPerWord: 2.5 });
     expect(e.costUsd).toBeCloseTo(0.85, 6);
-    expect(e.workerSeconds).toBe(2500);
+    expect(e.workerSeconds).toBe(2500); // 1000 words × 10 s of work shared by 4 workers
   });
 
   it('with enough history it uses the real average: input minus the cached prompt at the cache-read rate', () => {
     // 10 jobs, each 9000 input tokens (7859 cached) and 1000 output tokens
-    const history = { jobsWithTokens: 10, inputTokens: 90_000, outputTokens: 10_000, medianSeconds: 8, avgAttempts: 1.1 };
+    const history = { jobsWithTokens: 10, inputTokens: 90_000, outputTokens: 10_000, wallSecondsPerWord: 4.5, avgAttempts: 1.1 };
     const e = estimateRun({ words: 100, model: 'claude-haiku-5-5', history, concurrency: 2, dailyCap: 500, usedToday: 0 });
     const perJob = ((9000 - 7859) * 0.1 + 1000 * 0.5 + 7859 * 0.01) / 1_000_000;
     expect(e.costSource).toBe('history');
     expect(e.costPerWordUsd).toBeCloseTo(perJob, 9);
-    expect(e.secondsPerWord).toBe(8);
-    expect(e.workerSeconds).toBe(400);
+    expect(e.secondsPerWord).toBe(4.5); // wall clock, as measured: it is NOT divided by the concurrency again
+    expect(e.workerSeconds).toBe(450);
   });
 
   it('too little history (under 5 jobs) or an unknown model falls back to the default', () => {
@@ -285,7 +285,7 @@ describe('which earlier outcomes close a word', () => {
     ['rejected', 'unknown_word', true],
     ['skipped', 'variant_form', true],
     ['skipped', 'lemma_mismatch', true],
-    ['failed', 'invalid_output', true],
+    ['failed', 'invalid_output', false], // the first invalid_output is tried once more
     ['succeeded', null, false], // the entry is checked directly: if it was deleted since, the word is eligible again
     ['skipped', 'exists', false],
     ['skipped', 'budget', false],
@@ -301,6 +301,53 @@ describe('which earlier outcomes close a word', () => {
 });
 
 // ── the worker log and numbers ─────────────────────────────────────────────────────────────────────────────────────────
+
+describe('invalid_output is final after two runs', () => {
+  it('one run → not final, two or more → final; the other failures never depend on the count', () => {
+    expect(isFinalOutcome('failed', 'invalid_output', 1)).toBe(false);
+    expect(isFinalOutcome('failed', 'invalid_output', 2)).toBe(true);
+    expect(isFinalOutcome('failed', 'invalid_output', 5)).toBe(true);
+    expect(isFinalOutcome('failed', 'upstream_error', 9)).toBe(false);
+    expect(isFinalOutcome('rejected', 'proper_noun', 1)).toBe(true);
+    expect(MAX_INVALID_OUTPUT_RUNS).toBe(2);
+  });
+});
+
+describe('--retry-last-run and --from-run', () => {
+  it('--retry-last-run is its own mode: it sends the words of the latest run and takes no selection option', () => {
+    expect(parseSeedArgs(['--file', 'x.json', '--retry-last-run', '--confirm'])).toMatchObject({ retryLastRun: true, confirm: true });
+    expect(parseSeedArgs(['--file', 'x.json']).retryLastRun).toBe(false);
+    for (const extra of [['--limit', '5'], ['--offset', '2'], ['--sample', '5'], ['--only-cefr', 'A1']]) {
+      expect(() => parseSeedArgs(['--retry-last-run', ...extra])).toThrow(/--retry-last-run cannot be combined/);
+    }
+    expect(() => parseSeedArgs(['--retry-last-run', '--report'])).toThrow(/cannot be combined with --report/);
+    expect(selectionFromArgs(parseSeedArgs(['--retry-last-run'])).text).toContain('gửi lại');
+  });
+
+  it('--from-run goes with --report only, and needs a positive number', () => {
+    expect(parseSeedArgs(['--report', '--from-run', '2']).fromRun).toBe(2);
+    expect(() => parseSeedArgs(['--from-run', '2'])).toThrow(/only goes with --report/);
+    expect(() => parseSeedArgs(['--report', '--from-run', '0'])).toThrow(/positive/);
+    expect(() => parseSeedArgs(['--report', '--from-run', 'x'])).toThrow(/whole number/);
+  });
+});
+
+describe('invalid_output lines of the worker log', () => {
+  const log = [
+    JSON.stringify({ evt: 'enrich', word: 'a', job_id: 'job-a', output_tokens: 4300, status: 'failed', reason: 'invalid_output', issues: [{ path: 'senses[0].meanings_vi[2]', code: 'parenthesis' }], first_issues: [{ path: 'senses[3].definition_en', code: 'too_long' }] }),
+    JSON.stringify({ evt: 'enrich', word: 'b', status: 'failed', reason: 'invalid_output' }), // an older worker: no detail
+    JSON.stringify({ evt: 'enrich', word: 'c', status: 'failed', reason: 'config_error' }),
+    JSON.stringify({ evt: 'enrich', word: 'd', status: 'succeeded' }),
+    '{ not json',
+  ].join('\n');
+
+  it('keeps only the invalid_output lines, with the rules and the field paths with their indexes taken out', () => {
+    expect(parseInvalidOutputs(log)).toEqual([
+      { word: 'a', jobId: 'job-a', outputTokens: 4300, issues: [{ code: 'parenthesis', path: 'senses[].meanings_vi[]' }], firstIssues: [{ code: 'too_long', path: 'senses[].definition_en' }] },
+      { word: 'b', jobId: null, outputTokens: null, issues: [], firstIssues: [] },
+    ]);
+  });
+});
 
 describe('the worker log reader', () => {
   const log = [

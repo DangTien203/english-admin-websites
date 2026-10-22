@@ -211,6 +211,34 @@ describe('S3 / S4 — what Haiku says', () => {
     expect(deps.persist).not.toHaveBeenCalled();
   });
 
+  it('invalid_output names the validator rules that were broken (code and path, no text of the draft), for the last draft and for the first answer', async () => {
+    const deps = makeDeps({
+      generateDraft: jest.fn(
+        async () =>
+          ({
+            ...failure(),
+            details: [{ path: 'senses[0].meanings_vi[1]', code: 'parenthesis', message: 'secret text of the draft' }],
+            firstIssues: [{ path: 'senses[2].examples[0].example_vi', code: 'same_as_english', message: 'another text' }],
+          }) as any
+      ),
+    });
+    const out = await run('bank', deps);
+    expect(out.issues).toEqual([{ path: 'senses[0].meanings_vi[1]', code: 'parenthesis' }]);
+    expect(out.firstIssues).toEqual([{ path: 'senses[2].examples[0].example_vi', code: 'same_as_english' }]);
+    expect(JSON.stringify(out)).not.toContain('secret text');
+  });
+
+  it('an entry that cannot be assembled is invalid_output with the code "assemble"', async () => {
+    const deps = makeDeps({ generateDraft: jest.fn(async (b: SourceBundle) => success(draftFor(b.word, { senses: [makeSense({ meanings_vi: [' '] })] })) as any) });
+    expect((await run('bank', deps)).issues).toEqual([{ path: '$', code: 'assemble' }]);
+  });
+
+  it('only an invalid_output carries issues: a success, a rejection and a skip have none', async () => {
+    const ok = await run('bank', makeDeps());
+    expect(ok.issues).toBeUndefined();
+    expect(ok.firstIssues).toBeUndefined();
+  });
+
   it('a draft that cannot give a meaning_vi → failed / invalid_output, nothing written', async () => {
     const deps = makeDeps({ generateDraft: jest.fn(async (b: SourceBundle) => success(draftFor(b.word, { senses: [makeSense({ meanings_vi: [' '] })] })) as any) });
     expect(await run('bank', deps)).toMatchObject({ status: 'failed', reason: 'invalid_output' });

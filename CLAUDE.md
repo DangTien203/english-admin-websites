@@ -36,6 +36,11 @@ npm run check:env-example  # .env.example must match config/lookup.ts, and every
 npm run seed:lookup-test -- --staging   # test user/ebook + prerequisite entries for the acceptance run; writes .acceptance.local.json (git-ignored)
 npm run acceptance:lookup -- --staging  # 30-word acceptance run against a running server on the dev DB (real network, spends tokens); report in docs/lookup-acceptance-report.md; probes Free Dictionary first (words it cannot judge are "không đánh giá được", exit code 3); --cleanup needs the DB name retyped — docs/lookup-runbook.md §12
 
+# Oxford 5000 seeding (docs/lookup-runbook.md §13): dry run by default; --confirm sends; needs ENRICHMENT_ENABLED=true, ENRICHMENT_PUBLISH_POLICY=review (override in the command, never edit .env) and ONE worker of your machine
+npm run enrich:seed-oxford -- --file <oxford_5000.json> [--sample N | --limit N --offset N] [--only-cefr A1,A2] [--retry-last-run] [--confirm | --report [--from-run N]]
+npm run oxford:apply-cefr -- --file <oxford_5000.json> [--dry-run]   # cefr_level of [auto] entries from the lowest Oxford level; APPLIES unless --dry-run
+npm run enrich:publish -- [--cefr A1,A2] [--limit 500] [--confirm]   # bulk-publish rule of /lookup/review from the command line; dry run by default
+
 npm run db:migrate    # run all 32 migrations (idempotent, tracked in schema_migrations)
 npm run admin:create -- --email <e> --name <n>   # insert ONE super_admin; random password printed once (or ADMIN_PASSWORD from the environment); never deletes, refuses an existing e-mail
 npm run db:seed       # seed admin + sample data (scripts/seed.ts). WIPES ~32 tables first: lists them, refuses NODE_ENV=production or a non-local database unless --i-know-this-wipes-tables
@@ -54,7 +59,7 @@ Tests require `JWT_SECRET` in `.env` — `tests/setup.ts` throws otherwise. Test
 
 ### Mount order (app.ts)
 
-1. `injectAdmin` middleware on every request (web + API). Loads admin from session, populates `res.locals.admin`, and for super_admin fetches pending-approvals + pending-transactions counts for sidebar badges. **Don't add expensive queries here.**
+1. Session (`express-session`, in-memory store exported as `sessionStore`), `connect-flash` and `injectAdmin` run on **web requests only**: `webOnly(...)` (`middlewares/webOnly.ts`) skips them for `/api/*`, so `/api/v1` (JWT) never creates a session nor sets `connect.sid` (`tests/e2e/apiNoSession.test.ts`). `injectAdmin` loads admin from session, populates `res.locals.admin`, and for super_admin fetches pending-approvals + pending-transactions counts for sidebar badges. **Don't add expensive queries here.** A new session-authenticated route must live outside `/api`.
 2. **Web routes** (`/auth`, `/dashboard`, `/approvals`, `/users`, `/profile`, `/dictionary`, `/lessons`, `/decks`, `/ebooks`, `/subscriptions`, `/settings`, `/games`, `/ai-content`, `/lookup`).
 3. **API routes** (`/api/v1/...`) — see "API surface" below.
 4. **Catch-all** `/api/v1` cards mount must come **after** all specific `/api/v1/*` mounts (currently last, line ~142). Adding a new API resource? Mount it before the cards line.
@@ -168,7 +173,7 @@ Order in `app.ts` matters — specific mounts before the broad cards mount.
 | `/api/v1/decks` | `routes/api/decks.ts` | `requireApiAuth` | GET `/system`, `/mine`, `/:id`; POST `/create` (gated by `requireFeature('flashcard_max_decks')`); PATCH `/:id`, DELETE `/:id`; POST `/:id/favorite/toggle`, `/:id/cards`, DELETE `/:id/cards/:entryId`. Ownership gate on writes. |
 | `/api/v1/cards` | `routes/api/cards.ts` | `requireApiAuth` (broad mount) | GET/POST/DELETE under broad `/api/v1` prefix — **must mount last**. |
 | `/api/v1/review` | `routes/api/review.ts` | `requireApiAuth` | Legacy review endpoints (swift-choice, cloze). Kept for older client builds; new clients use `/practice`. |
-| `/api/v1/leitner` | `routes/api/leitner.ts` | `requireApiAuth` | GET `/overview` (box distribution + retention), GET `/question` (swift-choice / cloze / pair-link), POST `/answer`, POST `/batch-add`. SRS box transitions in `utils/leitnerManager.ts`. Review sessions (`/session/start|answer|complete`, GET `/session/:id`; `services/leitnerSessionService.ts`, step ordering in `utils/leitnerReviewQueue.ts`): box 4/5 words are checked on both English and Vietnamese meaning, ≥2 steps apart; summary counts original words; `/session/start` takes optional `box_number` (1–5) to study one box on demand. `POST /review` is box 1–3 only (409 `REVIEW_SESSION_REQUIRED` otherwise). |
+| `/api/v1/leitner` | `routes/api/leitner.ts` | `requireApiAuth` | GET `/overview` (box distribution + retention), GET `/question` (swift-choice / cloze / pair-link), POST `/answer`, POST `/batch-add`. SRS box transitions in `utils/leitnerManager.ts`. Review sessions (`/session/start|answer|complete`, GET `/session/:id`; `services/leitnerSessionService.ts`, step ordering in `utils/leitnerReviewQueue.ts`): box 4/5 words are checked on both English and Vietnamese meaning, ≥2 steps apart (both right → next box, exactly one right → box kept, none → box 1); summary counts original words; `/session/start` takes optional `box_number` (1–5) to study one box on demand. `POST /review` is box 1–3 only (409 `REVIEW_SESSION_REQUIRED` otherwise). |
 | `/api/v1/practice` | `routes/api/practice.ts` | `requireApiAuth` | POST `/session/start`, `/session/:id/question`, `/session/:id/answer`, `/session/:id/complete`. Modes: flashcard, swift-choice, cloze, pair-link. Tracks practice sessions + answers; updates streak. |
 | `/api/v1/subscriptions` | `routes/api/subscriptions.ts` | none (per-route) | GET `/plans` (public, 5-min in-memory cache), GET `/plans/:id`, GET `/:userId/active`, POST `/initiate` (transaction creation). |
 | `/api/v1/retrieval` | `routes/api/retrieval.ts` | `requireApiAuth` + `requireFeature('retrieval_practice_daily')` on POST | POST `/start`, `/sentence`, `/answer`, `/complete`. AI sentence grading via OpenAI; word translation fallback via Claude. |
@@ -548,4 +553,4 @@ Folder is `dictionary` only when `source_type === 'dictionary_headword'`; otherw
 - New migration? Append to the `migrations` array in `database/migrate.ts` with a never-changing `key`. Do not edit historical migrations once deployed.
 - Rate limiters skip under `NODE_ENV=test` — production rate limits are real, watch the per-user TTS limit (30/min).
 - The codebase has loose TS strictness — actively check for null/undefined; the compiler won't.
-- `injectAdmin` runs on every request including API. It's cheap for non-super_admin but does sidebar count queries for super_admin sessions — keep it that way.
+- `injectAdmin` runs on every web request (not on `/api/*`, see Mount order). It's cheap for non-super_admin but does sidebar count queries for super_admin sessions — keep it that way.

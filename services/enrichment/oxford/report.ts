@@ -14,6 +14,7 @@ import { buildMatrix, formatMatrix, planCefr } from './cefr';
 import { coverageOf, type ParsedOxford } from './list';
 import { measureDb, mb, payloadBytes } from './measure';
 import { classifyWords, costFromTotals, formatDuration, usd, type Queryable } from './plan';
+import { evaluate } from './publish';
 import { allSentWords, readState, type RunRecord } from './state';
 
 export const REPORT_FILE = 'docs/lookup-oxford-seed-report.md';
@@ -76,6 +77,37 @@ export function parseWorkerLog(text: string): WorkerLogStats {
   };
 }
 
+export interface InvalidOutputEvent {
+  word: string;
+  /** word_enrichment_jobs.id of the job (the log line's job_id) */
+  jobId: string | null;
+  /** the rules the last draft broke: validator code + field path with the indexes taken out (senses[].meanings_vi) */
+  issues: Array<{ code: string; path: string }>;
+  firstIssues: Array<{ code: string; path: string }>;
+  outputTokens: number | null;
+}
+
+const generic = (path: string): string => String(path).replace(/\[\d+\]/g, '[]');
+
+/** The `enrich` lines of the worker log that ended in failed / invalid_output, with the rules they broke (needs a worker that logs `issues`). */
+export function parseInvalidOutputs(text: string): InvalidOutputEvent[] {
+  const out: InvalidOutputEvent[] = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const start = raw.indexOf('{');
+    if (start < 0) continue;
+    let line: any;
+    try {
+      line = JSON.parse(raw.slice(start));
+    } catch {
+      continue;
+    }
+    if (line?.evt !== 'enrich' || line.status !== 'failed' || line.reason !== 'invalid_output') continue;
+    const pick = (list: unknown) => (Array.isArray(list) ? list.map((x: any) => ({ code: String(x?.code ?? '?'), path: generic(x?.path ?? '$') })) : []);
+    out.push({ word: String(line.word), jobId: line.job_id ? String(line.job_id) : null, issues: pick(line.issues), firstIssues: pick(line.first_issues), outputTokens: typeof line.output_tokens === 'number' ? line.output_tokens : null });
+  }
+  return out;
+}
+
 const md = (text: unknown): string => String(text ?? '').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
 const n = (v: number): string => v.toLocaleString('en-US');
 
@@ -133,6 +165,8 @@ export interface ReportInput {
   now?: Date;
   /** where the state file is (tests) */
   stateFile?: string;
+  /** report on the runs from this one (1 = the first) onwards; default: all of them */
+  fromRun?: number;
 }
 
 interface JobRow {
@@ -149,13 +183,13 @@ interface JobRow {
 
 export async function buildReport(i: ReportInput): Promise<string[]> {
   const now = i.now ?? new Date();
-  const state = readState(i.stateFile);
-  const runs = state.runs;
-  const sent = allSentWords(state);
+  const from = Math.max(1, i.fromRun ?? 1);
+  const runs = readState(i.stateFile).runs.slice(from - 1);
+  const sent = allSentWords({ runs });
   const out: string[] = [];
   const push = (...lines: string[]) => out.push(...lines);
 
-  push(`Sinh lúc ${now.toISOString()} bởi \`npm run enrich:seed-oxford -- --file … --report\`. Phần này được ghi lại mỗi lần chạy; ghi chú viết tay nằm SAU dấu kết thúc và được giữ.`, '');
+  push(`Sinh lúc ${now.toISOString()} bởi \`npm run enrich:seed-oxford -- --file … --report\`. Phạm vi: ${runs.length === 0 ? "chưa có lần gửi nào" : `các lần gửi #${from} đến #${from + runs.length - 1}`}. Phần này được ghi lại mỗi lần chạy; ghi chú viết tay nằm SAU dấu kết thúc và được giữ.`, '');
 
   // 1 ─ runs and the Oxford file
   push('## 1. Dữ liệu vào và các lần gửi', '');
@@ -173,10 +207,10 @@ export async function buildReport(i: ReportInput): Promise<string[]> {
       ...table(
         ['#', 'bắt đầu (UTC)', 'kết thúc', 'cách chọn', 'từ đã gửi', 'dừng bởi', 'model', 'policy', 'đồng thời'],
         runs.map((r: RunRecord, k) => [
-          k + 1,
+          from + k,
           r.startedAt.slice(0, 19).replace('T', ' '),
           (r.finishedAt ?? '').slice(11, 19),
-          [r.options.onlyCefr?.length ? `mức ${r.options.onlyCefr.join(',')}` : '', r.options.sample ? `mẫu ${r.options.sample}` : '', r.options.limit ? `limit ${r.options.limit}` : '', r.options.offset ? `offset ${r.options.offset}` : ''].filter(Boolean).join(' · ') || 'tất cả',
+          [r.options.onlyCefr?.length ? `mức ${r.options.onlyCefr.join(',')}` : '', r.options.sample ? `mẫu ${r.options.sample}` : '', r.options.limit ? `limit ${r.options.limit}` : '', r.options.offset ? `offset ${r.options.offset}` : '', r.options.retryLastRun ? 'gửi lại từ lần trước' : ''].filter(Boolean).join(' · ') || 'tất cả',
           r.words.length,
           r.stoppedBy ?? '-',
           r.model,
@@ -207,14 +241,85 @@ export async function buildReport(i: ReportInput): Promise<string[]> {
     const noRow = sent.length - jobs.length;
     push(...table(['status / reason', 'số từ'], [...[...byKey.entries()].sort((a, b) => b[1] - a[1]), ...(noRow > 0 ? [['(chưa có hàng sổ)', noRow] as [string, number]] : [])]), '');
     push(`Tổng ${n(sent.length)} từ đã gửi. Job còn \`queued\`/\`running\`: ${n(jobs.filter((j) => j.status === 'queued' || j.status === 'running').length)}.`, '');
-    const invalid = jobs.filter((j) => j.status === 'failed' && j.reason === 'invalid_output').length;
-    const finished = jobs.filter((j) => j.status !== 'queued' && j.status !== 'running').length;
     const transient = jobs.filter((j) => j.reason === 'budget' || j.reason === 'upstream_error' || j.reason === 'dead_letter').length;
-    const rate = finished > 0 ? (invalid * 100) / finished : 0;
+    push(`Job hết ngân sách hoặc lỗi nhà cung cấp (\`budget\`, \`upstream_error\`, \`dead_letter\`) ở job gần nhất của từ: ${transient}.`, '');
+  }
+
+  // 2b ─ per run, and why invalid_output
+  if (sent.length > 0 && runs.length > 0) {
+    const rows = (
+      await i.db.query(`SELECT id, word, status, reason, created_at FROM word_enrichment_jobs WHERE word = ANY($1::text[]) AND created_at >= $2::timestamptz - interval '1 minute' ORDER BY created_at`, [sent, runs[0].startedAt])
+    ).rows;
+    const bounds = runs.map((r, k) => ({ from: new Date(r.startedAt).getTime() - 60_000, to: k + 1 < runs.length ? new Date(runs[k + 1].startedAt).getTime() - 60_000 : Infinity, words: new Set(r.words) }));
+    const perRun = runs.map(() => new Map<string, number>());
+    const runOfJob = new Map<string, number>();
+    for (const row of rows) {
+      const at = new Date(row.created_at).getTime();
+      const k = bounds.findIndex((b) => at >= b.from && at < b.to && b.words.has(row.word));
+      if (k < 0) continue;
+      runOfJob.set(row.id, k);
+      const key = `${row.status} / ${row.reason ?? '-'}`;
+      perRun[k].set(key, (perRun[k].get(key) ?? 0) + 1);
+    }
+    const keys = [...new Set(perRun.flatMap((m) => [...m.keys()]))].sort();
+    push('**Theo từng lần gửi** (đếm HÀNG sổ do lần gửi đó tạo, nên hàng cũ của từ được gửi lại vẫn nằm ở lần gửi cũ của nó):', '');
+    push(...table(['status / reason', ...runs.map((_, k) => `lần #${from + k} (${n(runs[k].words.length)} từ)`)], keys.map((key) => [key, ...perRun.map((m) => m.get(key) ?? 0)])), '');
+
+    const firstInvalid = perRun[0].get('failed / invalid_output') ?? 0;
+    const firstRate = (firstInvalid * 100) / Math.max(1, runs[0].words.length);
+    const finalInvalid = jobs.filter((j) => j.status === 'failed' && j.reason === 'invalid_output').length;
     push(
-      `Tiêu chí dừng khẩn cấp ở giai đoạn 2 và 3: \`invalid_output\` ${rate.toFixed(1)}% (${invalid}/${finished}; dừng khi vượt 5%) ${rate > 5 ? '**VƯỢT**' : 'đạt'} · job hết ngân sách hoặc lỗi nhà cung cấp (\`budget\`, \`upstream_error\`, \`dead_letter\`): ${transient} (dừng khi có quá 3 lần liên tiếp) · chi phí so với ước tính: mục 4 (dừng khi vượt 2 lần).`,
+      `Tiêu chí dừng khẩn cấp: ở LƯỢT ĐẦU (lần #${from}, ${n(runs[0].words.length)} từ) \`invalid_output\` là ${n(firstInvalid)} (${firstRate.toFixed(1)}%; dừng khi vượt 5% theo yêu cầu ban đầu, 8% ở giai đoạn 2); sau các lần gửi lại còn ${n(finalInvalid)}/${n(sent.length)} từ hỏng (${((finalInvalid * 100) / Math.max(1, sent.length)).toFixed(1)}%). Lỗi nhà cung cấp và chi phí: ở trên và mục 4.`,
       ''
     );
+
+    const byWord = new Map(p.words.map((w) => [w.word, w]));
+    push('**\`invalid_output\` theo nguyên nhân (validator) và loại từ, từng lần gửi**', '');
+    if (!i.workerLog) push('(cần \`--worker-log <log của worker>\`: validator nào nằm ở log, không ở cơ sở dữ liệu; worker cũ trước P10 chưa ghi trường này)', '');
+    else {
+      const all = parseInvalidOutputs(fs.readFileSync(i.workerLog, 'utf8'));
+      let any = false;
+      for (let k = 0; k < runs.length; k++) {
+        const events = all.filter((e) => e.jobId !== null && runOfJob.get(e.jobId) === k);
+        if (events.length === 0) continue;
+        any = true;
+        const distinct = new Set(events.map((e) => e.word));
+        const noDetail = events.filter((e) => e.issues.length === 0).length;
+        push(`*Lần #${from + k}* (${n(runs[k].words.length)} từ): ${n(events.length)} job \`invalid_output\`${noDetail > 0 ? `, ${noDetail} không có chi tiết (worker cũ)` : ''}.`, '');
+        const countCodes = (pick: (e: InvalidOutputEvent) => Array<{ code: string; path: string }>) => {
+          const m = new Map<string, Set<string>>();
+          for (const e of events) for (const x of pick(e)) m.set(`${x.code} @ ${x.path}`, (m.get(`${x.code} @ ${x.path}`) ?? new Set()).add(e.word));
+          return [...m.entries()].map(([key, set]) => [key, set.size] as [string, number]).sort((a, b) => b[1] - a[1]);
+        };
+        const last = countCodes((e) => e.issues);
+        const first = countCodes((e) => e.firstIssues);
+        push('Luật mà bản nháp CUỐI (sau một lần sửa) vi phạm, số từ:', '', ...table(['validator @ trường', 'số từ'], last.length ? last : [['(không có chi tiết)', 0]]), '');
+        push('Luật mà câu trả lời ĐẦU TIÊN (trước khi sửa) vi phạm, số từ:', '', ...table(['validator @ trường', 'số từ'], first.length ? first : [['(không có chi tiết)', 0]]), '');
+        const sentByPos = new Map<string, number>();
+        for (const w of runs[k].words) {
+          const key = byWord.get(w)?.primaryPos ?? '(không rõ)';
+          sentByPos.set(key, (sentByPos.get(key) ?? 0) + 1);
+        }
+        const failedByPos = new Map<string, number>();
+        for (const w of distinct) {
+          const key = byWord.get(w)?.primaryPos ?? '(không rõ)';
+          failedByPos.set(key, (failedByPos.get(key) ?? 0) + 1);
+        }
+        push(
+          'Theo loại từ (loại từ của hàng có mức CEFR thấp nhất trong file Oxford):',
+          '',
+          ...table(
+            ['loại từ', 'từ đã gửi', 'từ hỏng', 'tỉ lệ'],
+            [...sentByPos.entries()].sort((a, b) => b[1] - a[1]).map(([key, total]) => [key, total, failedByPos.get(key) ?? 0, `${(((failedByPos.get(key) ?? 0) * 100) / total).toFixed(1)}%`])
+          ),
+          ''
+        );
+        const outTokens = events.map((e) => e.outputTokens).filter((x): x is number => x !== null);
+        if (outTokens.length > 0) push(`Token ra của các job hỏng: trung vị ${n(Math.round(percentile(outTokens, 50) ?? 0))} (giới hạn \`ANTHROPIC_MAX_OUTPUT_TOKENS_ENRICH\` mặc định 4.000).`, '');
+        push('Từng từ:', '', ...table(['từ', 'loại từ (Oxford)', 'CEFR', 'luật vi phạm ở bản cuối'], [...distinct].sort().map((w) => [w, (byWord.get(w)?.pos ?? []).join(', '), byWord.get(w)?.cefr ?? '-', [...new Set(events.filter((e) => e.word === w).flatMap((e) => e.issues.map((x) => `${x.code} @ ${x.path}`)))].join('; ') || '-'])), '');
+      }
+      if (!any) push('Không có dòng \`invalid_output\` nào trong log cho các lần gửi này.', '');
+    }
   }
 
   // 3 ─ skipped words
@@ -229,9 +334,9 @@ export async function buildReport(i: ReportInput): Promise<string[]> {
   );
   const notEntries = jobs.filter((j) => !(j.status === 'succeeded' && j.reason === null));
   if (notEntries.length > 0) {
-    push(`**Đã gửi nhưng không thành mục từ mới (${n(notEntries.length)}):**`, '');
-    push(...table(['từ', 'status', 'reason', 'số lần chạy'], notEntries.slice(0, 80).map((j) => [j.word, j.status, j.reason ?? '-', j.attempts])), '');
-    if (notEntries.length > 80) push(`… và ${n(notEntries.length - 80)} từ nữa.`, '');
+    push(`**Đã gửi nhưng không thành mục từ mới (${n(notEntries.length)}), theo job gần nhất của từ:**`, '');
+    push(...table(['từ', 'status', 'reason', 'số lần chạy'], notEntries.slice(0, 200).map((j) => [j.word, j.status, j.reason ?? '-', j.attempts])), '');
+    if (notEntries.length > 200) push(`… và ${n(notEntries.length - 200)} từ nữa.`, '');
   }
 
   // entries created by the run
@@ -408,6 +513,23 @@ export async function buildReport(i: ReportInput): Promise<string[]> {
   else {
     const pick = [...entries].sort((a, b) => stableHash(a.id) - stableHash(b.id)).slice(0, 30);
     push(...table(['từ', 'loại từ', 'CEFR', 'nghĩa (meaning_vi)'], pick.map((e) => [e.headword, (e.pos ?? []).join(', '), e.cefr_level ?? '-', String(e.meaning_vi ?? '').slice(0, 120)])), '');
+  }
+
+  // 10b ─ thirty random entries that pass the bulk-publish rule
+  push('## 10b. 30 mục ngẫu nhiên ĐỦ ĐIỀU KIỆN xuất bản (tiêu chí của nút xuất bản hàng loạt)', '');
+  if (entries.length === 0) push('(chưa có)', '');
+  else {
+    const verdict = await evaluate(i.db, entries.map((e) => ({ id: e.id, headword: e.headword, cefr_level: e.cefr_level, admin_note: e.admin_note })));
+    const eligibleIds = new Set(verdict.eligible.map((e) => e.id));
+    const held = new Map<string, number>();
+    for (const s of verdict.skipped) for (const label of s.reason === 'tier_a_incomplete' ? ['thiếu tầng A'] : [...new Set((s.blocking ?? []).map((b) => b.label))]) held.set(label, (held.get(label) ?? 0) + 1);
+    push(`${n(eligibleIds.size)}/${n(entries.length)} mục từ mới đủ điều kiện (đủ tầng A, không có ghi chú "cần xem"); giữ lại ${n(verdict.skipped.length)} mục, một mục có thể có nhiều lý do: ${pairs([...held.entries()].sort((a, b) => b[1] - a[1]))}. Chưa mục nào được xuất bản.`, '');
+    const pick = entries.filter((e) => eligibleIds.has(e.id)).sort((a, b) => stableHash(`${a.id}pub`) - stableHash(`${b.id}pub`)).slice(0, 30);
+    if (pick.length > 0) {
+      const senses = (await i.db.query(`SELECT entry_id, pos, definition_vi FROM entry_senses WHERE entry_id = ANY($1::uuid[]) ORDER BY entry_id, sense_order`, [pick.map((e) => e.id)])).rows;
+      const meanings = (id: string) => senses.filter((s) => s.entry_id === id).map((s) => `(${s.pos}) ${s.definition_vi}`).join(' · ');
+      push(...table(['từ', 'loại từ', 'CEFR', 'các nghĩa tiếng Việt (mỗi sense một nhóm)'], pick.map((e) => [e.headword, (e.pos ?? []).join(', '), e.cefr_level ?? '-', meanings(e.id)])), '');
+    }
   }
 
   // 11 ─ ten complete entries

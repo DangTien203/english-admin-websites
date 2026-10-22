@@ -59,7 +59,22 @@ export interface EnrichmentOutcome {
   outputTokens?: number | null;
   /** Milliseconds per stage (s0_exists, s1_sources, s1b_lemma_sources, s3_haiku, s5_assemble, s6_persist). */
   stagesMs?: Record<string, number>;
+  /**
+   * Only for failed / invalid_output: WHICH rules the last draft broke (validator code and field path, no text of the draft), and the
+   * rules the first answer broke before the repair. Logged by the worker so that a batch with many invalid_output can be explained.
+   */
+  issues?: OutcomeIssue[];
+  firstIssues?: OutcomeIssue[];
 }
+
+export interface OutcomeIssue {
+  path: string;
+  code: string;
+}
+
+const MAX_OUTCOME_ISSUES = 8;
+const toOutcomeIssues = (list: ReadonlyArray<{ path: string; code: string }> | undefined): OutcomeIssue[] =>
+  (list ?? []).slice(0, MAX_OUTCOME_ISSUES).map((i) => ({ path: String(i.path).slice(0, 80), code: String(i.code).slice(0, 40) }));
 
 export const OUTCOME_STATUSES: readonly EnrichmentOutcomeStatus[] = ['succeeded', 'rejected', 'skipped', 'failed'];
 
@@ -207,7 +222,9 @@ export async function runPipeline(job: EnrichmentJob, deps: PipelineDeps, option
   );
   const tokens = { inputTokens: totalInput(draft.usage), outputTokens: draft.usage.outputTokens, model: draft.model };
 
-  if (isDraftFailure(draft)) return done({ status: 'failed', reason: 'invalid_output', ...tokens }, { bundle: work, draft, formLink });
+  if (isDraftFailure(draft)) {
+    return done({ status: 'failed', reason: 'invalid_output', ...tokens, issues: toOutcomeIssues(draft.details), firstIssues: toOutcomeIssues(draft.firstIssues) }, { bundle: work, draft, formLink });
+  }
   const d = draft.draft;
   if (d.is_proper_noun) return done({ status: 'rejected', reason: 'proper_noun', ...tokens }, { bundle: work, draft, formLink });
   if (!d.is_english_word) return done({ status: 'rejected', reason: 'not_english', ...tokens }, { bundle: work, draft, formLink });
@@ -220,7 +237,10 @@ export async function runPipeline(job: EnrichmentJob, deps: PipelineDeps, option
   // ── S5: merge ──
   const ctx: AssembleContext = { jobId: job.jobRowId, model: draft.model ?? '', publishPolicy: deps.publishPolicy(), topicIds };
   const assembled = await stage('s5_assemble', () => assemble(work, d, ctx));
-  if (assembled.status === 'invalid_output') return done({ status: 'failed', reason: 'invalid_output', ...tokens }, { bundle: work, draft, formLink });
+  if (assembled.status === 'invalid_output') {
+    // not a rule of the validator: the entry could not be assembled (for example no usable meaning_vi)
+    return done({ status: 'failed', reason: 'invalid_output', ...tokens, issues: [{ path: '$', code: 'assemble' }] }, { bundle: work, draft, formLink });
+  }
   const entry = assembled.entry;
 
   if (options.dryRun) {

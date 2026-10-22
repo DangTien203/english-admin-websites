@@ -188,6 +188,13 @@ export interface MoveCardOptions {
    * i.e. it was already reviewed since the caller looked at it.
    */
   expectedTotalReviews?: number | null;
+  /**
+   * Only with `correct = true`: the answer was good enough not to lose the box but not
+   * good enough to leave it (box 4/5 word with exactly one of its two meanings right).
+   * The card stays in its box, the due date is rescheduled with that box's interval and
+   * the correct streak is left untouched.
+   */
+  hold?: boolean;
 }
 
 export async function moveCard(
@@ -215,7 +222,8 @@ export async function moveCard(
   }
 
   const oldBox: number = rows[0].box_number;
-  const newBox = correct ? Math.min(oldBox + 1, 5) : 1;
+  const hold = correct && opts.hold === true;
+  const newBox = hold ? oldBox : correct ? Math.min(oldBox + 1, 5) : 1;
   const nextDueAt = new Date(Date.now() + intervals[newBox - 1] * 24 * 60 * 60 * 1000);
   const masteredNow = newBox === 5 && oldBox < 5;
 
@@ -224,11 +232,13 @@ export async function moveCard(
      SET box_number        = $1,
          due_at            = $2,
          last_reviewed_at  = now(),
-         correct_streak    = CASE WHEN $3 THEN correct_streak + 1 ELSE 0 END,
+         correct_streak    = CASE WHEN $5 THEN correct_streak
+                                  WHEN $3 THEN correct_streak + 1
+                                  ELSE 0 END,
          total_reviews     = total_reviews + 1,
          updated_at        = now()
      WHERE id = $4`,
-    [newBox, nextDueAt, correct, leitnerCardId]
+    [newBox, nextDueAt, correct, leitnerCardId, hold]
   );
 
   await db.query(

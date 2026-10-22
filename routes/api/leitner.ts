@@ -400,7 +400,8 @@ router.post(
 //                                A box 4/5 word appears twice (English meaning, then Vietnamese
 //                                meaning, ≥ 2 other steps in between); other words once.
 //    2. POST /session/answer   → answer the steps in order. A word's box moves once, after its
-//                                last step: up one box if every check was right, else to box 1.
+//                                last step: every check right → up one box; box 4/5 word with
+//                                exactly one meaning right → stays in its box; none right → box 1.
 //    3. POST /session/complete → summary counted per original word (10 words → 10, not 13).
 //    GET  /session/:id         → resume / re-sync.
 // ─────────────────────────────────────────────────────────────────────────────

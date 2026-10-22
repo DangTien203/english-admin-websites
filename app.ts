@@ -9,6 +9,7 @@ import expressLayouts from 'express-ejs-layouts';
 
 import { injectAdmin } from './middlewares/auth';
 import { requireSameOrigin } from './middlewares/sameOrigin';
+import { webOnly } from './middlewares/webOnly';
 import { errorHandler } from './middlewares/errorHandler';
 import pool from './config/db';
 import { drainLookupBackground } from './services/lookup';
@@ -87,23 +88,30 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 // ── Session ──
+// The in-memory store (express-session's default), kept in a constant so tests can count the sessions in it.
+// Web pages only: /api/v1 authenticates with a JWT and must neither create a session nor answer with Set-Cookie.
+export const sessionStore = new session.MemoryStore();
 app.use(
-  session({
-    secret: process.env.SESSION_SECRET || 'fallback-secret-key',
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-      maxAge: 24 * 60 * 60 * 1000,
-      // Not sent on cross-site POST / fetch (CSRF); still sent when an admin follows a link to the dashboard.
-      sameSite: 'lax',
-      // HTTPS only in production (trust proxy above lets express-session see Railway's X-Forwarded-Proto).
-      secure: process.env.NODE_ENV === 'production',
-    },
-  })
+  webOnly(
+    session({
+      store: sessionStore,
+      secret: process.env.SESSION_SECRET || 'fallback-secret-key',
+      resave: false,
+      saveUninitialized: false,
+      cookie: {
+        maxAge: 24 * 60 * 60 * 1000,
+        // Not sent on cross-site POST / fetch (CSRF); still sent when an admin follows a link to the dashboard.
+        sameSite: 'lax',
+        // HTTPS only in production (trust proxy above lets express-session see Railway's X-Forwarded-Proto).
+        secure: process.env.NODE_ENV === 'production',
+      },
+    })
+  )
 );
 
 // ── Flash Messages ──
-app.use(flash());
+// req.flash() writes into the session (flash = {} even when empty), so it is what made every request modify the session: web only.
+app.use(webOnly(flash()));
 
 // ── CSRF: reject cross-site writes on every path that authenticates with the session cookie ──
 // /api/v1/* is left out on purpose (JWT Bearer, no cookie). A new session-authenticated mount below must be added here too.
@@ -115,8 +123,8 @@ app.use(
   requireSameOrigin
 );
 
-// ── Inject Admin Data vào tất cả Views ──
-app.use(injectAdmin);
+// ── Inject Admin Data vào tất cả Views ── (web pages: it reads the session and req.flash, which /api/v1 does not have)
+app.use(webOnly(injectAdmin));
 
 // ── Routes ──
 app.use('/auth', authRoutes);

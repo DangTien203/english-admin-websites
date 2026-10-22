@@ -95,6 +95,23 @@ describe('lifecycle: row → running → result', () => {
     });
   });
 
+  it('a failed / invalid_output logs WHICH validator rules were broken (issues, first_issues); other outcomes add nothing', async () => {
+    const issues = [{ path: 'senses[0].meanings_vi[1]', code: 'parenthesis' }];
+    const first = [{ path: 'senses[1].definition_en', code: 'too_long' }];
+    const { worker } = setup(async () => ({ status: 'failed', reason: 'invalid_output', model: 'haiku', inputTokens: 8400, outputTokens: 400, issues, firstIssues: first }));
+    await worker.handle([job()]);
+    const line = (console.info as jest.Mock).mock.calls.map((c) => JSON.parse(c[0])).find((l) => l.evt === 'enrich');
+    expect(line).toMatchObject({ status: 'failed', reason: 'invalid_output', issues, first_issues: first });
+
+    (console.info as jest.Mock).mockClear();
+    M.markRunning.mockResolvedValue(row({ attempts: 1 }));
+    const ok = setup(async () => ({ status: 'succeeded', entryId: 'entry-1' }));
+    await ok.worker.handle([job()]);
+    const okLine = (console.info as jest.Mock).mock.calls.map((c) => JSON.parse(c[0])).find((l) => l.evt === 'enrich');
+    expect(okLine).not.toHaveProperty('issues');
+    expect(okLine).not.toHaveProperty('first_issues');
+  });
+
   it('only the job data fields reach the pipeline (no personal data)', async () => {
     const { worker, runEnrichment } = setup(async () => ({ status: 'skipped' }));
     await worker.handle([job()]);

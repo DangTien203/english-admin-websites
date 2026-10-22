@@ -29,10 +29,14 @@ export interface SeedArgs {
   confirm: boolean;
   report: boolean;
   allowAuto: boolean;
+  /** send again the words of the latest run whose job did not make an entry */
+  retryLastRun: boolean;
+  /** --report only: report on the runs from this one (1 = the first) onwards */
+  fromRun?: number;
 }
 
 export function parseSeedArgs(argv: string[]): SeedArgs {
-  const args: SeedArgs = { dryRun: false, confirm: false, report: false, allowAuto: false };
+  const args: SeedArgs = { dryRun: false, confirm: false, report: false, allowAuto: false, retryLastRun: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     switch (a) {
@@ -48,6 +52,9 @@ export function parseSeedArgs(argv: string[]): SeedArgs {
       case '--allow-auto':
         args.allowAuto = true;
         break;
+      case '--retry-last-run':
+        args.retryLastRun = true;
+        break;
       case '--file':
       case '--only-cefr':
       case '--worker-log': {
@@ -55,6 +62,12 @@ export function parseSeedArgs(argv: string[]): SeedArgs {
         if (a === '--file') args.file = v;
         else if (a === '--only-cefr') args.onlyCefr = v;
         else args.workerLog = v;
+        break;
+      }
+      case '--from-run': {
+        const n = whole(a, valueOf(argv, i++, a));
+        if (n < 1) throw new Error('--from-run needs a positive number');
+        args.fromRun = n;
         break;
       }
       case '--limit':
@@ -72,6 +85,11 @@ export function parseSeedArgs(argv: string[]): SeedArgs {
   }
   if (args.dryRun && args.confirm) throw new Error('--dry-run and --confirm cannot be used together');
   if (args.report && (args.confirm || args.dryRun)) throw new Error('--report cannot be combined with --confirm or --dry-run (send first, then report)');
+  if (args.fromRun !== undefined && !args.report) throw new Error('--from-run only goes with --report');
+  if (args.retryLastRun && (args.limit !== undefined || args.offset !== undefined || args.sample !== undefined || args.onlyCefr !== undefined)) {
+    throw new Error('--retry-last-run cannot be combined with --limit, --offset, --sample or --only-cefr (it sends the words of the latest run, nothing else)');
+  }
+  if (args.retryLastRun && args.report) throw new Error('--retry-last-run cannot be combined with --report');
   if (args.sample !== undefined && (args.limit !== undefined || args.offset !== undefined)) throw new Error('--sample cannot be combined with --limit or --offset');
   if (args.limit !== undefined && args.limit < 1) throw new Error('--limit needs a positive number');
   if (args.sample !== undefined && args.sample < 1) throw new Error('--sample needs a positive number');
@@ -100,6 +118,7 @@ export function selectionFromArgs(a: SeedArgs): { text: string; options: Selecti
       parts.push(`tối đa ${a.limit} từ`);
     }
   }
+  if (a.retryLastRun) parts.push('gửi lại các từ của lần gửi gần nhất mà job chưa thành mục từ');
   return { text: parts.length > 0 ? parts.join(', ') : 'toàn bộ phần còn lại', options };
 }
 

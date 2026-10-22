@@ -204,6 +204,8 @@ export class EnrichmentWorker {
       stages_ms: outcome.stagesMs ?? null,
       input_tokens: outcome.inputTokens ?? null,
       output_tokens: outcome.outputTokens ?? null,
+      // only an invalid_output carries them: which validator rules the last draft (and the first answer) broke
+      ...(outcome.issues ? { issues: outcome.issues, first_issues: outcome.firstIssues ?? [] } : {}),
     });
   }
 

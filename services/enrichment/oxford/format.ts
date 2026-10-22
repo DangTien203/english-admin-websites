@@ -50,6 +50,12 @@ export function formatPlan(plan: SeedPlan, estimate: Estimate, o: { fileName: st
 
   out.push('');
   out.push(`Lần chạy này (${o.selectionText}): ${count(plan.selected.length)} từ  (${levelCounts(plan.selected)})`);
+  if (plan.retries.length > 0) {
+    const byDetail = new Map<string, number>();
+    for (const r of plan.retries) byDetail.set(r.detail, (byDetail.get(r.detail) ?? 0) + 1);
+    out.push(`  trong đó GỬI LẠI ${count(plan.retries.length)} từ vì job trước chưa thành mục từ: ${[...byDetail.entries()].map(([k, v]) => `${k} ${v}`).join('; ')}`);
+    out.push(`    (${plan.retries.slice(0, 40).map((r) => r.word).join(', ')}${plan.retries.length > 40 ? ', …' : ''})`);
+  }
   const pos = new Map<string, number>();
   for (const w of plan.selected) pos.set(w.primaryPos ?? '(không rõ)', (pos.get(w.primaryPos ?? '(không rõ)') ?? 0) + 1);
   if (pos.size > 0) out.push(`  loại từ: ${[...pos.entries()].sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n}`).join(', ')}`);
@@ -70,7 +76,7 @@ export function formatPlan(plan: SeedPlan, estimate: Estimate, o: { fileName: st
       : 'ƯỚC TÍNH: chưa đủ lịch sử, dùng 0,00085 USD/từ (docs/lookup-runbook.md §10.3)';
   out.push(`  chi phí:   ${usd(estimate.costUsd)}  (${usd(estimate.costPerWordUsd)}/từ; ${costNote}; chưa tính lần thử lại và bảng giá nhập tay phải được xác minh lại)`);
   out.push(
-    `  thời gian: ${formatDuration(estimate.workerSeconds)} cho worker  (${Math.round(estimate.secondsPerWord)} giây/từ ${estimate.timeSource === 'history' ? 'theo trung vị thật' : 'ƯỚC TÍNH'}, đồng thời ${estimate.concurrency}); cộng thời gian gửi vào hàng đợi (khoảng 1 đến 2 giây/từ với DB ở xa)`
+    `  thời gian: ${formatDuration(estimate.workerSeconds)} cho worker  (${estimate.secondsPerWord.toFixed(1)} giây/từ trên đồng hồ treo tường; ${estimate.timeSource === 'history' ? 'theo tốc độ thật của các đợt trước: khoảng cách trung vị giữa hai job xong liên tiếp khi worker bận, ở độ song song của đợt đó' : 'ƯỚC TÍNH: 10 giây công việc mỗi từ chia cho độ song song'}; độ song song hiện tại ${estimate.concurrency}); cộng thời gian gửi vào hàng đợi (khoảng 1 giây/từ với DB ở xa)`
   );
   out.push(
     `  số ngày:   ${Number.isFinite(estimate.days) ? estimate.days : 'không xác định'}  (ENRICHMENT_MAX_JOBS_PER_DAY = ${count(estimate.dailyCap)}, hôm nay (UTC) đã dùng ${count(estimate.usedToday)})`

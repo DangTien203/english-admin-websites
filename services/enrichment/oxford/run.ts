@@ -16,7 +16,7 @@ import { buildSeedPlan, estimateRun, jobsUsedToday, loadHistory, usd, type Query
 import { REPORT_FILE, writeReport } from './report';
 import { parseCefrList } from './selection';
 import { preflight, sendWords, SPEND_CAP_REMINDER, type SendReport, type WorkerInstance } from './send';
-import { addRun, STATE_FILE, type RunRecord } from './state';
+import { addRun, readState, STATE_FILE, type RunRecord } from './state';
 
 export interface SeedDeps {
   db: Queryable;
@@ -43,7 +43,7 @@ export interface SeedDeps {
 }
 
 const USAGE =
-  'usage: npm run enrich:seed-oxford -- --file <oxford_5000.json> [--limit N] [--offset N] [--only-cefr A1,A2] [--sample N] [--dry-run | --confirm | --report [--worker-log <file>]] [--allow-auto]';
+  'usage: npm run enrich:seed-oxford -- --file <oxford_5000.json> [--limit N] [--offset N] [--only-cefr A1,A2] [--sample N] [--retry-last-run] [--dry-run | --confirm | --report [--worker-log <file>] [--from-run N]] [--allow-auto]';
 
 /** 0 ok, 1 refused or failed, 2 wrong usage. */
 export async function runSeed(argv: string[], deps: SeedDeps): Promise<number> {
@@ -70,7 +70,7 @@ export async function runSeed(argv: string[], deps: SeedDeps): Promise<number> {
   const fileName = path.basename(args.file);
 
   if (args.report) {
-    const written = await writeReport({ db: deps.db, refDb: deps.refDb, parsed, fileName, workerLog: args.workerLog, stateFile: deps.stateFile, outFile: deps.reportFile, now: deps.now?.() });
+    const written = await writeReport({ db: deps.db, refDb: deps.refDb, parsed, fileName, workerLog: args.workerLog, stateFile: deps.stateFile, outFile: deps.reportFile, now: deps.now?.(), fromRun: args.fromRun });
     out(`Đã ghi ${deps.reportFile ?? REPORT_FILE} (${written.lines} dòng).`);
     return 0;
   }
@@ -82,7 +82,17 @@ export async function runSeed(argv: string[], deps: SeedDeps): Promise<number> {
     err((e as Error).message);
     return 2;
   }
-  const plan = await buildSeedPlan(deps.db, deps.refDb, parsed, selection.options);
+  let only: Set<string> | undefined;
+  if (args.retryLastRun) {
+    const last = readState(deps.stateFile ?? STATE_FILE).runs.at(-1);
+    if (!last) {
+      err('--retry-last-run: chưa có lần gửi nào được ghi nhận (.oxford-seed.local.json). Gửi trước, rồi mới gửi lại.');
+      return 1;
+    }
+    only = new Set(last.words);
+    out(`Lần gửi gần nhất: ${last.startedAt.slice(0, 19).replace('T', ' ')} UTC, ${last.words.length} từ.`);
+  }
+  const plan = await buildSeedPlan(deps.db, deps.refDb, parsed, selection.options, only);
   const estimate = estimateRun({
     words: plan.selected.length,
     model: deps.config.model,
@@ -121,7 +131,7 @@ export async function runSeed(argv: string[], deps: SeedDeps): Promise<number> {
   const run: RunRecord = {
     startedAt: (deps.now?.() ?? new Date()).toISOString(),
     finishedAt: null,
-    options: { sample: args.sample, limit: args.limit, offset: args.offset, onlyCefr: selection.options.onlyCefr ? [...selection.options.onlyCefr] : undefined },
+    options: { sample: args.sample, limit: args.limit, offset: args.offset, onlyCefr: selection.options.onlyCefr ? [...selection.options.onlyCefr] : undefined, retryLastRun: args.retryLastRun || undefined },
     model: deps.config.model,
     publishPolicy: deps.config.publishPolicy,
     concurrency: deps.config.concurrency,

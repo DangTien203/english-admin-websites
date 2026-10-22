@@ -45,6 +45,8 @@ export interface LookupApp {
   setEnqueuer(enqueuer: EnrichmentEnqueuer): void;
   /** The upstream clients (and their circuit breakers) THIS app uses. */
   upstream(): UpstreamClients;
+  /** How many HTTP sessions THIS app's session store (in memory) holds. */
+  sessionCount(): Promise<number>;
   /** POST /api/v1/ebooks/:id/lookup */
   lookup(word: string, opts?: { token?: string; paragraphId?: string }): Promise<import('supertest').Response>;
   /** Waits for what the service does AFTER an answer (the job send, the word_lookups insert; spec 1.5). */
@@ -144,12 +146,15 @@ export async function bootLookupApp(opts: BootOptions = {}): Promise<LookupApp> 
   let pool!: Pool;
   let lookupModule!: typeof import('../../services/lookup');
   let upstreamModule!: typeof import('../../services/upstream');
+  let sessionStore!: { length(callback: (err: any, length: number) => void): void };
   try {
     jest.isolateModules(() => {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       pool = require('../../config/db');
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      app = require('../../app').default;
+      const appModule = require('../../app');
+      app = appModule.default;
+      sessionStore = appModule.sessionStore;
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       lookupModule = require('../../services/lookup');
       // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -206,6 +211,7 @@ export async function bootLookupApp(opts: BootOptions = {}): Promise<LookupApp> 
     createUser,
     setEnqueuer: (enqueuer) => lookupModule.setEnrichmentEnqueuer(enqueuer),
     upstream: () => upstreamModule.getUpstreamClients(),
+    sessionCount: () => new Promise<number>((resolve, reject) => sessionStore.length((err, n) => (err ? reject(err) : resolve(n)))),
     lookup: (word, o = {}) =>
       supertest(app)
         .post(`/api/v1/ebooks/${ebook.id}/lookup`)

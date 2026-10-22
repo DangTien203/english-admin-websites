@@ -21,8 +21,11 @@ import {
  * words in box 4/5 own two steps — English meaning, then Vietnamese meaning, at
  * least MIN_STEPS_BETWEEN_CHECKS steps apart — every other word owns one.
  * Steps must be answered in order. A word's Leitner box moves exactly once, when
- * its last step is answered: up one box when every check was right, back to
- * box 1 otherwise. Summaries count words, never steps.
+ * its last step is answered:
+ *   every check right          → up one box ("advance")
+ *   box 4/5, exactly one right → stays in its box ("hold")
+ *   no check right             → back to box 1 ("reset")
+ * Summaries count words, never steps.
  */
 
 export class LeitnerSessionError extends Error {
@@ -37,8 +40,13 @@ export class LeitnerSessionError extends Error {
   }
 }
 
+export type WordResult = 'advance' | 'hold' | 'reset';
+
 export interface WordOutcome {
+  /** Every check of the word was right (= result "advance"). */
   correct: boolean;
+  /** Absent on outcomes stored before the "hold" rule existed — use resultOf(). */
+  result?: WordResult;
   /** false → the card was already reviewed elsewhere, so its box was left alone. */
   applied: boolean;
   old_box_number: number;
@@ -324,25 +332,33 @@ export async function getReviewSession(userId: string, sessionId: string) {
 
 // ── answer ───────────────────────────────────────────────────────────────────
 
+function resultOf(outcome: WordOutcome): WordResult {
+  return outcome.result ?? (outcome.correct ? 'advance' : 'reset');
+}
+
 async function finalizeWord(
   db: Queryable,
   userId: string,
   target: StepRow,
   wordSteps: StepRow[]
 ): Promise<WordOutcome> {
-  const correct = wordSteps.every((s) => s.correct === true);
+  const rightChecks = wordSteps.filter((s) => s.correct === true).length;
+  const result: WordResult =
+    rightChecks === wordSteps.length ? 'advance' : rightChecks === 0 ? 'reset' : 'hold';
+  const correct = result === 'advance';
   const totalMs = wordSteps.reduce((sum, s) => sum + (s.time_ms ?? 0), 0);
 
   try {
     const moved = await moveCard(
       target.leitner_card_id,
       userId,
-      correct,
+      result !== 'reset',
       totalMs > 0 ? totalMs : undefined,
-      { db, expectedTotalReviews: target.start_total_reviews }
+      { db, expectedTotalReviews: target.start_total_reviews, hold: result === 'hold' }
     );
     return {
       correct,
+      result,
       applied: true,
       old_box_number: target.start_box,
       new_box_number: moved.newBoxNumber,
@@ -355,6 +371,7 @@ async function finalizeWord(
     if (err.statusCode === 409 || err.statusCode === 404) {
       return {
         correct,
+        result,
         applied: false,
         old_box_number: target.start_box,
         new_box_number: null,
@@ -454,6 +471,7 @@ export async function answerReviewStep(userId: string, input: AnswerStepInput) {
         checks_correct: wordSteps.filter((s) => s.correct).length,
         resolved: outcome !== null,
         correct: outcome ? outcome.correct : null,
+        result: outcome ? resultOf(outcome) : null,
         applied: outcome ? outcome.applied : null,
         new_box_number: outcome ? outcome.new_box_number : null,
         next_due_at: outcome ? outcome.next_due_at : null,
@@ -507,11 +525,17 @@ export async function completeReviewSession(userId: string, sessionId: string) {
 
   const words = rows.map((r: any) => {
     const outcome: WordOutcome | null = r.outcome;
+    const result = outcome ? resultOf(outcome) : null;
     return {
       leitner_card_id: r.leitner_card_id,
       entry_id: r.entry_id,
       headword: r.headword,
-      status: outcome ? (outcome.correct ? 'correct' : 'wrong') : 'skipped',
+      // correct = every check right, partial = box 4/5 word with one meaning right (box kept),
+      // wrong = nothing right (back to box 1), skipped = not all its steps were answered.
+      status: result
+        ? ({ advance: 'correct', hold: 'partial', reset: 'wrong' } as const)[result]
+        : 'skipped',
+      result,
       correct: outcome ? outcome.correct : null,
       checks: { total: r.checks_total, done: r.checks_done, correct: r.checks_correct },
       old_box_number: r.start_box,
@@ -522,14 +546,16 @@ export async function completeReviewSession(userId: string, sessionId: string) {
   });
 
   const correctWords = words.filter((w) => w.status === 'correct').length;
+  const partialWords = words.filter((w) => w.status === 'partial').length;
   const wrongWords = words.filter((w) => w.status === 'wrong').length;
-  const answeredWords = correctWords + wrongWords;
+  const answeredWords = correctWords + partialWords + wrongWords;
 
   return {
     session_id: sessionId,
     summary: {
       total_words: session.total_words,
       correct_words: correctWords,
+      partial_words: partialWords,
       wrong_words: wrongWords,
       skipped_words: words.length - answeredWords,
       accuracy: answeredWords > 0 ? Math.round((correctWords / answeredWords) * 100) / 100 : 0,
