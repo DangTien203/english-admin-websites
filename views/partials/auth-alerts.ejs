@@ -1,0 +1,15 @@
+<%
+  // Flash messages (connect-flash, put in res.locals by injectAdmin) drawn inside the sign-in card.
+  var flashes = [
+    ['error', typeof error !== 'undefined' ? error : [], 'alert-circle'],
+    ['warning', typeof warning !== 'undefined' ? warning : [], 'warning'],
+    ['success', typeof success !== 'undefined' ? success : [], 'check-circle']
+  ];
+%><div class="auth-alerts">
+<% flashes.forEach(function (f) { if (f[1] && f[1].length) { %>
+  <div class="auth-alert auth-alert-<%= f[0] %>" role="<%= f[0] === 'error' ? 'alert' : 'status' %>">
+    <%- include('auth-icon', { name: f[2] }) %>
+    <span><%= [].concat(f[1]).join(' ') %></span>
+  </div>
+<% } }) %>
+</div>

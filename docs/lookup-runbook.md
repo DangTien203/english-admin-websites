@@ -438,7 +438,7 @@ Mục tiêu: mọi từ của danh sách Oxford 5000 chưa có trong từ điể
 | `ENRICHMENT_ENABLED=true` | `--confirm` tự kiểm | Đặt trong môi trường **của lệnh** và của worker. `.env` của dự án đang là `false` |
 | 30 chủ đề trong `tags` | `--confirm` tự kiểm (`loadTopicIds`) | Thiếu thì chạy `docs/seed-topics.sql` |
 | `ENRICHMENT_PUBLISH_POLICY=review` | `--confirm` tự kiểm | `auto` bị từ chối trừ khi có thêm `--allow-auto`. `.env` của dự án đang là `auto`: **ghi đè bằng biến môi trường của lệnh và của worker, không sửa `.env`** |
-| Có đúng một worker, của máy bạn | `--confirm` tự kiểm bảng `pgboss.instance` (không dừng, nhịp tim trong 3 phút) | Có worker của máy khác (kể cả máy chủ triển khai) thì từ chối: worker đó cũng nhận job, với cấu hình và mã của nó |
+| Có đúng một worker, của máy bạn | `--confirm` tự kiểm bảng `pgboss.instance`: chỉ đếm dòng có `name = 'enrichment-worker'`, không dừng, nhịp tim trong 3 phút | Có worker của máy khác thì từ chối: worker đó cũng nhận job, với cấu hình và mã của nó. Dòng `name = 'enrichment-sender'` (máy chủ triển khai chạy `ENRICHMENT_WORKER_ENABLED=false`, hoặc một công cụ dòng lệnh) **chỉ gửi, không nhận job** nên không tính. Trước P11 bộ kiểm tra không lọc theo tên và coi một sender là "worker khác" |
 | So chi phí ước tính với trần chi tiêu hằng tháng của Anthropic | bạn tự làm | Lệnh nhắc trước khi gửi |
 | Bảng giá còn đúng | `services/enrichment/pricing.ts` (`PRICING_CHECKED_ON`) | Là bảng nhập tay, ước tính chứ không phải hóa đơn |
 

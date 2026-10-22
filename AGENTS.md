@@ -139,7 +139,7 @@ No admin credentials are recorded in this repo (not here, not in README.md).
 
 ### Views (EJS + express-ejs-layouts)
 
-- Master layout: `views/layouts/main.ejs` (header, sidebar, footer). All pages inherit.
+- Master layout: `views/layouts/main.ejs` (header, sidebar, footer). All pages inherit, except sign-in / sign-up (`views/auth/*`), which render with `layout: 'layouts/auth'` (split screen; `public/css/auth.css`, `public/js/auth.js`, partials `auth-*.ejs`). Admin e-mails are matched trimmed and case-insensitively (`normalizeEmail` in `authController`, `LOWER(email)` in `Admin.findByEmail`).
 - `res.locals.admin` available in every view (set by `injectAdmin`).
 - Flash messages via `connect-flash` (`success`, `error`, `warning`).
 - Folder structure mirrors web routes: `views/{auth,dashboard,approvals,users,profile,dictionary,lessons,decks,ebooks,subscriptions,settings,games,ai-content}/...` plus `views/partials/` (sidebar, header, pagination).

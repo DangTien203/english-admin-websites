@@ -11,6 +11,7 @@ import { PgBossEnrichmentEnqueuer } from '../../services/queue/pgBossEnqueuer';
 import { runSeed, type SeedDeps } from '../../services/enrichment/oxford/run';
 import { classifyWords, buildSeedPlan } from '../../services/enrichment/oxford/plan';
 import { liveWorkers, preflight, sendWords, type WorkerInstance } from '../../services/enrichment/oxford/send';
+import { buildBossOptions, SENDER_INSTANCE_NAME, WORKER_INSTANCE_NAME } from '../../services/queue/boss';
 import { parseOxford } from '../../services/enrichment/oxford/list';
 import { readState } from '../../services/enrichment/oxford/state';
 import { BEGIN_MARK, END_MARK } from '../../services/enrichment/oxford/report';
@@ -400,11 +401,23 @@ describe('sending and the worker list in isolation', () => {
     expect(calls[0].sql).toMatch(/FROM "pgboss"\.instance/);
     expect(calls[0].sql).toMatch(/stopped_on IS NULL/);
     expect(calls[0].sql).toMatch(/heartbeat_on > now\(\)/);
-    expect(calls[0].params).toEqual([120]);
+    expect(calls[0].sql).toMatch(/name = \$2/); // only instances that take jobs: a sender (the API server of a deployment) takes none
+    expect(calls[0].params).toEqual([120, 'enrichment-worker']);
+    expect(WORKER_INSTANCE_NAME).toBe(buildBossOptions({ schema: 'pgboss' } as any, 'worker', {}).instanceName);
+    expect(SENDER_INSTANCE_NAME).toBe(buildBossOptions({ schema: 'pgboss' } as any, 'sender', {}).instanceName);
+    expect(SENDER_INSTANCE_NAME).not.toBe(WORKER_INSTANCE_NAME);
     await expect(liveWorkers(fake, 'pg"boss; drop table x')).rejects.toThrow(/plain identifier/);
     // and the real table answers (every worker recorded in it is old or stopped, or it is one of this machine's)
     const real = await liveWorkers(pool as any, 'pgboss');
     expect(Array.isArray(real)).toBe(true);
+    // against the real table, with a window long enough to take in every row ever written: senders are in it and are left out
+    const names = (await pool.query(`SELECT DISTINCT name FROM pgboss.instance`)).rows.map((r) => r.name);
+    const everyone = await liveWorkers(pool as any, 'pgboss', 315_000_000);
+    expect(everyone.every((w) => w.name === 'enrichment-worker')).toBe(true);
+    if (names.includes('enrichment-sender') && names.includes('enrichment-worker')) {
+      const stopped = (await pool.query(`SELECT count(*)::int AS n FROM pgboss.instance WHERE name = 'enrichment-worker' AND stopped_on IS NULL`)).rows[0].n;
+      expect(everyone).toHaveLength(stopped);
+    }
   });
 
   it('preflight reports every check, not just the first failure', async () => {

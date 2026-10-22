@@ -45,13 +45,17 @@ function connectionFromAppPool(): ConstructorOptions {
   return out;
 }
 
+/** `pgboss.instance.name` of a process that TAKES jobs, and of one that only SENDS them (the API server of a deployment). */
+export const WORKER_INSTANCE_NAME = 'enrichment-worker';
+export const SENDER_INSTANCE_NAME = 'enrichment-sender';
+
 export function buildBossOptions(settings: QueueSettings, role: BossRole, connection: ConstructorOptions = connectionFromAppPool()): ConstructorOptions {
   return {
     ...connection,
     schema: settings.schema,
     max: settings.poolMax,
     application_name: role === 'worker' ? 'wordygo-enrichment-worker' : 'wordygo-enrichment-sender',
-    instanceName: role === 'worker' ? 'enrichment-worker' : 'enrichment-sender',
+    instanceName: role === 'worker' ? WORKER_INSTANCE_NAME : SENDER_INSTANCE_NAME,
     supervise: role === 'worker',
     schedule: role === 'worker',
   };

@@ -1,25 +1,49 @@
-<div class="auth-card">
-  <div class="auth-header">
-    <div class="auth-logo">E</div>
-    <h1>English Admin</h1>
-    <p>Đăng nhập vào bảng điều khiển</p>
+<div class="auth-panel">
+  <div class="auth-mobile-brand">
+    <span class="auth-logo-mark">E</span>
+    <span class="auth-brand-name">English Admin</span>
   </div>
 
-  <form action="/auth/login" method="POST" class="auth-form">
-    <div class="form-group">
+  <header class="auth-heading">
+    <h1>Chào mừng trở lại</h1>
+    <p>Đăng nhập để vào bảng điều khiển quản trị.</p>
+  </header>
+
+  <%- include('../partials/auth-alerts') %>
+
+  <form action="/auth/login" method="POST" class="auth-form" data-auth-form>
+    <div class="field">
       <label for="email">Email</label>
-      <input type="email" id="email" name="email" placeholder="admin@english-app.com" required autofocus>
+      <div class="input-wrap">
+        <span class="input-icon"><%- include('../partials/auth-icon', { name: 'mail' }) %></span>
+        <input type="email" id="email" name="email" value="<%= email %>" placeholder="email@english-app.com"
+               autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="email"
+               required <%= email ? '' : 'autofocus' %> data-normalize-email>
+      </div>
     </div>
 
-    <div class="form-group">
+    <div class="field">
       <label for="password">Mật khẩu</label>
-      <input type="password" id="password" name="password" placeholder="Nhập mật khẩu" required>
+      <div class="input-wrap input-wrap-toggle">
+        <span class="input-icon"><%- include('../partials/auth-icon', { name: 'lock' }) %></span>
+        <input type="password" id="password" name="password" placeholder="Nhập mật khẩu"
+               autocomplete="current-password" required <%= email ? 'autofocus' : '' %> data-caps-lock="caps-hint">
+        <button type="button" class="toggle-password" data-toggle-password="password" aria-label="Hiện mật khẩu" aria-pressed="false">
+          <span class="icon-show"><%- include('../partials/auth-icon', { name: 'eye' }) %></span>
+          <span class="icon-hide"><%- include('../partials/auth-icon', { name: 'eye-off' }) %></span>
+        </button>
+      </div>
+      <p class="field-hint field-hint-warn" id="caps-hint" role="status" hidden>Caps Lock đang bật.</p>
     </div>
 
-    <button type="submit" class="btn btn-primary btn-full">Đăng nhập</button>
+    <button type="submit" class="auth-submit">
+      <span class="auth-submit-label">Đăng nhập</span>
+      <span class="auth-spinner" aria-hidden="true"></span>
+    </button>
   </form>
 
-  <div class="auth-footer">
-    <a href="/auth/register">Tạo tài khoản admin mới</a>
-  </div>
+  <footer class="auth-footer">
+    <p>Chưa có tài khoản? <a href="/auth/register">Tạo tài khoản admin</a></p>
+    <p class="auth-footer-note">Quên mật khẩu? Liên hệ Super Admin để được hỗ trợ.</p>
+  </footer>
 </div>

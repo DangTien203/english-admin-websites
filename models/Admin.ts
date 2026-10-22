@@ -1,9 +1,10 @@
 import pool from '../config/db';
 
 const Admin = {
+  /** Case-insensitive: accounts are stored in lower case, but "Name@Example.com" is the same address. */
   async findByEmail(email: string) {
     const { rows } = await pool.query(
-      'SELECT * FROM admin_accounts WHERE email = $1',
+      'SELECT * FROM admin_accounts WHERE LOWER(email) = LOWER($1)',
       [email]
     );
     return rows[0] || null;

@@ -4,6 +4,7 @@
  * file only decides WHEN to send and WHEN to stop.
  */
 import type { EnrichmentEnqueuer } from '../../lookup/enqueuer';
+import { WORKER_INSTANCE_NAME } from '../../queue/boss';
 import type { Queryable } from './plan';
 
 export interface Check {
@@ -41,13 +42,17 @@ export interface WorkerInstance {
 
 const IDENT = /^[a-z_][a-z0-9_]{0,62}$/i;
 
-/** pg-boss workers that are alive: not stopped, and a heartbeat inside the window. */
-export async function liveWorkers(db: Queryable, schema: string, windowSeconds = 180): Promise<WorkerInstance[]> {
+/**
+ * pg-boss processes that TAKE jobs and are alive: an instance named `enrichment-worker` (WORKER_INSTANCE_NAME), not stopped, with a heartbeat
+ * inside the window. A process that only SENDS jobs (`enrichment-sender`: the API server of a deployment, a command-line tool) is in the same
+ * table but takes nothing, so it is not counted: counting it made a healthy deployment look like a second worker.
+ */
+export async function liveWorkers(db: Queryable, schema: string, windowSeconds = 180, instanceName: string = WORKER_INSTANCE_NAME): Promise<WorkerInstance[]> {
   if (!IDENT.test(schema)) throw new Error('PGBOSS_SCHEMA is not a plain identifier');
   const { rows } = await db.query(
     `SELECT name, host, pid, started_on, heartbeat_on FROM "${schema}".instance
-      WHERE stopped_on IS NULL AND heartbeat_on > now() - ($1::int * interval '1 second') ORDER BY started_on DESC`,
-    [windowSeconds]
+      WHERE name = $2 AND stopped_on IS NULL AND heartbeat_on > now() - ($1::int * interval '1 second') ORDER BY started_on DESC`,
+    [windowSeconds, instanceName]
   );
   return rows;
 }
