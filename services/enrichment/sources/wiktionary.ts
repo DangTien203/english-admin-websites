@@ -1,6 +1,7 @@
 import { isNonStandardSense, targetsOf } from '../../lookup/wiktionaryTags';
 import { tagsForLemma } from '../../lookup/localLookup';
 import type { Db, WiktionaryRow } from '../types';
+import { isLowercaseHeadword } from '../../../utils/headword';
 
 /**
  * Local Wiktionary reference data (ref_wiktionary_en) for the enrichment job: reading the rows, deciding what
@@ -14,7 +15,6 @@ import type { Db, WiktionaryRow } from '../types';
  *   - Misspellings carry the tag "misspelling" and an alt_of target in the sense (recieve → receive).
  */
 
-const SINGLE_WORD = /^[a-z]+(?:['-][a-z]+)*$/;
 const ABBREVIATION_TAGS = new Set(['abbreviation', 'initialism', 'acronym']);
 
 /**
@@ -91,7 +91,7 @@ export const isNameRow = (row: WiktionaryRow): boolean => row.pos === 'name';
 /** An inflected / alternative form of ONE single-word lemma (never a phrase, never a name or an abbreviation). */
 export const isFormRow = (word: string, row: WiktionaryRow): boolean =>
   typeof row.lemma_of === 'string' &&
-  SINGLE_WORD.test(row.lemma_of) &&
+  isLowercaseHeadword(row.lemma_of) &&
   row.lemma_of !== word &&
   !isNameRow(row) &&
   !isAbbreviationRow(row) &&

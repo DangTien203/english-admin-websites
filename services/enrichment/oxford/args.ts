@@ -2,6 +2,7 @@
  * Command-line parsing of the three Oxford tools. Strict: an option that is not known is an error, so a typo of --confirm never runs as
  * something else. Pure (tests/enrichment/oxfordArgs.test.ts).
  */
+import { BLOCKING_REVIEW_NOTE_CATEGORIES, type ReviewNoteCategoryId } from '../../lookup/reviewNotes';
 import { DEFAULT_PUBLISH_LIMIT } from './publish';
 import { parseCefrList, type SelectionOptions } from './selection';
 
@@ -142,16 +143,35 @@ export interface PublishArgs {
   limit: number;
   dryRun: boolean;
   confirm: boolean;
+  /** "needs a look" categories of Haiku's notes that the caller accepts: an entry held back ONLY by these is published too */
+  acceptNotes: ReviewNoteCategoryId[];
+}
+
+/**
+ * --accept-notes meaning_doubt,validator_flag  (or: all). Only the categories that hold an entry back can be named: accepting a light
+ * category would mean nothing, and a typo must never be read as "accept nothing" or "accept everything".
+ */
+export function parseAcceptNotes(value: string): ReviewNoteCategoryId[] {
+  const names = [...new Set(value.split(',').map((s) => s.trim()).filter(Boolean))];
+  if (names.length === 0) throw new Error('--accept-notes needs at least one category');
+  if (names.includes('all')) {
+    if (names.length > 1) throw new Error('--accept-notes: "all" cannot be combined with other categories');
+    return [...BLOCKING_REVIEW_NOTE_CATEGORIES];
+  }
+  const unknown = names.filter((n) => !(BLOCKING_REVIEW_NOTE_CATEGORIES as readonly string[]).includes(n));
+  if (unknown.length > 0) throw new Error(`--accept-notes: unknown category ${unknown.join(', ')} (allowed: ${BLOCKING_REVIEW_NOTE_CATEGORIES.join(', ')}, or all)`);
+  return names as ReviewNoteCategoryId[];
 }
 
 export function parsePublishArgs(argv: string[]): PublishArgs {
-  const out: PublishArgs = { limit: DEFAULT_PUBLISH_LIMIT, dryRun: false, confirm: false };
+  const out: PublishArgs = { limit: DEFAULT_PUBLISH_LIMIT, dryRun: false, confirm: false, acceptNotes: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--dry-run') out.dryRun = true;
     else if (a === '--confirm') out.confirm = true;
     else if (a === '--cefr') out.cefr = valueOf(argv, i++, a);
     else if (a === '--limit') out.limit = whole(a, valueOf(argv, i++, a));
+    else if (a === '--accept-notes') out.acceptNotes = parseAcceptNotes(valueOf(argv, i++, a));
     else throw new Error(`Unknown option: ${a}`);
   }
   if (out.dryRun && out.confirm) throw new Error('--dry-run and --confirm cannot be used together');

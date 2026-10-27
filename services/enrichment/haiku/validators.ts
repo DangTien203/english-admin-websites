@@ -1,5 +1,6 @@
 import type { z } from 'zod';
 import { isTopicName } from '../topics';
+import { isLowercaseHeadword } from '../../../utils/headword';
 import { LIMITS, type Draft, type Sense } from './schema';
 
 /**
@@ -36,7 +37,6 @@ export const MEANING_MAX_CHARS = 40;
 export const MEANING_MAX_SYLLABLES = 6;
 export const DEFINITION_MAX_WORDS = 25;
 
-const LEMMA_FORMAT = /^[a-z]+(?:['-][a-z]+)*$/;
 /** CJK radicals and symbols, kana, bopomofo, hangul, ideographs, compatibility ideographs, full-width forms. */
 const CJK = /[\u2E80-\u2FDF\u3000-\u30FF\u3100-\u312F\u3130-\u318F\u31A0-\u31FF\u3400-\u9FFF\uA960-\uA97F\uAC00-\uD7FF\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFFEF]/;
 const PAREN = /[()（）]/;
@@ -122,7 +122,7 @@ export function validateDraft(input: Draft, ctx: ValidationContext): ValidationR
   if (isReal) {
     if (!headword) issue('headword', 'empty', 'headword is empty');
     if (!lemma) issue('lemma', 'empty', 'lemma is empty');
-    else if (!LEMMA_FORMAT.test(lemma)) issue('lemma', 'format', `lemma "${lemma}" must be a single lowercase word (letters, with an apostrophe or hyphen between letters)`);
+    else if (!isLowercaseHeadword(lemma)) issue('lemma', 'format', `lemma "${lemma}" must be a single lowercase word (letters, with an apostrophe or hyphen between letters)`);
     if (headword && lemma && headword.toLowerCase() !== lemma) {
       issue('headword', 'headword_lemma', `headword "${headword}" must be the display form of lemma "${lemma}" (same letters, only the letter case may differ)`);
     }

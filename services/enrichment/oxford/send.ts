@@ -123,23 +123,60 @@ export interface SendReport {
   stoppedBy: 'daily_cap' | 'disabled' | 'errors' | null;
 }
 
+/** Errors that fail at once and leave nothing half done (the transaction is rolled back): worth trying the same word again. */
+export const TRANSIENT_CONNECTION_ERROR = /ECONNRESET|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|EPIPE|Connection terminated|57P01|57P03/i;
+
+export class EnqueueTimeoutError extends Error {
+  constructor(ms: number) {
+    super(`enqueue timed out after ${ms} ms (a connection that no longer answers)`);
+    this.name = 'EnqueueTimeoutError';
+  }
+}
+
 export interface SendOptions {
   /** stop after this many errors in a row (a broken queue or database) */
   maxConsecutiveErrors?: number;
+  /** one word must be sent within this time, otherwise it counts as an error and the run goes on to the next word (default 45 s) */
+  perWordTimeoutMs?: number;
+  /** how many more times a word that failed with a connection error is tried, with 1 s, 2 s… of waiting (default 2) */
+  connectionRetries?: number;
+  /** waiting before a retry, multiplied by the number of the retry (tests use 0) */
+  retryDelayMs?: number;
   onProgress?: (done: number, total: number, report: SendReport) => void;
   progressEvery?: number;
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const limit = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new EnqueueTimeoutError(ms)), ms);
+  });
+  return Promise.race([promise, limit]).finally(() => timer && clearTimeout(timer));
 }
 
 export async function sendWords(enqueuer: EnrichmentEnqueuer, words: readonly string[], opts: SendOptions = {}): Promise<SendReport> {
   const maxErrors = opts.maxConsecutiveErrors ?? 3;
   const every = opts.progressEvery ?? 25;
+  const timeoutMs = opts.perWordTimeoutMs ?? 45_000;
+  const retries = opts.connectionRetries ?? 2;
+  const retryDelay = opts.retryDelayMs ?? 1000;
   const report: SendReport = { queued: [], alreadyQueued: [], skipped: [], errors: [], notAttempted: [], stoppedBy: null };
   let consecutive = 0;
 
   for (let i = 0; i < words.length; i++) {
     const word = words[i];
     try {
-      const info = await enqueuer.enqueue({ word, requestedBy: null, ebookId: null });
+      let info;
+      for (let attempt = 0; ; attempt++) {
+        try {
+          info = await withTimeout(enqueuer.enqueue({ word, requestedBy: null, ebookId: null }), timeoutMs);
+          break;
+        } catch (err) {
+          // a timeout is NOT retried: the first attempt may still hold its row on a connection that is dead but not yet closed
+          if (attempt >= retries || err instanceof EnqueueTimeoutError || !TRANSIENT_CONNECTION_ERROR.test(String((err as Error)?.message ?? err))) throw err;
+          if (retryDelay > 0) await new Promise((r) => setTimeout(r, retryDelay * (attempt + 1)));
+        }
+      }
       consecutive = 0;
       if (info.status === 'queued') report.queued.push(word);
       else if (info.status === 'already_queued') report.alreadyQueued.push(word);

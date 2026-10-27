@@ -25,6 +25,7 @@ npm test              # jest (sequential, maxWorkers=1, forceExit, real PG)
 npm test -- tests/auth.test.ts           # single file
 npm test -- -t "login happy path"        # by test name
 npm run test:watch
+npm run clean:test-data   # fixtures that killed / timed-out test runs leave in the shared DB (qzq… words, test accounts, "E2E ebook …"); dry run unless -- --confirm; only rows older than --older-than 60 minutes, so a run in progress is spared
 npm run test:chaos    # fault-injection scenarios (breaker, 429, budgets, killed connections / processes); slow, NOT part of npm test — docs/lookup-chaos.md
 npm run mock:upstream # local fake Google / Free Dictionary / Datamuse (127.0.0.1, dev and tests only) — docs/lookup-loadtest.md
 npm run loadtest:lookup  # burst load test of POST /api/v1/ebooks/:id/lookup (single-flight, per-user limit, latency, heap)
@@ -39,7 +40,7 @@ npm run acceptance:lookup -- --staging  # 30-word acceptance run against a runni
 # Oxford 5000 seeding (docs/lookup-runbook.md §13): dry run by default; --confirm sends; needs ENRICHMENT_ENABLED=true, ENRICHMENT_PUBLISH_POLICY=review (override in the command, never edit .env) and ONE worker of your machine
 npm run enrich:seed-oxford -- --file <oxford_5000.json> [--sample N | --limit N --offset N] [--only-cefr A1,A2] [--retry-last-run] [--confirm | --report [--from-run N]]
 npm run oxford:apply-cefr -- --file <oxford_5000.json> [--dry-run]   # cefr_level of [auto] entries from the lowest Oxford level; APPLIES unless --dry-run
-npm run enrich:publish -- [--cefr A1,A2] [--limit 500] [--confirm]   # bulk-publish rule of /lookup/review from the command line; dry run by default
+npm run enrich:publish -- [--cefr A1,A2] [--limit 500] [--accept-notes meaning_doubt,validator_flag,…|all] [--confirm]   # bulk-publish rule of /lookup/review from the command line; dry run by default; --accept-notes = a person has read those categories of blocking notes (history line says which); flags need the `--` after the script name
 
 npm run db:migrate    # run all 32 migrations (idempotent, tracked in schema_migrations)
 npm run admin:create -- --email <e> --name <n>   # insert ONE super_admin; random password printed once (or ADMIN_PASSWORD from the environment); never deletes, refuses an existing e-mail
@@ -60,7 +61,7 @@ Tests require `JWT_SECRET` in `.env` — `tests/setup.ts` throws otherwise. Test
 ### Mount order (app.ts)
 
 1. Session (`express-session`, in-memory store exported as `sessionStore`), `connect-flash` and `injectAdmin` run on **web requests only**: `webOnly(...)` (`middlewares/webOnly.ts`) skips them for `/api/*`, so `/api/v1` (JWT) never creates a session nor sets `connect.sid` (`tests/e2e/apiNoSession.test.ts`). `injectAdmin` loads admin from session, populates `res.locals.admin`, and for super_admin fetches pending-approvals + pending-transactions counts for sidebar badges. **Don't add expensive queries here.** A new session-authenticated route must live outside `/api`.
-2. **Web routes** (`/auth`, `/dashboard`, `/approvals`, `/users`, `/profile`, `/dictionary`, `/lessons`, `/decks`, `/ebooks`, `/subscriptions`, `/settings`, `/games`, `/ai-content`, `/lookup`).
+2. **Web routes** (`/auth`, `/dashboard`, `/approvals`, `/users`, `/admins`, `/profile`, `/dictionary`, `/lessons`, `/decks`, `/ebooks`, `/subscriptions`, `/settings`, `/games`, `/ai-content`, `/lookup`).
 3. **API routes** (`/api/v1/...`) — see "API surface" below.
 4. **Catch-all** `/api/v1` cards mount must come **after** all specific `/api/v1/*` mounts (currently last, line ~142). Adding a new API resource? Mount it before the cards line.
 5. `/api/*` 404 returns JSON via `apiError`. Web 404 renders `views/404.ejs`.
@@ -115,6 +116,7 @@ Railway (`railway.json`): build `npm run build`, start `node dist/database/migra
 | `/dashboard` | `routes/dashboard.ts` → `dashboardController` | any admin | stats: users, admins, dictionary entries, lessons; admin list |
 | `/approvals` | `routes/approvals.ts` → `approvalController` | super_admin | pending approval queue, approve/reject with note |
 | `/users` | `routes/users.ts` → `userController` | super_admin, moderator | mobile user CRUD, status toggle (active/inactive/banned) |
+| `/admins` | `routes/admins.ts` → `adminController` | super_admin | edit the OTHER admin accounts: name, e-mail, role, status (active/disabled), password reset. Own account → redirected to `/profile`; the last active super admin cannot be demoted/disabled; every change is written to `audit_logs`; role/status/e-mail/password changes end the target's sessions (`utils/adminSessions.ts`) |
 | `/profile` | `routes/profile.ts` → `profileController` | any admin | admin profile edit, avatar upload, password change, delete account |
 | `/dictionary` | `routes/dictionary.ts` → `dictionaryController` | super_admin, moderator | dictionary entry CRUD, tag list, missing-IPA count, JSON import |
 | `/lessons` | `routes/lessons.ts` → `lessonController` | super_admin, moderator | lesson CRUD, attach/detach entries, status toggle |
@@ -138,6 +140,7 @@ Railway (`railway.json`): build `npm run build`, start `node dist/database/migra
 | `/lookup` writes (send words, retry, publish, hide, bulk publish, edit the Vietnamese of a sense) | ✅ | ❌ (403) | ✅ |
 | Set `published` in the entry editor and on create (`POST /dictionary/:id/edit`, `POST /dictionary/create`; for other roles the value is ignored and logged as `forbidden`, and a moderator's new entry is always created hidden) | ✅ | ❌ | ✅ |
 | Users CRUD | ✅ | ✅ | ❌ |
+| Edit other admin accounts (`/admins`: role, status, e-mail, password) | ✅ | ❌ | ❌ |
 | Approvals (queue, approve/reject) | ✅ | ❌ | ❌ |
 | Subscriptions (plans, payment methods, transactions) | ✅ | ❌ | ❌ |
 | Sidebar pending counts (approvals + transactions) | ✅ | ❌ | ❌ |
@@ -157,7 +160,7 @@ No admin credentials are recorded in this repo (not here, not in README.md).
 - Master layout: `views/layouts/main.ejs` (header, sidebar, footer). All pages inherit, except sign-in / sign-up (`views/auth/*`), which render with `layout: 'layouts/auth'` (split screen; `public/css/auth.css`, `public/js/auth.js`, partials `auth-*.ejs`). Admin e-mails are matched trimmed and case-insensitively (`normalizeEmail` in `authController`, `LOWER(email)` in `Admin.findByEmail`).
 - `res.locals.admin` available in every view (set by `injectAdmin`).
 - Flash messages via `connect-flash` (`success`, `error`, `warning`).
-- Folder structure mirrors web routes: `views/{auth,dashboard,approvals,users,profile,dictionary,lessons,decks,ebooks,subscriptions,settings,games,ai-content,lookup}/...` plus `views/partials/` (sidebar, header, pagination).
+- Folder structure mirrors web routes: `views/{auth,dashboard,approvals,users,admins,profile,dictionary,lessons,decks,ebooks,subscriptions,settings,games,ai-content,lookup}/...` plus `views/partials/` (sidebar, header, pagination).
 
 ---
 
@@ -173,7 +176,7 @@ Order in `app.ts` matters — specific mounts before the broad cards mount.
 | `/api/v1/decks` | `routes/api/decks.ts` | `requireApiAuth` | GET `/system`, `/mine`, `/:id`; POST `/create` (gated by `requireFeature('flashcard_max_decks')`); PATCH `/:id`, DELETE `/:id`; POST `/:id/favorite/toggle`, `/:id/cards`, DELETE `/:id/cards/:entryId`. Ownership gate on writes. |
 | `/api/v1/cards` | `routes/api/cards.ts` | `requireApiAuth` (broad mount) | GET/POST/DELETE under broad `/api/v1` prefix — **must mount last**. |
 | `/api/v1/review` | `routes/api/review.ts` | `requireApiAuth` | Legacy review endpoints (swift-choice, cloze). Kept for older client builds; new clients use `/practice`. |
-| `/api/v1/leitner` | `routes/api/leitner.ts` | `requireApiAuth` | GET `/overview` (box distribution + retention), GET `/question` (swift-choice / cloze / pair-link), POST `/answer`, POST `/batch-add`. SRS box transitions in `utils/leitnerManager.ts`. Review sessions (`/session/start|answer|complete`, GET `/session/:id`; `services/leitnerSessionService.ts`, step ordering in `utils/leitnerReviewQueue.ts`): box 4/5 words are checked on both English and Vietnamese meaning, ≥2 steps apart (both right → next box, exactly one right → box kept, none → box 1); summary counts original words; `/session/start` takes optional `box_number` (1–5) to study one box on demand. `POST /review` is box 1–3 only (409 `REVIEW_SESSION_REQUIRED` otherwise). |
+| `/api/v1/leitner` | `routes/api/leitner.ts` | `requireApiAuth` | GET `/overview` (box distribution + retention), GET `/question` (swift-choice / cloze / pair-link), POST `/answer`, POST `/batch-add`. SRS box transitions in `utils/leitnerManager.ts`. Review sessions (`/session/start|answer|complete`, GET `/session/:id`; `services/leitnerSessionService.ts`, step ordering in `utils/leitnerReviewQueue.ts`): box 4/5 words are checked on both English and Vietnamese meaning, ≥2 steps apart (both right → next box, exactly one right → box kept, none → box 1); summary counts original words; `/session/start` takes optional `box_number` (1–5) to review only the DUE words of that box (words that are not due are never offered); `GET /box/:n` returns `due_count`. `POST /review` is box 1–3 only (409 `REVIEW_SESSION_REQUIRED` otherwise). |
 | `/api/v1/practice` | `routes/api/practice.ts` | `requireApiAuth` | POST `/session/start`, `/session/:id/question`, `/session/:id/answer`, `/session/:id/complete`. Modes: flashcard, swift-choice, cloze, pair-link. Tracks practice sessions + answers; updates streak. |
 | `/api/v1/subscriptions` | `routes/api/subscriptions.ts` | none (per-route) | GET `/plans` (public, 5-min in-memory cache), GET `/plans/:id`, GET `/:userId/active`, POST `/initiate` (transaction creation). |
 | `/api/v1/retrieval` | `routes/api/retrieval.ts` | `requireApiAuth` + `requireFeature('retrieval_practice_daily')` on POST | POST `/start`, `/sentence`, `/answer`, `/complete`. AI sentence grading via OpenAI; word translation fallback via Claude. |
@@ -203,6 +206,7 @@ Order in `app.ts` matters — specific mounts before the broad cards mount.
 | `authController.ts` | `/auth` | login (email lowercase + bcrypt), register (disabled in UI), logout |
 | `dashboardController.ts` | `/dashboard` | aggregate counts, admin list |
 | `userController.ts` | `/users` | mobile user CRUD with paginated filters, status toggle |
+| `adminController.ts` | `/admins` | super_admin edits other admin accounts (list, edit form, save; sessions of the edited admin are ended) |
 | `profileController.ts` | `/profile` | admin profile edit, avatar upload, password change, soft-delete |
 | `dictionaryController.ts` | `/dictionary` | entry CRUD, tag aggregation, missing-IPA count, JSON bulk import |
 | `lessonController.ts` | `/lessons` | lesson CRUD, attach/detach entries via `lesson_entries` |
@@ -275,6 +279,8 @@ External integrations and reusable workflows.
 | `paymentMethodValidator.ts` | Per-type config validation for payment methods |
 | `paragraphSegmenter.ts` | Text → paragraph boundaries (used by ebook ingest) |
 | `safeResponse.ts` | `s/n/b/a` — null-safe coercion helpers for response shaping |
+| `answerLanguage.ts` | `looksVietnamese`, `stripDiacritics` — deterministic "is this answer Vietnamese?" used by the English-meaning check (box 4/5): a Vietnamese answer to an English check is wrong, decided before the cache and before OpenAI |
+| `headword.ts` | `isHeadword`, `isLowercaseHeadword`, `headwordProblem`, `HEADWORD_MAX_LENGTH` — the ONE rule for a single-word headword: letters (any case), hyphen or apostrophe only between letters (full-time, T-shirt, o'clock), no digits or spaces, max 50. Used by `normalizeWord` and the enrichment validators; do not write another pattern (`tests/lookup/headword.test.ts` scans for one) |
 
 ### Helpers (`helpers/`)
 
@@ -325,7 +331,7 @@ The runner uses opaque `key` strings — **do not rename keys post-deploy**. New
 | 29 | `29_answer_grading` | `entry_answer_aliases, answer_semantic_cache` + grading columns on `practice_answers` |
 | 30 | `30_answer_cache_lang` | `answer_semantic_cache.lang` (vi/en) + unique `(entry_id, lang, normalized_answer)` |
 | 31 | `31_leitner_review_sessions` | `leitner_review_sessions, leitner_review_steps` (box 4/5 dual-meaning checks) |
-| 32 | `32_leitner_session_box` | `leitner_review_sessions.box_number` (study one box), `leitner_review_steps.start_total_reviews` (reviewed-elsewhere guard) |
+| 32 | `32_leitner_session_box` | `leitner_review_sessions.box_number` (review the due words of one box), `leitner_review_steps.start_total_reviews` (reviewed-elsewhere guard) |
 
 ### Schema by domain
 
@@ -408,6 +414,7 @@ Real PostgreSQL, sequential (`maxWorkers: 1`). Cleanup via DELETE WHERE email LI
 | `notifications.test.ts` | listing, mark read, delete |
 | `retrieval.test.ts` | start/sentence/answer flow, feature gating |
 | `admin/lookupAdmin*.test.ts`, `admin/dictionaryEditor.test.ts` | the `/lookup` admin: roles (session login per role via `/auth/login`), jobs, retry, review / publish / hide / bulk publish (+ `entry_edit_history`), health, missing words, `admin_action` log, rendered pages; the dictionary editor's `published` checkbox. Real PG, fake enqueuer (one suite uses real pg-boss in its own schema) |
+| `admin/adminAccounts.test.ts` | `/admins`: role gate, edit name/role/status/e-mail, password reset, audit row, sessions ended, own account, last super admin, cross-site POST |
 | `word-translation.test.ts` | Claude translation cache hit/miss |
 | `paragraphSegmenter.test.ts` | text → paragraph boundary unit tests |
 

@@ -1,4 +1,5 @@
 import { normalizeVietnameseAnswer } from '../../utils/answerNormalizer';
+import { isLowercaseHeadword } from '../../utils/headword';
 import type { FormType } from '../lookup/localLookup';
 import { NON_STANDARD_TAGS } from '../lookup/wiktionaryTags';
 import { REGISTER_VALUES, type Draft, type PosValue } from './haiku/schema';
@@ -574,15 +575,13 @@ export function mergeRelated(wiktionary: readonly string[], haiku: readonly stri
 
 // ── word families ────────────────────────────────────────────────────────────────────────────────────────────────
 
-const SINGLE_WORD = /^[a-z]+(?:['-][a-z]+)*$/;
-
 function familyWordsOf(rows: readonly WiktionaryRow[], lemma: string): string[] {
   const out: string[] = [];
   for (const row of rows) {
     for (const key of ['derived', 'related']) {
       for (const w of wordList(row.data?.[key])) {
         const word = lower(w);
-        if (SINGLE_WORD.test(word) && word !== lemma && !out.includes(word)) out.push(word);
+        if (isLowercaseHeadword(word) && word !== lemma && !out.includes(word)) out.push(word);
         if (out.length >= FAMILY_CANDIDATES_MAX) return out;
       }
     }

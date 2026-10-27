@@ -487,7 +487,7 @@ All Leitner endpoints are mounted behind `requireApiAuth`.
 - Auth: Auth
 - Path: `box_number` must be 1-5
 - Query: `page?`, `limit?`
-- Returns: cards in a specific Leitner box.
+- Returns: `{ box_number, items, total, due_count, page, limit }` - cards in a specific Leitner box. `total` = all cards in the box, `due_count` = the ones due now (the words "Ôn tập các từ đến hạn" of this box can use).
 - Errors: `400 INVALID_BOX_NUMBER`
 
 ### `POST /api/v1/leitner/review`
@@ -517,10 +517,10 @@ If a session has fewer than 3 words and contains a box 4/5 word, the gap cannot 
 - Body: `{ limit?: 1-100, box_number?: 1-5 }`
   - `limit`: number of **words** (default 20), not steps. The server takes the first `limit` cards by `due_at` (most overdue / closest to due first), then shuffles them.
   - `box_number` omitted: **"Review due now"** - due cards only.
-  - `box_number` 1-5: **study one box on demand** - cards of that box, due or not (closest to due first). Same rules apply: box 1-3 = one Vietnamese check per word; box 4/5 = English + Vietnamese check per word (2 steps, summary still 1 word; both right -> next box, exactly one right -> stays in the same box, both wrong -> box 1). If the box has fewer than `limit` cards, all of them are used. "All cards" in a box = `limit: min(cards in box, 100)`; per-box counts come from `GET /leitner/overview` (`boxes[].total_cards`).
+  - `box_number` 1-5: **review the due words of one box** - ONLY cards of that box that are due now (most overdue first); words that are not due yet are never included, so words just promoted out of the previous box cannot be reviewed again in the next one. Same rules apply: box 1-3 = one Vietnamese check per word; box 4/5 = English + Vietnamese check per word (2 steps, summary still 1 word; both right -> next box, exactly one right -> stays in the same box, both wrong -> box 1). If fewer than `limit` words are due, all of them are used (e.g. 3 due words -> 3 words, even if the client asked for 10). "All due words" of a box = `limit: min(due words in box, 100)`; the number of due words comes from `GET /leitner/box/:n` (`due_count`) or `GET /leitner/overview` (`boxes[].due_today`).
   - Box 4/5 with fewer than 3 words cannot keep the 2-step gap between the two checks; they are then spread as far apart as possible.
 - Returns: `{ session_id, box_number (null for "due now"), total_words, total_steps, completed, min_steps_between_checks, progress, steps }`; each step: `{ step_index, leitner_card_id, entry_id, check: "en"|"vi", check_number, checks_total, box_number, typed_answer_required, answered, correct, entry }`. `entry` never contains the meaning.
-- Errors: `400 NO_DUE_CARDS` (due-now session), `400 NO_CARDS_IN_BOX` (`details.box_number`)
+- Errors: `400 NO_DUE_CARDS` - nothing is due; for a box session `error.details.box_number` names the box.
 
 #### `POST /api/v1/leitner/session/answer`
 
@@ -528,6 +528,7 @@ If a session has fewer than 3 words and contains a box 4/5 word, the gap cannot 
 - Body: `{ session_id, step_index, user_answer?, correct?, time_ms? }` (one of `user_answer` / `correct`; `user_answer` max 500 chars)
   - `user_answer` is the meaning asked by the step's `check`; the server grades it.
   - `correct` (client-graded, e.g. swift-choice) is only accepted for single-check words (`typed_answer_required: false`).
+- English check (`check: "en"`): the answer must be written in **English**. A Vietnamese answer (with or without diacritics, or the entry's own Vietnamese meaning) is graded wrong without any model call (`grading_source: "deterministic_miss"`, `reason_vi` asks for English). The same rule applies to `user_answer_en` in `/practice/session/answer`.
 - Steps must be answered **in order** (`step_index` = `progress.next_step_index`).
 - Behavior: a word's Leitner box moves **once**, when its last step is answered (`word.result`):
   - `advance`: every check right (box 4/5: English **and** Vietnamese) -> up one box (box 5 stays 5).

@@ -44,7 +44,8 @@
     "test:chaos": "jest --config jest.chaos.config.js",
     "mock:upstream": "tsx scripts/mock-upstream/server.ts",
     "loadtest:lookup": "tsx --expose-gc scripts/loadtest/lookup-burst.ts",
-    "health:snapshot": "tsx scripts/health-snapshot.ts"
+    "health:snapshot": "tsx scripts/health-snapshot.ts",
+    "clean:test-data": "tsx scripts/dev/clean-test-data.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",

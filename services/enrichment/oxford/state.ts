@@ -55,6 +55,18 @@ export function addRun(run: RunRecord, file: string = STATE_FILE): void {
   writeState(state, file);
 }
 
+/**
+ * Writes the record of a run that is still going: replaces the record with the same startedAt, or adds it. Called before the first word is
+ * sent and every few words, so a run that dies in the middle (a dropped network, a killed process) still has the words it sent on record.
+ */
+export function saveRun(run: RunRecord, file: string = STATE_FILE): void {
+  const state = readState(file);
+  const at = state.runs.findIndex((r) => r.startedAt === run.startedAt);
+  if (at >= 0) state.runs[at] = run;
+  else state.runs.push(run);
+  writeState(state, file);
+}
+
 /** Every word sent by any run, once. */
 export function allSentWords(state: SeedState): string[] {
   return [...new Set(state.runs.flatMap((r) => r.words))];

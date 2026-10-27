@@ -15,8 +15,8 @@ import { CLI_PUBLISH_VALUE, planPublish, publishSelected, type Connectable as Pu
 import { buildSeedPlan, estimateRun, jobsUsedToday, loadHistory, usd, type Queryable } from './plan';
 import { REPORT_FILE, writeReport } from './report';
 import { parseCefrList } from './selection';
-import { preflight, sendWords, SPEND_CAP_REMINDER, type SendReport, type WorkerInstance } from './send';
-import { addRun, readState, STATE_FILE, type RunRecord } from './state';
+import { preflight, sendWords, SPEND_CAP_REMINDER, type SendOptions, type SendReport, type WorkerInstance } from './send';
+import { readState, saveRun, STATE_FILE, type RunRecord } from './state';
 
 export interface SeedDeps {
   db: Queryable;
@@ -33,6 +33,8 @@ export interface SeedDeps {
   loadTopics: () => Promise<unknown>;
   /** Tests give their own list of live workers; the real tool reads the pg-boss `instance` table. */
   listWorkers?: () => Promise<WorkerInstance[]>;
+  /** Time limit and retries of the sending loop (tests make them small). */
+  sendOptions?: Pick<SendOptions, 'perWordTimeoutMs' | 'connectionRetries' | 'retryDelayMs' | 'maxConsecutiveErrors'>;
   /** Called only after every check passed, just before the first word is sent. */
   createEnqueuer: () => Promise<EnrichmentEnqueuer>;
   out: (line: string) => void;
@@ -149,21 +151,33 @@ export async function runSeed(argv: string[], deps: SeedDeps): Promise<number> {
   };
 
   out(`Bắt đầu gửi ${plan.selected.length} từ (DB ${mb(before.dbBytes)} trước khi gửi)…`);
+  const stateFile = deps.stateFile ?? STATE_FILE;
+  // the record exists BEFORE the first word is sent and follows the run, so a run that dies in the middle still has its words on record
+  saveRun(run, stateFile);
   const started = Date.now();
   let report: SendReport;
   try {
     const enqueuer = await deps.createEnqueuer();
     report = await sendWords(enqueuer, plan.selected.map((w) => w.word), {
-      onProgress: (done, total, r) => out(`  ${done}/${total} — mới ${r.queued.length}, đã có job ${r.alreadyQueued.length}, bỏ qua ${r.skipped.length}, lỗi ${r.errors.length}`),
+      progressEvery: 10,
+      ...deps.sendOptions,
+      onProgress: (done, total, r) => {
+        run.words = [...r.queued, ...r.alreadyQueued];
+        saveRun(run, stateFile);
+        if (done % 25 === 0 || done === total) out(`  ${done}/${total} — mới ${r.queued.length}, đã có job ${r.alreadyQueued.length}, bỏ qua ${r.skipped.length}, lỗi ${r.errors.length}`);
+      },
     });
   } catch (e) {
+    run.finishedAt = (deps.now?.() ?? new Date()).toISOString();
+    run.stoppedBy = 'error';
+    saveRun(run, stateFile);
     err(`Không khởi động được hàng đợi: ${(e as Error).message}`);
     return 1;
   }
   run.words = [...report.queued, ...report.alreadyQueued];
   run.finishedAt = (deps.now?.() ?? new Date()).toISOString();
   run.stoppedBy = report.stoppedBy;
-  addRun(run, deps.stateFile ?? STATE_FILE);
+  saveRun(run, stateFile);
 
   out('');
   out(`Xong sau ${Math.round((Date.now() - started) / 1000)} giây.`);
@@ -247,11 +261,11 @@ export async function runPublish(argv: string[], deps: PublishDeps): Promise<num
   try {
     args = parsePublishArgs(argv);
   } catch (e) {
-    err(`${(e as Error).message}\nusage: npm run enrich:publish -- [--cefr A1,A2] [--limit 500] [--dry-run | --confirm]`);
+    err(`${(e as Error).message}\nusage: npm run enrich:publish -- [--cefr A1,A2] [--limit 500] [--accept-notes meaning_doubt,validator_flag,… | all] [--dry-run | --confirm]`);
     return 2;
   }
   const cefr = args.cefr ? parseCefrList(args.cefr) : undefined;
-  const plan = await planPublish(deps.db, { cefr, limit: args.limit });
+  const plan = await planPublish(deps.db, { cefr, limit: args.limit, accept: args.acceptNotes });
 
   const byReason = new Map<string, number>();
   for (const s of plan.skipped) byReason.set(s.reason, (byReason.get(s.reason) ?? 0) + 1);
@@ -261,6 +275,10 @@ export async function runPublish(argv: string[], deps: PublishDeps): Promise<num
   out(`Mục từ [auto] chưa xuất bản${cefr ? ` (mức ${cefr.join(', ')})` : ''}: ${plan.candidates}`);
   out(`  đủ điều kiện xuất bản hàng loạt: ${plan.eligible.length}`);
   out(`  giữ lại: thiếu tầng A ${byReason.get('tier_a_incomplete') ?? 0} · có ghi chú cần xem ${byReason.get('has_review_notes') ?? 0}`);
+  if (args.acceptNotes.length > 0) {
+    const throughNotes = plan.eligible.filter((e) => e.accepted);
+    out(`  chấp nhận ghi chú nhóm ${args.acceptNotes.join(', ')}: ${throughNotes.length} trong số mục đủ điều kiện có ghi chú cần xem đã được chấp nhận`);
+  }
   for (const [label, n] of [...byCategory.entries()].sort((a, b) => b[1] - a[1])) out(`      ghi chú "${label}": ${n}`);
   out(`Lần này (--limit ${args.limit}): ${plan.selected.length} mục từ`);
   for (const e of plan.selected.slice(0, 40)) out(`  ${(e.cefr_level ?? '-').padEnd(3)} ${e.headword}`);
@@ -270,7 +288,7 @@ export async function runPublish(argv: string[], deps: PublishDeps): Promise<num
     out('\nCHƯA XUẤT BẢN GÌ (chạy thử). Để xuất bản thật: thêm --confirm.');
     return 0;
   }
-  const result = await publishSelected(deps.source, plan.selected);
+  const result = await publishSelected(deps.source, plan.selected, { accept: args.acceptNotes });
   out('');
   out(`ĐÃ XUẤT BẢN ${result.published.length} mục từ (mỗi mục một dòng entry_edit_history, new_value "${CLI_PUBLISH_VALUE}").`);
   if (result.dropped.length > 0) out(`  bỏ ${result.dropped.length} mục từ vì đã đổi giữa lúc lập kế hoạch và lúc ghi: ${result.dropped.map((d) => d.headword).join(', ')}`);

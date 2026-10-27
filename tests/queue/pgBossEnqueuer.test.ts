@@ -27,7 +27,15 @@ beforeEach(() => {
 afterEach(() => jest.restoreAllMocks());
 
 describe('a) word cleaning', () => {
-  it.each(['', '   ', '12345', 'two words', 'a'.repeat(51), 'café!?', '<script>'])(
+  it.each(['full-time', 'T-shirt', 'well-being', "o'clock", 'good-for-nothing'])('queues the hyphenated / apostrophe word %j (valid headword), lower-cased', async (word) => {
+    const t = build();
+    await expect(t.enqueuer.enqueue({ ...input, word })).resolves.toEqual(expect.objectContaining({ status: 'queued' }));
+    const [, data, options] = t.send.mock.calls[0];
+    expect((data as any).word).toBe(word.toLowerCase());
+    expect(options?.singletonKey).toBe(word.toLowerCase());
+  });
+
+  it.each(['', '   ', '12345', 'two words', 'a'.repeat(51), 'café!?', '<script>', '-abc', 'abc-', 'a--b', 'ice cream', 'abc123'])(
     'rejects %j as invalid_word without touching anything',
     async (word) => {
       const t = build();

@@ -13,7 +13,7 @@ import { classifyWords, buildSeedPlan } from '../../services/enrichment/oxford/p
 import { liveWorkers, preflight, sendWords, type WorkerInstance } from '../../services/enrichment/oxford/send';
 import { buildBossOptions, SENDER_INSTANCE_NAME, WORKER_INSTANCE_NAME } from '../../services/queue/boss';
 import { parseOxford } from '../../services/enrichment/oxford/list';
-import { readState } from '../../services/enrichment/oxford/state';
+import { readState, saveRun } from '../../services/enrichment/oxford/state';
 import { BEGIN_MARK, END_MARK } from '../../services/enrichment/oxford/report';
 import { RUN, cleanup, createEntry, fixtureWord } from '../helpers/lookupAdminFixtures';
 
@@ -139,7 +139,7 @@ describe('the dry run (the default)', () => {
     h.deps.now = () => new Date('2099-01-01T12:00:00Z');
     await runSeed(['--file', file], h.deps);
     expect(h.text()).toMatch(/chi phí: +\$[\d.]+/);
-    expect(h.text()).toMatch(/trung bình thật của \d+ job|ƯỚC TÍNH/);
+    expect(h.text()).toMatch(/trung bình thật của [\d,.]+ job|ƯỚC TÍNH/); // the count has a thousands separator once the table holds 1,000+ jobs
     expect(h.text()).toMatch(/thời gian: /);
     expect(h.text()).toMatch(/số ngày: +1 +\(ENRICHMENT_MAX_JOBS_PER_DAY = 500/);
   });
@@ -148,7 +148,7 @@ describe('the dry run (the default)', () => {
 // ═════════════════════════════════════════════════════════════════════════════
 describe('who is left out, and why', () => {
   it('an entry (published or not), a word form, a queued job and a closed earlier outcome are left out; a job that may pass is not', async () => {
-    const tags = ['exEntryPub', 'exEntryHid', 'exForm', 'exQueued', 'exRejected', 'exVariant', 'exInvalid', 'exUpstream', 'exSucceeded', 'exFree'];
+    const tags = ['exEntryPub', 'exEntryHid', 'exForm', 'exQueued', 'exRejected', 'exVariant', 'exInvalid', 'exUpstream', 'exSucceeded', 'exMadeAs', 'exFoundAs', 'exFree'];
     const file = oxfordFile('classify', tags.map((t) => [t, 'A1', 'noun'] as [string, string, string]));
     const entryPub = await createEntry({ tag: L('exEntryPub'), published: true });
     await createEntry({ tag: L('exEntryHid'), published: false });
@@ -162,6 +162,11 @@ describe('who is left out, and why', () => {
     await job('exInvalid', 'failed', 'invalid_output');
     await job('exUpstream', 'failed', 'upstream_error');
     await job('exSucceeded', 'succeeded', null); // its entry was deleted since: the word is eligible again
+    // the model filed these under another spelling ("judgement" → "judgment"): the job's own entry is alive, so the word is done
+    const spelled = await createEntry({ tag: 'exOtherSpelling', published: false });
+    for (const [tag, status, reason] of [['exMadeAs', 'succeeded', null], ['exFoundAs', 'skipped', 'exists']] as const) {
+      await pool.query(`INSERT INTO word_enrichment_jobs (word, status, reason, entry_id, finished_at) VALUES ($1, $2::varchar, $3, $4, NOW())`, [word(tag), status, reason, spelled]);
+    }
 
     const parsed = parseOxford(JSON.parse(fs.readFileSync(file, 'utf8')));
     const { eligible, excluded } = await classifyWords(pool as any, parsed.words);
@@ -174,6 +179,8 @@ describe('who is left out, and why', () => {
       [word('exRejected')]: 'done_before',
       [word('exVariant')]: 'done_before',
       [word('exInvalid')]: 'done_before',
+      [word('exMadeAs')]: 'done_before',
+      [word('exFoundAs')]: 'done_before',
     });
     expect(eligible.map((w) => w.word).sort()).toEqual([word('exFree'), word('exSucceeded'), word('exUpstream')].sort());
   });
@@ -649,9 +656,17 @@ describe('--report scoped to the runs from N', () => {
     expect(text).toMatch(/\| noun \| 2 \| 1 \| 50\.0% \|/);
     // eligible for the bulk publish: sc2 only (sc4 has a blocking note, sc3 has no entry, sc1 is not in the scope)
     expect(text).toContain('## 10b.');
-    expect(text).toContain('1/2 mục từ mới đủ điều kiện');
+    expect(text).toContain('1/2 mục từ mới còn chờ duyệt đủ điều kiện');
+    expect(text).toContain('Chưa mục nào được xuất bản.');
     expect(text).toContain(word('sc2'));
     expect(text).not.toMatch(new RegExp(`\\| ${word('sc4')} \\|.*\\(noun\\)`));
+
+    // an entry that an admin published by hand since the run no longer counts as waiting
+    await pool.query(`UPDATE dictionary_entries SET published = TRUE WHERE id = $1`, [e4]);
+    expect(await runSeed(['--file', file, '--report', '--from-run', '2', '--worker-log', log], h.deps)).toBe(0);
+    const later = fs.readFileSync(target, 'utf8');
+    expect(later).toContain('1/1 mục từ mới còn chờ duyệt đủ điều kiện');
+    expect(later).toContain('1 mục đã được xuất bản bằng tay');
 
     // without --from-run it covers every run, with --from-run 3 there is nothing
     expect(await runSeed(['--file', file, '--report', '--worker-log', log], h.deps)).toBe(0);
@@ -665,6 +680,88 @@ describe('--report scoped to the runs from N', () => {
     const h = harness();
     expect(await runSeed(['--file', file, '--from-run', '2'], h.deps)).toBe(2);
     expect(h.err.join('\n')).toContain('--from-run only goes with --report');
+  });
+});
+
+describe('a send that meets a bad network', () => {
+  const ok = { status: 'queued' as const };
+  const fast = { perWordTimeoutMs: 40, retryDelayMs: 0 };
+
+  it('a word that never answers does not hang the run: it is an error after the time limit, and three in a row stop the run', async () => {
+    let calls = 0;
+    const enqueuer = { enqueue: jest.fn((): Promise<any> => (++calls <= 2 ? Promise.resolve(ok) : new Promise(() => undefined))) };
+    const r = await sendWords(enqueuer, ['a', 'b', 'c', 'd', 'e', 'f', 'g'], fast);
+    expect(r.queued).toEqual(['a', 'b']);
+    expect(r.errors.map((e) => e.word)).toEqual(['c', 'd', 'e']);
+    expect(r.errors[0].error).toContain('timed out');
+    expect(r.stoppedBy).toBe('errors');
+    expect(r.notAttempted).toEqual(['f', 'g']);
+  });
+
+  it('a timeout is NOT tried again (the first attempt may still hold its row on a dead connection)', async () => {
+    const enqueuer = { enqueue: jest.fn((): Promise<any> => new Promise(() => undefined)) };
+    await sendWords(enqueuer, ['a'], { ...fast, maxConsecutiveErrors: 1 });
+    expect(enqueuer.enqueue).toHaveBeenCalledTimes(1);
+  });
+
+  it('a connection error that fails at once is tried again, twice at most, then it is an error', async () => {
+    const flaky = { enqueue: jest.fn() as any };
+    flaky.enqueue.mockRejectedValueOnce(new Error('read ECONNRESET')).mockRejectedValueOnce(new Error('getaddrinfo ENOTFOUND host')).mockResolvedValue(ok);
+    const r = await sendWords(flaky, ['a', 'b'], fast);
+    expect(r.queued).toEqual(['a', 'b']);
+    expect(flaky.enqueue).toHaveBeenCalledTimes(4); // a: 3 attempts, b: 1
+
+    const dead = { enqueue: jest.fn(async () => { throw new Error('read ECONNRESET'); }) };
+    const d = await sendWords(dead, ['a'], { ...fast, maxConsecutiveErrors: 5 });
+    expect(dead.enqueue).toHaveBeenCalledTimes(3);
+    expect(d.errors).toHaveLength(1);
+  });
+
+  it('any other error (a bug, a constraint) is not retried', async () => {
+    const broken = { enqueue: jest.fn(async () => { throw new Error('duplicate key value violates unique constraint'); }) };
+    await sendWords(broken, ['a'], { ...fast, maxConsecutiveErrors: 5 });
+    expect(broken.enqueue).toHaveBeenCalledTimes(1);
+  });
+
+  it('the record of the run exists BEFORE the first word is sent and follows it, so a run that dies in the middle keeps the words it sent', async () => {
+    const tags = ['durA', 'durB', 'durC', 'durD', 'durE'];
+    const file = oxfordFile('durable', tags.map((t) => [t, 'A1', 'noun'] as [string, string, string]));
+    const ranks = Object.fromEntries(tags.map((t, i) => [word(t), i + 1]));
+    const h = harness({ ranks });
+    const real = new PgBossEnrichmentEnqueuer({ pool: pool as any, getBoss: async () => h.boss, maxJobsPerDay: 500, usageProvider: `${PROVIDER}-durable` });
+    let seenBefore: any;
+    h.deps.createEnqueuer = jest.fn(async () => {
+      seenBefore = readState(h.stateFile).runs.at(-1); // what is on disk when the queue is opened
+      let n = 0;
+      return { enqueue: (input: any) => (++n <= 2 ? real.enqueue(input) : new Promise<any>(() => undefined)) };
+    }) as any;
+    h.deps.sendOptions = { perWordTimeoutMs: 8000, retryDelayMs: 0, maxConsecutiveErrors: 1 }; // real enqueues take about a second against the remote database
+
+    expect(await runSeed(['--file', file, '--confirm'], h.deps)).toBe(0);
+    expect(seenBefore).toMatchObject({ words: [], finishedAt: null });
+
+    const run = readState(h.stateFile).runs.at(-1)!;
+    expect(run.words).toEqual([word('durA'), word('durB')]); // the two that were sent
+    expect(run.stoppedBy).toBe('errors');
+    expect(run.finishedAt).not.toBeNull();
+    expect(readState(h.stateFile).runs).toHaveLength(1); // one record, updated — not one per update
+  });
+
+  it('a run that cannot even open the queue leaves a record that says so', async () => {
+    const file = oxfordFile('noqueue', [['nq1', 'A1', 'noun']]);
+    const h = harness();
+    h.deps.createEnqueuer = jest.fn(async () => { throw new Error('queue is down'); }) as any;
+    expect(await runSeed(['--file', file, '--confirm'], h.deps)).toBe(1);
+    expect(readState(h.stateFile).runs.at(-1)).toMatchObject({ words: [], stoppedBy: 'error' });
+  });
+
+  it('saveRun replaces the record with the same start time and adds a new one otherwise', () => {
+    const f = path.join(TMP, 'saverun.json');
+    const base = { startedAt: '2026-01-01T00:00:00.000Z', finishedAt: null, options: {}, model: 'm', publishPolicy: 'review', concurrency: 2, words: [], stoppedBy: null, before: { dbBytes: 1, anthropicInputTokens: 0, anthropicOutputTokens: 0, tableBytes: 1 }, estimate: { words: 1, costUsd: 0, costSource: 'default', secondsPerWord: 1, workerSeconds: 1, days: 1 } };
+    saveRun(base, f);
+    saveRun({ ...base, words: ['x'] }, f);
+    saveRun({ ...base, startedAt: '2026-01-02T00:00:00.000Z', words: ['y'] }, f);
+    expect(readState(f).runs.map((r) => [r.startedAt.slice(0, 10), r.words])).toEqual([['2026-01-01', ['x']], ['2026-01-02', ['y']]]);
   });
 });
 

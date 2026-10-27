@@ -1,6 +1,7 @@
 import { Pool } from 'pg';
 import dotenv from 'dotenv';
 import { attachPoolErrorHandlers } from './poolErrors';
+import { KEEP_ALIVE } from './keepAlive';
 
 dotenv.config();
 
@@ -15,6 +16,7 @@ if (dbUrl && (dbUrl.startsWith('postgresql://') || dbUrl.startsWith('postgres://
     ssl: process.env.NODE_ENV === 'production'
       ? { rejectUnauthorized: false }
       : false,
+    ...KEEP_ALIVE,
   });
 } else {
   // Local dev: dùng biến riêng lẻ
@@ -24,6 +26,7 @@ if (dbUrl && (dbUrl.startsWith('postgresql://') || dbUrl.startsWith('postgres://
     database: process.env.DB_NAME || 'english_learning_app',
     user: process.env.DB_USER || 'postgres',
     password: process.env.DB_PASSWORD || '',
+    ...KEEP_ALIVE,
   });
 }
 

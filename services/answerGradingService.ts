@@ -1,4 +1,5 @@
 import pool from '../config/db';
+import { looksVietnamese, stripDiacritics } from '../utils/answerLanguage';
 import { normalizeEnglishAnswer, normalizeVietnameseAnswer } from '../utils/answerNormalizer';
 import {
   buildAnswerCandidates,
@@ -218,6 +219,15 @@ async function gradeEntryEnglishMeaning(
     };
   }
 
+  // The answer must be ENGLISH. Checked before the cache and the paid model: a Vietnamese translation of the word is not what was
+  // asked, however correct it is (the model would call it correct — it only sees that the meaning matches).
+  if (looksVietnamese(userAnswer) || (await isVietnameseMeaning(entry, userAnswer))) {
+    return {
+      ...miss('Đang kiểm tra nghĩa tiếng Anh: hãy trả lời bằng tiếng Anh, không phải tiếng Việt.'),
+      details: { normalized_user_answer: normalizedUserAnswer, wrong_language: 'vi' },
+    };
+  }
+
   return gradeSemantic({
     entry,
     lang: 'en',
@@ -225,6 +235,23 @@ async function gradeEntryEnglishMeaning(
     normalizedUserAnswer,
     referenceAnswers,
   });
+}
+
+/**
+ * Is the answer one of the entry's Vietnamese meanings, typed with or without diacritics ("mau nau" for "màu nâu")? Text without any
+ * diacritics cannot be recognised as Vietnamese by its letters alone (utils/answerLanguage.ts).
+ */
+async function isVietnameseMeaning(entry: EntryForCard, userAnswer: string): Promise<boolean> {
+  const target = stripDiacritics(normalizeVietnameseAnswer(userAnswer));
+  if (!target) return false;
+
+  const [senseDefinitions, aliases] = await Promise.all([
+    fetchSenseDefinitions(entry.entry_id),
+    fetchActiveAliases(entry.entry_id),
+  ]);
+  return buildAnswerCandidates({ meaningVi: entry.meaning_vi, senseDefinitions, aliases }).some(
+    (candidate) => stripDiacritics(candidate.normalized) === target
+  );
 }
 
 /** Cache → OpenAI fallback shared by the Vietnamese and English meaning checks. */

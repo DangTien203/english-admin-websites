@@ -519,12 +519,16 @@ export async function buildReport(i: ReportInput): Promise<string[]> {
   push('## 10b. 30 mục ngẫu nhiên ĐỦ ĐIỀU KIỆN xuất bản (tiêu chí của nút xuất bản hàng loạt)', '');
   if (entries.length === 0) push('(chưa có)', '');
   else {
-    const verdict = await evaluate(i.db, entries.map((e) => ({ id: e.id, headword: e.headword, cefr_level: e.cefr_level, admin_note: e.admin_note })));
+    // only entries still waiting: an admin may have published some from /lookup/review since the run
+    const waiting = entries.filter((e) => !e.published);
+    const verdict = await evaluate(i.db, waiting.map((e) => ({ id: e.id, headword: e.headword, cefr_level: e.cefr_level, admin_note: e.admin_note })));
     const eligibleIds = new Set(verdict.eligible.map((e) => e.id));
     const held = new Map<string, number>();
     for (const s of verdict.skipped) for (const label of s.reason === 'tier_a_incomplete' ? ['thiếu tầng A'] : [...new Set((s.blocking ?? []).map((b) => b.label))]) held.set(label, (held.get(label) ?? 0) + 1);
-    push(`${n(eligibleIds.size)}/${n(entries.length)} mục từ mới đủ điều kiện (đủ tầng A, không có ghi chú "cần xem"); giữ lại ${n(verdict.skipped.length)} mục, một mục có thể có nhiều lý do: ${pairs([...held.entries()].sort((a, b) => b[1] - a[1]))}. Chưa mục nào được xuất bản.`, '');
-    const pick = entries.filter((e) => eligibleIds.has(e.id)).sort((a, b) => stableHash(`${a.id}pub`) - stableHash(`${b.id}pub`)).slice(0, 30);
+    const published = entries.length - waiting.length;
+    const publishedNote = published === 0 ? 'Chưa mục nào được xuất bản.' : `${n(published)} mục đã được xuất bản bằng tay ở giao diện (không phải do công cụ này) và không tính ở đây.`;
+    push(`${n(eligibleIds.size)}/${n(waiting.length)} mục từ mới còn chờ duyệt đủ điều kiện (đủ tầng A, không có ghi chú "cần xem"); giữ lại ${n(verdict.skipped.length)} mục, một mục có thể có nhiều lý do: ${pairs([...held.entries()].sort((a, b) => b[1] - a[1]))}. ${publishedNote}`, '');
+    const pick = waiting.filter((e) => eligibleIds.has(e.id)).sort((a, b) => stableHash(`${a.id}pub`) - stableHash(`${b.id}pub`)).slice(0, 30);
     if (pick.length > 0) {
       const senses = (await i.db.query(`SELECT entry_id, pos, definition_vi FROM entry_senses WHERE entry_id = ANY($1::uuid[]) ORDER BY entry_id, sense_order`, [pick.map((e) => e.id)])).rows;
       const meanings = (id: string) => senses.filter((s) => s.entry_id === id).map((s) => `(${s.pos}) ${s.definition_vi}`).join(' · ');

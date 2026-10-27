@@ -8,10 +8,14 @@
  * two answers agree.
  *
  * Every published entry gets an entry_edit_history line: field_name = 'published', admin_id NULL, old_value 'false', new_value 'true (cli)'.
+ *
+ * --accept-notes: the caller may accept whole categories of "needs a look" notes (a person has read them). An entry whose blocking notes
+ * are ALL in the accepted categories is published, and its history line says which ones it went through with:
+ * 'true (cli, accepted: meaning_doubt,validator_flag)'. Tier A is never waived, and a note of a category that was not named still holds.
  */
 import { tierAFactsFor } from '../../../models/AutoEntry';
 import { tierAMissing } from '../../lookup/adminRules';
-import { blockingReviewNotes, type ClassifiedNote } from '../../lookup/reviewNotes';
+import { blockingReviewNotes, type ClassifiedNote, type ReviewNoteCategoryId } from '../../lookup/reviewNotes';
 import { AUTO_NOTE_PREFIX, parseAutoNote } from '../../../utils/autoEntryNote';
 import type { Cefr } from './list';
 import type { Queryable } from './plan';
@@ -25,6 +29,13 @@ export interface PublishCandidate {
   headword: string;
   cefr_level: string | null;
   admin_note: string | null;
+  /** only set when the entry has blocking notes that the caller accepted: their categories */
+  accepted?: ReviewNoteCategoryId[];
+}
+
+/** The value of the history line: 'true (cli)', or 'true (cli, accepted: <categories>)' when notes were accepted for the entry. */
+export function publishedValue(accepted?: readonly string[]): string {
+  return accepted && accepted.length > 0 ? `true (cli, accepted: ${[...accepted].sort().join(',')})` : CLI_PUBLISH_VALUE;
 }
 
 export interface PublishSkip {
@@ -49,7 +60,12 @@ const CHUNK = 1000;
 const LEVEL_ORDER_SQL = `CASE cefr_level WHEN 'A1' THEN 1 WHEN 'A2' THEN 2 WHEN 'B1' THEN 3 WHEN 'B2' THEN 4 WHEN 'C1' THEN 5 WHEN 'C2' THEN 6 ELSE 7 END`;
 
 /** Decides, for the given entries, who may be published. Reads the child tables in batches. */
-export async function evaluate(db: Queryable, entries: readonly PublishCandidate[]): Promise<{ eligible: PublishCandidate[]; skipped: PublishSkip[] }> {
+export async function evaluate(
+  db: Queryable,
+  entries: readonly PublishCandidate[],
+  accept: readonly ReviewNoteCategoryId[] = []
+): Promise<{ eligible: PublishCandidate[]; skipped: PublishSkip[] }> {
+  const accepted = new Set<string>(accept);
   const facts = new Map<string, any>();
   for (let i = 0; i < entries.length; i += CHUNK) {
     const part = await tierAFactsFor(db, entries.slice(i, i + CHUNK).map((e) => e.id));
@@ -63,17 +79,18 @@ export async function evaluate(db: Queryable, entries: readonly PublishCandidate
       skipped.push({ id: e.id, headword: e.headword, reason: 'tier_a_incomplete', tier_a_missing: missing });
       continue;
     }
-    const blocking = blockingReviewNotes(parseAutoNote(e.admin_note).review_notes);
+    const all = blockingReviewNotes(parseAutoNote(e.admin_note).review_notes);
+    const blocking = all.filter((n) => !accepted.has(n.category));
     if (blocking.length > 0) {
       skipped.push({ id: e.id, headword: e.headword, reason: 'has_review_notes', blocking: blocking.map(({ text, category, label }) => ({ text, category, label })) });
       continue;
     }
-    eligible.push(e);
+    eligible.push(all.length > 0 ? { ...e, accepted: [...new Set(all.map((n) => n.category))] } : e);
   }
   return { eligible, skipped };
 }
 
-export async function planPublish(db: Queryable, o: { cefr?: readonly Cefr[]; limit?: number } = {}): Promise<PublishPlan> {
+export async function planPublish(db: Queryable, o: { cefr?: readonly Cefr[]; limit?: number; accept?: readonly ReviewNoteCategoryId[] } = {}): Promise<PublishPlan> {
   const limit = o.limit ?? DEFAULT_PUBLISH_LIMIT;
   if (!Number.isInteger(limit) || limit < 1 || limit > MAX_PUBLISH_LIMIT) throw new Error(`--limit must be a whole number from 1 to ${MAX_PUBLISH_LIMIT}`);
   const params: any[] = [`${AUTO_NOTE_PREFIX}%`];
@@ -88,7 +105,7 @@ export async function planPublish(db: Queryable, o: { cefr?: readonly Cefr[]; li
       ORDER BY ${LEVEL_ORDER_SQL}, LOWER(headword), id`,
     params
   );
-  const { eligible, skipped } = await evaluate(db, rows);
+  const { eligible, skipped } = await evaluate(db, rows, o.accept);
   return { candidates: rows.length, eligible, skipped, selected: eligible.slice(0, limit) };
 }
 
@@ -110,7 +127,11 @@ export interface PublishResult {
  * edited (or published by someone else) between the plan and the commit is left alone. Either every history line is written with its
  * UPDATE or nothing is.
  */
-export async function publishSelected(source: Connectable, selected: readonly PublishCandidate[]): Promise<PublishResult> {
+export async function publishSelected(
+  source: Connectable,
+  selected: readonly PublishCandidate[],
+  o: { accept?: readonly ReviewNoteCategoryId[] } = {}
+): Promise<PublishResult> {
   if (selected.length === 0) return { published: [], dropped: [] };
   const client = await source.connect();
   let broken = false;
@@ -122,15 +143,17 @@ export async function publishSelected(source: Connectable, selected: readonly Pu
         WHERE id = ANY($1::uuid[]) AND admin_note LIKE $2 AND published = FALSE ORDER BY id FOR UPDATE`,
       [ids, `${AUTO_NOTE_PREFIX}%`]
     );
-    const { eligible, skipped } = await evaluate(client, locked);
+    const { eligible, skipped } = await evaluate(client, locked, o.accept);
     const changed = eligible.length
       ? (await client.query(`UPDATE dictionary_entries SET published = TRUE, updated_at = NOW() WHERE id = ANY($1::uuid[]) AND published = FALSE RETURNING id`, [eligible.map((e) => e.id)])).rows.map((r) => r.id as string)
       : [];
     if (changed.length > 0) {
+      const doneIds = new Set(changed);
+      const lines = eligible.filter((e) => doneIds.has(e.id));
       await client.query(
         `INSERT INTO entry_edit_history (entry_id, admin_id, field_name, old_value, new_value)
-         SELECT t.id, NULL, 'published', 'false', $2 FROM UNNEST($1::uuid[]) AS t(id)`,
-        [changed, CLI_PUBLISH_VALUE]
+         SELECT t.id, NULL, 'published', 'false', t.val FROM UNNEST($1::uuid[], $2::text[]) AS t(id, val)`,
+        [lines.map((e) => e.id), lines.map((e) => publishedValue(e.accepted))]
       );
     }
     await client.query('COMMIT');

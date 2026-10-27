@@ -88,6 +88,10 @@
 
     <% if (admin && admin.role === 'super_admin') { %>
       <div class="nav-divider"></div>
+      <a href="/admins" class="nav-item <%= typeof active !== 'undefined' && active === 'admins' ? 'active' : '' %>">
+        <span class="nav-icon">🔑</span>
+        <span class="nav-label">Admins</span>
+      </a>
       <a href="/approvals" class="nav-item <%= typeof active !== 'undefined' && active === 'approvals' ? 'active' : '' %>">
         <span class="nav-icon">📋</span>
         <span class="nav-label">

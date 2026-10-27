@@ -246,13 +246,15 @@ router.get(
         [userId, boxNumber, safeLimit, offset]
       ),
       pool.query(
-        `SELECT COUNT(*)::int AS count
+        `SELECT COUNT(*)::int AS count,
+                COUNT(*) FILTER (WHERE due_at <= NOW())::int AS due_count
          FROM leitner_cards WHERE user_id = $1 AND box_number = $2`,
         [userId, boxNumber]
       ),
     ]);
 
     const total: number = countRows[0]?.count ?? 0;
+    const dueCount: number = countRows[0]?.due_count ?? 0;
 
     return apiSuccess(res, {
       box_number: boxNumber,
@@ -282,6 +284,8 @@ router.get(
         },
       })),
       total,
+      // cards of this box that are due now = the words "review the due words of this box" can use
+      due_count: dueCount,
       page: safePage,
       limit: safeLimit,
     });
@@ -439,7 +443,7 @@ function sendSessionError(res: Response, err: unknown) {
 //  body: { limit?, box_number? }
 //    limit      counts words (default 20, max 100), not steps.
 //    box_number omitted → "review due now" (due cards only);
-//               1–5     → study that box on demand (cards of the box, due or not).
+//               1–5     → only the DUE cards of that box (never words that are not due yet).
 router.post(
   '/session/start',
   validateBody(sessionStartSchema),

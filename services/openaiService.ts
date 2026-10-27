@@ -128,10 +128,14 @@ The learner was shown an English headword and asked to explain its meaning in En
 captures the meaning of the headword. Use the part of speech and reference definitions
 as context, but do not require exact wording.
 
+The answer MUST be written in English. A Vietnamese answer (or any other language) is wrong, even when it is a correct
+translation of the headword: the learner was asked to explain the word in English, not to translate it.
+
 Return:
-- correct: the answer clearly conveys the meaning (a valid definition, paraphrase, or close synonym).
+- correct: the answer is in English and clearly conveys the meaning (a valid definition, paraphrase, or close synonym).
 - near_correct: related, too broad, too narrow, or slightly off in nuance.
-- wrong: different meaning, unrelated, an antonym, or merely repeats the headword without explaining it.
+- wrong: not in English (e.g. a Vietnamese translation), different meaning, unrelated, an antonym, or merely repeats the
+  headword without explaining it.
 
 Rules:
 - Repeating the headword itself (or a trivial inflection of it) is wrong.
@@ -255,6 +259,7 @@ export async function gradeEnglishMeaning(
   return runAnswerGrade(input.systemPrompt || DEFAULT_EN_MEANING_GRADER_PROMPT, {
     headword: input.headword,
     pos: input.pos,
+    required_answer_language: 'English',
     reference_definitions: input.expectedAnswers,
     user_answer: input.userAnswer,
   });

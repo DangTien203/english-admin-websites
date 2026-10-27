@@ -37,15 +37,25 @@ export const MAX_INVALID_OUTPUT_RUNS = 2;
  * (skipped: variant_form, lemma_mismatch), or its draft stayed invalid (failed: invalid_output) in `invalidRuns` runs, at least
  * MAX_INVALID_OUTPUT_RUNS. The first invalid_output is NOT final: the word is sent once more.
  *
- * A job that SUCCEEDED, or was skipped as "exists", is not final: the entry it made (or found) is checked directly, and if it has been
- * deleted since (for example by scripts/dev/cleanup-auto-entries.ts) the word is eligible again. Rows that failed for a reason that
- * may pass (upstream error, budget, daily cap, stale, dead letter, queue error, config error) do not close it either.
+ * A job that SUCCEEDED, or was skipped as "exists", is not final by its status alone: see endedInLiveEntry. Rows that failed for a
+ * reason that may pass (upstream error, budget, daily cap, stale, dead letter, queue error, config error) do not close it either.
  */
 export function isFinalOutcome(status: string, reason: string | null, invalidRuns = 1): boolean {
   if (status === 'rejected') return true;
   if (status === 'skipped') return ['variant_form', 'lemma_mismatch'].includes(reason ?? '');
   if (status === 'failed') return reason === 'invalid_output' && invalidRuns >= MAX_INVALID_OUTPUT_RUNS;
   return false;
+}
+
+/**
+ * A job that made an entry (succeeded), or found one (skipped: exists), closes the matter while that entry still exists. The entry is
+ * checked by the job's own entry_id, not by the Oxford spelling: the model may file the word under another spelling ("judgement" →
+ * "judgment"), and sending it again would only repeat the answer. If the entry was deleted since (for example by
+ * scripts/dev/cleanup-auto-entries.ts) the word is eligible again.
+ */
+export function endedInLiveEntry(status: string, reason: string | null, entryAlive: boolean): boolean {
+  if (!entryAlive) return false;
+  return status === 'succeeded' || (status === 'skipped' && reason === 'exists');
 }
 
 const BATCH = 2000;
@@ -84,7 +94,8 @@ export async function classifyWords(db: Queryable, words: readonly OxfordWord[])
 
     const latest = await db.query(
       `SELECT DISTINCT ON (j.word) j.word AS w, j.status, j.reason,
-              (SELECT count(*)::int FROM word_enrichment_jobs k WHERE k.word = j.word AND k.status = 'failed' AND k.reason = 'invalid_output') AS invalid_runs
+              (SELECT count(*)::int FROM word_enrichment_jobs k WHERE k.word = j.word AND k.status = 'failed' AND k.reason = 'invalid_output') AS invalid_runs,
+              EXISTS (SELECT 1 FROM dictionary_entries e WHERE e.id = j.entry_id) AS entry_alive
          FROM word_enrichment_jobs j
         WHERE j.word = ANY($1::text[]) AND j.status NOT IN ('queued', 'running')
         ORDER BY j.word, j.created_at DESC`,
@@ -92,7 +103,7 @@ export async function classifyWords(db: Queryable, words: readonly OxfordWord[])
     );
     for (const r of latest.rows) {
       const label = r.reason === 'invalid_output' ? `${r.status} / invalid_output (${r.invalid_runs} lượt)` : `${r.status} / ${r.reason ?? '-'}`;
-      if (isFinalOutcome(r.status, r.reason, Number(r.invalid_runs))) doneBefore.set(r.w, label);
+      if (isFinalOutcome(r.status, r.reason, Number(r.invalid_runs)) || endedInLiveEntry(r.status, r.reason, r.entry_alive)) doneBefore.set(r.w, label);
       else earlier.set(r.w, label);
     }
   }

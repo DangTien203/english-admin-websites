@@ -184,38 +184,30 @@ function toGradingPayload(grading: PracticeAnswerGradeResult | null, correct: bo
 // ── start / get ──────────────────────────────────────────────────────────────
 
 /**
- * @param limit     number of words (not steps)
- * @param boxNumber omitted → "review due now": the most overdue due cards.
- *                  1–5 → cards of that box, due or not (closest to due first), so a box can be
- *                  studied on demand. Either way the picked words are shuffled before ordering.
+ * Only DUE words are ever reviewed — a word that is not due yet must not move up a box, or finishing
+ * one box and opening the next would let the learner re-review (and re-promote) the same words.
+ *
+ * @param limit     number of words (not steps); fewer are used when fewer are due
+ * @param boxNumber omitted → every box ("review due now"). 1–5 → only the due words of that box.
+ *                  Either way the most overdue come first, and the picked words are shuffled
+ *                  before ordering.
  */
 export async function startReviewSession(userId: string, limit: number, boxNumber?: number) {
-  const { rows: picked } = boxNumber
-    ? await pool.query(
-        `SELECT id, box_number, COALESCE(total_reviews, 0) AS total_reviews
-           FROM leitner_cards
-          WHERE user_id = $1 AND box_number = $3
-          ORDER BY due_at ASC
-          LIMIT $2`,
-        [userId, limit, boxNumber]
-      )
-    : await pool.query(
-        `SELECT id, box_number, COALESCE(total_reviews, 0) AS total_reviews
-           FROM leitner_cards
-          WHERE user_id = $1 AND due_at <= NOW()
-          ORDER BY due_at ASC
-          LIMIT $2`,
-        [userId, limit]
-      );
+  const { rows: picked } = await pool.query(
+    `SELECT id, box_number, COALESCE(total_reviews, 0) AS total_reviews
+       FROM leitner_cards
+      WHERE user_id = $1 AND due_at <= NOW() AND ($3::int IS NULL OR box_number = $3::int)
+      ORDER BY due_at ASC
+      LIMIT $2`,
+    [userId, limit, boxNumber ?? null]
+  );
   if (picked.length === 0) {
-    throw boxNumber
-      ? new LeitnerSessionError(
-          400,
-          'NO_CARDS_IN_BOX',
-          `Box ${boxNumber} chưa có từ nào để ôn tập`,
-          { box_number: boxNumber }
-        )
-      : new LeitnerSessionError(400, 'NO_DUE_CARDS', 'Không có thẻ nào đến hạn ôn tập');
+    throw new LeitnerSessionError(
+      400,
+      'NO_DUE_CARDS',
+      boxNumber ? `Box ${boxNumber} chưa có từ nào đến hạn ôn tập` : 'Không có thẻ nào đến hạn ôn tập',
+      boxNumber ? { box_number: boxNumber } : undefined
+    );
   }
 
   const cardById = new Map<string, { box_number: number; total_reviews: number }>(

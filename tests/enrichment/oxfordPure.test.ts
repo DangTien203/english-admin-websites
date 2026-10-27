@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parseApplyCefrArgs, parsePublishArgs, parseSeedArgs, selectionFromArgs } from '../../services/enrichment/oxford/args';
 import { readOxfordFile, parseOxford, coverageOf, cefrRank, type OxfordWord } from '../../services/enrichment/oxford/list';
-import { estimateRun, isFinalOutcome, DEFAULT_COST_PER_WORD_USD, MAX_INVALID_OUTPUT_RUNS, costFromTotals, formatDuration } from '../../services/enrichment/oxford/plan';
+import { estimateRun, isFinalOutcome, endedInLiveEntry, DEFAULT_COST_PER_WORD_USD, MAX_INVALID_OUTPUT_RUNS, costFromTotals, formatDuration } from '../../services/enrichment/oxford/plan';
 import { parseInvalidOutputs, parseWorkerLog, percentile } from '../../services/enrichment/oxford/report';
 import { bySendOrder, fnv1a, parseCefrList, selectWords, stratifiedSample, type SeedWord } from '../../services/enrichment/oxford/selection';
 import { parseAutoNote, OXFORD_CEFR_MARK } from '../../utils/autoEntryNote';
@@ -286,7 +286,7 @@ describe('which earlier outcomes close a word', () => {
     ['skipped', 'variant_form', true],
     ['skipped', 'lemma_mismatch', true],
     ['failed', 'invalid_output', false], // the first invalid_output is tried once more
-    ['succeeded', null, false], // the entry is checked directly: if it was deleted since, the word is eligible again
+    ['succeeded', null, false], // not by its status alone: endedInLiveEntry looks at the entry itself
     ['skipped', 'exists', false],
     ['skipped', 'budget', false],
     ['skipped', 'duplicate', false],
@@ -301,6 +301,20 @@ describe('which earlier outcomes close a word', () => {
 });
 
 // ── the worker log and numbers ─────────────────────────────────────────────────────────────────────────────────────────
+
+describe('a job that ended in an entry that still exists', () => {
+  it.each([
+    ['succeeded', null, true, true],
+    ['skipped', 'exists', true, true],
+    ['succeeded', null, false, false], // the entry was deleted since: the word is eligible again
+    ['skipped', 'exists', false, false],
+    ['failed', 'upstream_error', true, false], // an entry_id on a job that did not succeed closes nothing
+    ['failed', 'invalid_output', true, false],
+    ['skipped', 'budget', true, false],
+  ])('%s / %s, entry alive %s → %s', (status, reason, alive, closes) => {
+    expect(endedInLiveEntry(status as string, reason as string | null, alive as boolean)).toBe(closes);
+  });
+});
 
 describe('invalid_output is final after two runs', () => {
   it('one run → not final, two or more → final; the other failures never depend on the count', () => {

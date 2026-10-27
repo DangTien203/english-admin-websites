@@ -4,7 +4,7 @@
 
 <!-- BEGIN GENERATED (npm run enrich:seed-oxford -- --report) -->
 
-Sinh lúc 2026-10-20T09:13:45.555Z bởi `npm run enrich:seed-oxford -- --file … --report`. Phạm vi: các lần gửi #2 đến #3. Phần này được ghi lại mỗi lần chạy; ghi chú viết tay nằm SAU dấu kết thúc và được giữ.
+Sinh lúc 2026-10-23T18:18:19.697Z bởi `npm run enrich:seed-oxford -- --file … --report`. Phạm vi: các lần gửi #1 đến #14. Phần này được ghi lại mỗi lần chạy; ghi chú viết tay nằm SAU dấu kết thúc và được giữ.
 
 ## 1. Dữ liệu vào và các lần gửi
 
@@ -14,34 +14,91 @@ File `oxford_5000.json`: 5,948 dòng, 4,958 từ khác nhau (chữ thường). G
 
 | # | bắt đầu (UTC) | kết thúc | cách chọn | từ đã gửi | dừng bởi | model | policy | đồng thời |
 |---|---|---|---|---|---|---|---|---|
+| 1 | 2026-10-20 05:58:04 | 05:58:33 | mẫu 50 | 50 | - | claude-haiku-5-5 | review | 2 |
 | 2 | 2026-10-20 07:57:50 | 08:05:25 | limit 500 | 500 | - | claude-haiku-5-5 | review | 2 |
 | 3 | 2026-10-20 09:06:04 | 09:06:31 | gửi lại từ lần trước | 27 | - | claude-haiku-5-5 | review | 2 |
+| 4 | 2026-10-22 04:22:26 | 04:30:19 | limit 1000 | 7 | killed: the network dropped (ECONNRESET, DNS ENOTFOUND) and the next word hung; the record was rebuilt from the send log and the ledger | claude-haiku-5-5 | review | 2 |
+| 5 | 2026-10-22 04:30:48 | 04:38:46 | limit 993 | 989 | - | claude-haiku-5-5 | review | 2 |
+| 6 | 2026-10-22 05:45:58 | 05:46:13 | gửi lại từ lần trước | 27 | - | claude-haiku-5-5 | review | 2 |
+| 7 | 2026-10-22 05:53:02 | 06:00:41 | limit 1000 | 998 | - | claude-haiku-5-5 | review | 2 |
+| 8 | 2026-10-22 08:28:48 | 08:29:05 | gửi lại từ lần trước | 21 | - | claude-haiku-5-5 | review | 2 |
+| 9 | 2026-10-22 08:39:46 | 08:53:46 | limit 1000 | 999 | - | claude-haiku-5-5 | review | 2 |
+| 10 | 2026-10-22 09:31:59 | 09:32:13 | gửi lại từ lần trước | 18 | - | claude-haiku-5-5 | review | 2 |
+| 11 | 2026-10-22 09:42:10 | 09:46:26 | limit 1000 | 440 | - | claude-haiku-5-5 | review | 2 |
+| 12 | 2026-10-23 17:17:29 | 17:17:38 | gửi lại từ lần trước | 18 | - | claude-haiku-5-5 | review | 2 |
+| 13 | 2026-10-23 17:58:34 | 17:58:40 | limit 1000 | 10 | - | claude-haiku-5-5 | review | 2 |
+| 14 | 2026-10-23 18:09:45 | 18:09:47 | limit 1 · offset 4 | 1 | - | claude-haiku-5-5 | review | 2 |
 
 ## 2. Kết quả theo trạng thái và lý do
 
 | status / reason | số từ |
 |---|---|
-| succeeded / - | 474 |
-| skipped / exists | 15 |
-| failed / invalid_output | 9 |
+| succeeded / - | 3891 |
+| skipped / exists | 56 |
+| failed / upstream_error | 14 |
+| skipped / variant_form | 7 |
+| failed / invalid_output | 5 |
 | rejected / proper_noun | 2 |
+| skipped / lemma_mismatch | 1 |
 
-Tổng 500 từ đã gửi. Job còn `queued`/`running`: 0.
+Tổng 3,976 từ đã gửi. Job còn `queued`/`running`: 0.
 
-Job hết ngân sách hoặc lỗi nhà cung cấp (`budget`, `upstream_error`, `dead_letter`) ở job gần nhất của từ: 0.
+Job hết ngân sách hoặc lỗi nhà cung cấp (`budget`, `upstream_error`, `dead_letter`) ở job gần nhất của từ: 14.
 
 **Theo từng lần gửi** (đếm HÀNG sổ do lần gửi đó tạo, nên hàng cũ của từ được gửi lại vẫn nằm ở lần gửi cũ của nó):
 
-| status / reason | lần #2 (500 từ) | lần #3 (27 từ) |
-|---|---|---|
-| failed / invalid_output | 28 | 8 |
-| rejected / proper_noun | 2 | 0 |
-| skipped / exists | 15 | 0 |
-| succeeded / - | 455 | 19 |
+| status / reason | lần #1 (50 từ) | lần #2 (500 từ) | lần #3 (27 từ) | lần #4 (7 từ) | lần #5 (989 từ) | lần #6 (27 từ) | lần #7 (998 từ) | lần #8 (21 từ) | lần #9 (999 từ) | lần #10 (18 từ) | lần #11 (440 từ) | lần #12 (18 từ) | lần #13 (10 từ) | lần #14 (1 từ) |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| failed / invalid_output | 2 | 28 | 8 | 0 | 27 | 8 | 20 | 2 | 14 | 2 | 2 | 1 | 0 | 0 |
+| failed / upstream_error | 0 | 0 | 0 | 0 | 0 | 0 | 1 | 1 | 4 | 4 | 16 | 21 | 10 | 0 |
+| rejected / proper_noun | 0 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| skipped / exists | 0 | 15 | 0 | 1 | 22 | 0 | 10 | 0 | 6 | 0 | 2 | 0 | 0 | 0 |
+| skipped / lemma_mismatch | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1 | 0 | 0 | 0 |
+| skipped / variant_form | 1 | 0 | 0 | 0 | 0 | 0 | 1 | 0 | 3 | 0 | 2 | 0 | 0 | 0 |
+| succeeded / - | 47 | 455 | 19 | 6 | 940 | 19 | 966 | 18 | 972 | 12 | 417 | 2 | 0 | 1 |
 
-Tiêu chí dừng khẩn cấp: ở LƯỢT ĐẦU (lần #2, 500 từ) `invalid_output` là 28 (5.6%; dừng khi vượt 5% theo yêu cầu ban đầu, 8% ở giai đoạn 2); sau các lần gửi lại còn 9/500 từ hỏng (1.8%). Lỗi nhà cung cấp và chi phí: ở trên và mục 4.
+Tiêu chí dừng khẩn cấp: ở LƯỢT ĐẦU (lần #1, 50 từ) `invalid_output` là 2 (4.0%; dừng khi vượt 5% theo yêu cầu ban đầu, 8% ở giai đoạn 2); sau các lần gửi lại còn 5/3,976 từ hỏng (0.1%). Lỗi nhà cung cấp và chi phí: ở trên và mục 4.
 
 **`invalid_output` theo nguyên nhân (validator) và loại từ, từng lần gửi**
+
+*Lần #1* (50 từ): 2 job `invalid_output`, 2 không có chi tiết (worker cũ).
+
+Luật mà bản nháp CUỐI (sau một lần sửa) vi phạm, số từ:
+
+| validator @ trường | số từ |
+|---|---|
+| (không có chi tiết) | 0 |
+
+Luật mà câu trả lời ĐẦU TIÊN (trước khi sửa) vi phạm, số từ:
+
+| validator @ trường | số từ |
+|---|---|
+| (không có chi tiết) | 0 |
+
+Theo loại từ (loại từ của hàng có mức CEFR thấp nhất trong file Oxford):
+
+| loại từ | từ đã gửi | từ hỏng | tỉ lệ |
+|---|---|---|---|
+| noun | 8 | 0 | 0.0% |
+| adverb | 6 | 0 | 0.0% |
+| adjective | 6 | 0 | 0.0% |
+| verb | 6 | 0 | 0.0% |
+| preposition | 5 | 1 | 20.0% |
+| conjunction | 5 | 0 | 0.0% |
+| pronoun | 4 | 1 | 25.0% |
+| determiner | 4 | 0 | 0.0% |
+| exclamation | 2 | 0 | 0.0% |
+| number | 2 | 0 | 0.0% |
+| modal verb | 2 | 0 | 0.0% |
+
+Token ra của các job hỏng: trung vị 2,636 (giới hạn `ANTHROPIC_MAX_OUTPUT_TOKENS_ENRICH` mặc định 4.000).
+
+Từng từ:
+
+| từ | loại từ (Oxford) | CEFR | luật vi phạm ở bản cuối |
+|---|---|---|---|
+| into | preposition | A1 | - |
+| theirs | pronoun | B1 | - |
 
 *Lần #2* (500 từ): 28 job `invalid_output`.
 
@@ -157,40 +214,445 @@ Từng từ:
 | welcome | adjective, exclamation, noun, verb | A1 | schema_too_big @ senses |
 | you | pronoun | A1 | classifier_duplicate @ senses[].meanings_vi[] |
 
+*Lần #5* (989 từ): 27 job `invalid_output`.
+
+Luật mà bản nháp CUỐI (sau một lần sửa) vi phạm, số từ:
+
+| validator @ trường | số từ |
+|---|---|
+| schema_too_big @ senses | 21 |
+| classifier_duplicate @ senses[].meanings_vi[] | 3 |
+| parenthesis @ senses[].meanings_vi[] | 1 |
+| too_long @ senses[].definition_en | 1 |
+| too_many_syllables @ senses[].meanings_vi[] | 1 |
+
+Luật mà câu trả lời ĐẦU TIÊN (trước khi sửa) vi phạm, số từ:
+
+| validator @ trường | số từ |
+|---|---|
+| schema_too_big @ senses | 23 |
+| classifier_duplicate @ senses[].meanings_vi[] | 2 |
+| too_long @ senses[].definition_en | 1 |
+| too_many_syllables @ senses[].meanings_vi[] | 1 |
+
+Theo loại từ (loại từ của hàng có mức CEFR thấp nhất trong file Oxford):
+
+| loại từ | từ đã gửi | từ hỏng | tỉ lệ |
+|---|---|---|---|
+| noun | 596 | 16 | 2.7% |
+| adjective | 191 | 7 | 3.7% |
+| verb | 105 | 3 | 2.9% |
+| adverb | 54 | 0 | 0.0% |
+| number | 19 | 0 | 0.0% |
+| pronoun | 8 | 0 | 0.0% |
+| preposition | 6 | 1 | 16.7% |
+| conjunction | 3 | 0 | 0.0% |
+| exclamation | 2 | 0 | 0.0% |
+| determiner | 2 | 0 | 0.0% |
+| ordinal number | 1 | 0 | 0.0% |
+| linking verb | 1 | 0 | 0.0% |
+| modal verb | 1 | 0 | 0.0% |
+
+Token ra của các job hỏng: trung vị 3,863 (giới hạn `ANTHROPIC_MAX_OUTPUT_TOKENS_ENRICH` mặc định 4.000).
+
+Từng từ:
+
+| từ | loại từ (Oxford) | CEFR | luật vi phạm ở bản cuối |
+|---|---|---|---|
+| deep | adjective, adverb | A2 | schema_too_big @ senses |
+| drop | noun, verb | A2 | schema_too_big @ senses |
+| flat | adjective, noun | A1 | schema_too_big @ senses |
+| function | noun, verb | B1 | schema_too_big @ senses |
+| golf | noun | A2 | too_long @ senses[].definition_en |
+| heavy | adjective | A2 | schema_too_big @ senses |
+| hit | noun, verb | A2 | schema_too_big @ senses |
+| human | adjective, noun | A2 | classifier_duplicate @ senses[].meanings_vi[] |
+| level | adjective, noun, verb | A2 | schema_too_big @ senses |
+| loss | noun | B1 | schema_too_big @ senses |
+| narrow | adjective, verb | A2 | schema_too_big @ senses |
+| nose | noun | A1 | schema_too_big @ senses |
+| offer | noun, verb | A2 | schema_too_big @ senses |
+| opposite | adjective, adverb, noun, preposition | A1 | schema_too_big @ senses |
+| platform | noun | A2 | schema_too_big @ senses |
+| plus | adjective, conjunction, noun, preposition | B1 | schema_too_big @ senses |
+| profile | noun | A2 | schema_too_big @ senses |
+| quarter | noun | A1 | classifier_duplicate @ senses[].meanings_vi[] |
+| save | verb | A2 | schema_too_big @ senses |
+| score | noun, verb | A2 | schema_too_big @ senses |
+| sheet | noun | A2 | schema_too_big @ senses |
+| shower | noun | A1 | parenthesis @ senses[].meanings_vi[] |
+| touch | noun, verb | A2 | classifier_duplicate @ senses[].meanings_vi[] |
+| trainer | noun | A2 | too_many_syllables @ senses[].meanings_vi[] |
+| underground | adjective, adverb | A2 | schema_too_big @ senses |
+| value | noun, verb | B1 | schema_too_big @ senses |
+| warm | adjective, verb | A1 | schema_too_big @ senses |
+
+*Lần #6* (27 từ): 8 job `invalid_output`.
+
+Luật mà bản nháp CUỐI (sau một lần sửa) vi phạm, số từ:
+
+| validator @ trường | số từ |
+|---|---|
+| schema_too_big @ senses | 8 |
+
+Luật mà câu trả lời ĐẦU TIÊN (trước khi sửa) vi phạm, số từ:
+
+| validator @ trường | số từ |
+|---|---|
+| schema_too_big @ senses | 8 |
+
+Theo loại từ (loại từ của hàng có mức CEFR thấp nhất trong file Oxford):
+
+| loại từ | từ đã gửi | từ hỏng | tỉ lệ |
+|---|---|---|---|
+| noun | 16 | 4 | 25.0% |
+| adjective | 7 | 3 | 42.9% |
+| verb | 3 | 0 | 0.0% |
+| preposition | 1 | 1 | 100.0% |
+
+Token ra của các job hỏng: trung vị 3,812 (giới hạn `ANTHROPIC_MAX_OUTPUT_TOKENS_ENRICH` mặc định 4.000).
+
+Từng từ:
+
+| từ | loại từ (Oxford) | CEFR | luật vi phạm ở bản cuối |
+|---|---|---|---|
+| flat | adjective, noun | A1 | schema_too_big @ senses |
+| function | noun, verb | B1 | schema_too_big @ senses |
+| hit | noun, verb | A2 | schema_too_big @ senses |
+| level | adjective, noun, verb | A2 | schema_too_big @ senses |
+| opposite | adjective, adverb, noun, preposition | A1 | schema_too_big @ senses |
+| plus | adjective, conjunction, noun, preposition | B1 | schema_too_big @ senses |
+| underground | adjective, adverb | A2 | schema_too_big @ senses |
+| warm | adjective, verb | A1 | schema_too_big @ senses |
+
+*Lần #7* (998 từ): 20 job `invalid_output`.
+
+Luật mà bản nháp CUỐI (sau một lần sửa) vi phạm, số từ:
+
+| validator @ trường | số từ |
+|---|---|
+| schema_too_big @ senses | 15 |
+| classifier_duplicate @ senses[].meanings_vi[] | 3 |
+| too_many_syllables @ senses[].meanings_vi[] | 2 |
+
+Luật mà câu trả lời ĐẦU TIÊN (trước khi sửa) vi phạm, số từ:
+
+| validator @ trường | số từ |
+|---|---|
+| schema_too_big @ senses | 18 |
+| classifier_duplicate @ senses[].meanings_vi[] | 1 |
+| too_many_syllables @ senses[].meanings_vi[] | 1 |
+
+Theo loại từ (loại từ của hàng có mức CEFR thấp nhất trong file Oxford):
+
+| loại từ | từ đã gửi | từ hỏng | tỉ lệ |
+|---|---|---|---|
+| noun | 552 | 14 | 2.5% |
+| adjective | 266 | 5 | 1.9% |
+| verb | 109 | 0 | 0.0% |
+| adverb | 66 | 1 | 1.5% |
+| conjunction | 2 | 0 | 0.0% |
+| pronoun | 2 | 0 | 0.0% |
+| preposition | 1 | 0 | 0.0% |
+
+Token ra của các job hỏng: trung vị 4,086 (giới hạn `ANTHROPIC_MAX_OUTPUT_TOKENS_ENRICH` mặc định 4.000).
+
+Từng từ:
+
+| từ | loại từ (Oxford) | CEFR | luật vi phạm ở bản cuối |
+|---|---|---|---|
+| handle | noun, verb | B2 | schema_too_big @ senses |
+| junior | adjective | B2 | schema_too_big @ senses |
+| margin | noun | B2 | too_many_syllables @ senses[].meanings_vi[] |
+| overnight | adverb | B2 | schema_too_big @ senses |
+| principal | adjective, noun | B2 | schema_too_big @ senses |
+| rank | noun, verb | B2 | schema_too_big @ senses |
+| root | noun | B2 | schema_too_big @ senses |
+| scratch | noun, verb | B2 | classifier_duplicate @ senses[].meanings_vi[] |
+| sensitive | adjective | B2 | schema_too_big @ senses |
+| shade | noun | B2 | schema_too_big @ senses |
+| shadow | noun | B2 | schema_too_big @ senses |
+| shift | noun, verb | B1 | schema_too_big @ senses |
+| shy | adjective | B1 | schema_too_big @ senses |
+| slide | noun, verb | B2 | schema_too_big @ senses |
+| smooth | adjective | B1 | schema_too_big @ senses |
+| steam | noun | B2 | classifier_duplicate @ senses[].meanings_vi[] |
+| teens | noun | B2 | too_many_syllables @ senses[].meanings_vi[] |
+| terminal | adjective, noun | B2 | schema_too_big @ senses |
+| tone | noun | B2 | schema_too_big @ senses |
+| trap | noun, verb | B2 | classifier_duplicate @ senses[].meanings_vi[] |
+
+*Lần #8* (21 từ): 2 job `invalid_output`.
+
+Luật mà bản nháp CUỐI (sau một lần sửa) vi phạm, số từ:
+
+| validator @ trường | số từ |
+|---|---|
+| schema_too_big @ senses | 2 |
+
+Luật mà câu trả lời ĐẦU TIÊN (trước khi sửa) vi phạm, số từ:
+
+| validator @ trường | số từ |
+|---|---|
+| schema_too_big @ senses | 2 |
+
+Theo loại từ (loại từ của hàng có mức CEFR thấp nhất trong file Oxford):
+
+| loại từ | từ đã gửi | từ hỏng | tỉ lệ |
+|---|---|---|---|
+| noun | 14 | 1 | 7.1% |
+| adjective | 6 | 0 | 0.0% |
+| adverb | 1 | 1 | 100.0% |
+
+Token ra của các job hỏng: trung vị 4,308 (giới hạn `ANTHROPIC_MAX_OUTPUT_TOKENS_ENRICH` mặc định 4.000).
+
+Từng từ:
+
+| từ | loại từ (Oxford) | CEFR | luật vi phạm ở bản cuối |
+|---|---|---|---|
+| handle | noun, verb | B2 | schema_too_big @ senses |
+| overnight | adverb | B2 | schema_too_big @ senses |
+
+*Lần #9* (999 từ): 14 job `invalid_output`.
+
+Luật mà bản nháp CUỐI (sau một lần sửa) vi phạm, số từ:
+
+| validator @ trường | số từ |
+|---|---|
+| schema_too_big @ senses | 8 |
+| too_many_syllables @ senses[].meanings_vi[] | 2 |
+| classifier_duplicate @ senses[].meanings_vi[] | 2 |
+| duplicate @ senses[].meanings_vi[] | 1 |
+| too_long @ senses[].definition_en | 1 |
+
+Luật mà câu trả lời ĐẦU TIÊN (trước khi sửa) vi phạm, số từ:
+
+| validator @ trường | số từ |
+|---|---|
+| schema_too_big @ senses | 8 |
+| parenthesis @ senses[].meanings_vi[] | 2 |
+| too_many_syllables @ senses[].meanings_vi[] | 2 |
+| too_long @ senses[].definition_en | 1 |
+| classifier_duplicate @ senses[].meanings_vi[] | 1 |
+
+Theo loại từ (loại từ của hàng có mức CEFR thấp nhất trong file Oxford):
+
+| loại từ | từ đã gửi | từ hỏng | tỉ lệ |
+|---|---|---|---|
+| noun | 581 | 10 | 1.7% |
+| adjective | 221 | 3 | 1.4% |
+| verb | 144 | 1 | 0.7% |
+| adverb | 53 | 0 | 0.0% |
+
+Token ra của các job hỏng: trung vị 3,991 (giới hạn `ANTHROPIC_MAX_OUTPUT_TOKENS_ENRICH` mặc định 4.000).
+
+Từng từ:
+
+| từ | loại từ (Oxford) | CEFR | luật vi phạm ở bản cuối |
+|---|---|---|---|
+| dam | noun | C1 | classifier_duplicate @ senses[].meanings_vi[] |
+| default | noun | C1 | schema_too_big @ senses |
+| deficit | noun | C1 | classifier_duplicate @ senses[].meanings_vi[] |
+| efficiency | noun | C1 | too_long @ senses[].definition_en |
+| extract | noun, verb | B2 | schema_too_big @ senses |
+| flame | noun | B2 | schema_too_big @ senses |
+| gut | noun | C1 | schema_too_big @ senses |
+| hollow | adjective | B2 | schema_too_big @ senses |
+| license | verb | C1 | schema_too_big @ senses |
+| optimistic | adjective | B2 | duplicate @ senses[].meanings_vi[] |
+| socialist | adjective | C1 | too_many_syllables @ senses[].meanings_vi[] |
+| tenure | noun | C1 | too_many_syllables @ senses[].meanings_vi[] |
+| trail | noun, verb | C1 | schema_too_big @ senses |
+| warrant | noun, verb | C1 | schema_too_big @ senses |
+
+*Lần #10* (18 từ): 2 job `invalid_output`.
+
+Luật mà bản nháp CUỐI (sau một lần sửa) vi phạm, số từ:
+
+| validator @ trường | số từ |
+|---|---|
+| schema_too_big @ senses | 2 |
+
+Luật mà câu trả lời ĐẦU TIÊN (trước khi sửa) vi phạm, số từ:
+
+| validator @ trường | số từ |
+|---|---|
+| schema_too_big @ senses | 2 |
+
+Theo loại từ (loại từ của hàng có mức CEFR thấp nhất trong file Oxford):
+
+| loại từ | từ đã gửi | từ hỏng | tỉ lệ |
+|---|---|---|---|
+| noun | 11 | 1 | 9.1% |
+| adjective | 6 | 1 | 16.7% |
+| verb | 1 | 0 | 0.0% |
+
+Token ra của các job hỏng: trung vị 4,178 (giới hạn `ANTHROPIC_MAX_OUTPUT_TOKENS_ENRICH` mặc định 4.000).
+
+Từng từ:
+
+| từ | loại từ (Oxford) | CEFR | luật vi phạm ở bản cuối |
+|---|---|---|---|
+| gut | noun | C1 | schema_too_big @ senses |
+| hollow | adjective | B2 | schema_too_big @ senses |
+
+*Lần #11* (440 từ): 2 job `invalid_output`.
+
+Luật mà bản nháp CUỐI (sau một lần sửa) vi phạm, số từ:
+
+| validator @ trường | số từ |
+|---|---|
+| schema_too_big @ senses | 1 |
+| too_long @ senses[].definition_en | 1 |
+
+Luật mà câu trả lời ĐẦU TIÊN (trước khi sửa) vi phạm, số từ:
+
+| validator @ trường | số từ |
+|---|---|
+| schema_too_big @ senses | 1 |
+| too_long @ senses[].definition_en | 1 |
+
+Theo loại từ (loại từ của hàng có mức CEFR thấp nhất trong file Oxford):
+
+| loại từ | từ đã gửi | từ hỏng | tỉ lệ |
+|---|---|---|---|
+| noun | 188 | 1 | 0.5% |
+| verb | 174 | 1 | 0.6% |
+| adjective | 69 | 0 | 0.0% |
+| adverb | 9 | 0 | 0.0% |
+
+Token ra của các job hỏng: trung vị 2,901 (giới hạn `ANTHROPIC_MAX_OUTPUT_TOKENS_ENRICH` mặc định 4.000).
+
+Từng từ:
+
+| từ | loại từ (Oxford) | CEFR | luật vi phạm ở bản cuối |
+|---|---|---|---|
+| drift | verb | C1 | schema_too_big @ senses |
+| faction | noun | C1 | too_long @ senses[].definition_en |
+
+*Lần #12* (18 từ): 1 job `invalid_output`.
+
+Luật mà bản nháp CUỐI (sau một lần sửa) vi phạm, số từ:
+
+| validator @ trường | số từ |
+|---|---|
+| schema_too_big @ senses | 1 |
+
+Luật mà câu trả lời ĐẦU TIÊN (trước khi sửa) vi phạm, số từ:
+
+| validator @ trường | số từ |
+|---|---|
+| schema_too_big @ senses | 1 |
+
+Theo loại từ (loại từ của hàng có mức CEFR thấp nhất trong file Oxford):
+
+| loại từ | từ đã gửi | từ hỏng | tỉ lệ |
+|---|---|---|---|
+| adjective | 10 | 0 | 0.0% |
+| noun | 7 | 0 | 0.0% |
+| verb | 1 | 1 | 100.0% |
+
+Token ra của các job hỏng: trung vị 3,250 (giới hạn `ANTHROPIC_MAX_OUTPUT_TOKENS_ENRICH` mặc định 4.000).
+
+Từng từ:
+
+| từ | loại từ (Oxford) | CEFR | luật vi phạm ở bản cuối |
+|---|---|---|---|
+| drift | verb | C1 | schema_too_big @ senses |
+
 ## 3. Từ bị bỏ qua
 
 **Bị bộ làm sạch đầu vào từ chối (9):** `according to` (nhiều từ), `all right` (nhiều từ), `any more` (nhiều từ), `have to` (nhiều từ), `ice cream` (nhiều từ), `next to` (nhiều từ), `no one` (nhiều từ), `per cent` (nhiều từ), `used to` (nhiều từ)
 
-**Không gửi vì đã có (tính tại thời điểm sinh báo cáo, nên gồm cả mục từ do chính đợt nạp này tạo):** trong từ điển 1,358 · là dạng biến trong word_forms 82 · đang trong hàng đợi 0 · đã có kết quả cuối từ job trước 12.
+**Không gửi vì đã có (tính tại thời điểm sinh báo cáo, nên gồm cả mục từ do chính đợt nạp này tạo):** trong từ điển 4,723 · là dạng biến trong word_forms 193 · đang trong hàng đợi 0 · đã có kết quả cuối từ job trước 19.
 
-**Đã gửi nhưng không thành mục từ mới (26), theo job gần nhất của từ:**
+**Đã gửi nhưng không thành mục từ mới (85), theo job gần nhất của từ:**
 
 | từ | status | reason | số lần chạy |
 |---|---|---|---|
+| constraint | skipped | exists | 2 |
+| convinced | skipped | exists | 1 |
+| cooking | skipped | exists | 1 |
+| counselling | skipped | lemma_mismatch | 1 |
+| covered | skipped | exists | 1 |
+| crowded | skipped | exists | 1 |
+| dangerous | skipped | exists | 2 |
+| determine | skipped | exists | 1 |
+| disturbing | skipped | exists | 1 |
+| encompass | skipped | exists | 2 |
+| engineering | skipped | exists | 1 |
+| enquiry | skipped | exists | 1 |
+| enrol | skipped | variant_form | 1 |
 | evening | skipped | exists | 1 |
+| expected | skipped | exists | 1 |
+| favour | skipped | variant_form | 1 |
 | february | rejected | proper_noun | 1 |
 | feeling | skipped | exists | 1 |
+| fighting | skipped | exists | 1 |
+| film-maker | failed | upstream_error | 4 |
+| fit | skipped | exists | 1 |
+| fixed | skipped | exists | 1 |
+| forth | skipped | variant_form | 1 |
+| frighten | skipped | exists | 1 |
+| frightening | skipped | exists | 1 |
+| funding | skipped | exists | 1 |
+| graphics | skipped | exists | 1 |
 | half | failed | invalid_output | 1 |
-| help | failed | invalid_output | 1 |
+| halt | skipped | variant_form | 1 |
+| handle | failed | invalid_output | 1 |
+| high-profile | failed | upstream_error | 4 |
 | his | skipped | exists | 1 |
-| hope | failed | invalid_output | 1 |
+| injure | skipped | exists | 1 |
+| integrated | skipped | exists | 1 |
+| intended | skipped | exists | 1 |
 | interested | skipped | exists | 1 |
 | interesting | skipped | exists | 1 |
-| into | failed | invalid_output | 1 |
+| involved | skipped | exists | 1 |
 | its | skipped | exists | 1 |
 | july | rejected | proper_noun | 1 |
+| killing | skipped | exists | 1 |
+| large-scale | failed | upstream_error | 4 |
+| leading | skipped | exists | 1 |
+| level | failed | invalid_output | 1 |
+| licence | skipped | variant_form | 1 |
+| line-up | failed | upstream_error | 4 |
+| long-standing | failed | upstream_error | 4 |
+| long-time | failed | upstream_error | 4 |
+| make-up | failed | upstream_error | 4 |
 | meaning | skipped | exists | 1 |
 | meeting | skipped | exists | 1 |
 | my | skipped | exists | 1 |
 | news | skipped | exists | 1 |
+| non-profit | failed | upstream_error | 4 |
+| old-fashioned | failed | upstream_error | 4 |
+| ought | skipped | variant_form | 1 |
 | our | skipped | exists | 1 |
 | out | failed | invalid_output | 1 |
+| outdoors | skipped | exists | 1 |
+| part-time | failed | upstream_error | 4 |
+| post-war | failed | upstream_error | 4 |
 | reading | skipped | exists | 1 |
-| right | failed | invalid_output | 1 |
-| slow | failed | invalid_output | 1 |
+| recording | skipped | exists | 1 |
+| relieve | skipped | exists | 1 |
+| sailing | skipped | exists | 1 |
+| sceptical | skipped | variant_form | 1 |
+| set-up | failed | upstream_error | 4 |
+| shocked | skipped | exists | 1 |
+| singing | skipped | exists | 1 |
+| skiing | skipped | exists | 1 |
+| smoking | skipped | exists | 1 |
+| so-called | failed | upstream_error | 4 |
+| span | skipped | exists | 1 |
+| specialized | skipped | exists | 1 |
+| spelling | skipped | exists | 1 |
+| surprised | skipped | exists | 1 |
+| surprising | skipped | exists | 1 |
 | them | skipped | exists | 1 |
+| themselves | skipped | exists | 1 |
 | they | skipped | exists | 1 |
-| welcome | failed | invalid_output | 1 |
+| thought-provoking | failed | upstream_error | 4 |
+| washing | skipped | exists | 1 |
+| worried | skipped | exists | 1 |
 | would | skipped | exists | 1 |
 | you | failed | invalid_output | 1 |
 
@@ -198,171 +660,173 @@ Từng từ:
 
 | nguồn | token vào | token ra | chi phí ước tính | ghi chú |
 |---|---|---|---|---|
-| hàng word_enrichment_jobs của các từ đã gửi | 5,838,989 | 946,266 | $0.69 | 512 job có gọi Haiku; chỉ lưu token của lần chạy cuối của mỗi job |
-| bộ đếm api_usage_counters, mức tăng từ trước lần gửi đầu | 5,848,203 | 948,084 | $0.70 | MỌI lần gọi Haiku trong thời gian đó, kể cả lần thử lại (và việc khác dùng Haiku cùng lúc, nếu có) |
-| ước tính trước khi gửi (dry-run) | - | - | $0.48 | 527 từ; nguồn: history, history |
+| hàng word_enrichment_jobs của các từ đã gửi | 40,663,368 | 6,122,165 | $4.28 | 4,026 job có gọi Haiku; chỉ lưu token của lần chạy cuối của mỗi job |
+| bộ đếm api_usage_counters, mức tăng từ trước lần gửi đầu | 40,824,296 | 6,145,425 | $4.31 | MỌI lần gọi Haiku trong thời gian đó, kể cả lần thử lại (và việc khác dùng Haiku cùng lúc, nếu có) |
+| ước tính trước khi gửi (dry-run) | - | - | $5.98 | 5,105 từ; nguồn: history, history, history, history, history, history, history, history, history, history, history, history, history, history |
 
-Lần thử lại và lần gọi bị mất ở hàng sổ làm chênh lệch: bộ đếm cao hơn hàng sổ $0.0018. Chi phí thực tính cả lần thử lại: **$0.70** ($0.0014 mỗi job có gọi Haiku). Bảng giá là nhập tay (`services/enrichment/pricing.ts`) và giả định 7,859 token system prompt đọc từ cache mỗi job: hóa đơn của Anthropic mới là số chính xác.
+Lần thử lại và lần gọi bị mất ở hàng sổ làm chênh lệch: bộ đếm cao hơn hàng sổ $0.0277. Chi phí thực tính cả lần thử lại: **$4.31** ($0.0011 mỗi job có gọi Haiku). Bảng giá là nhập tay (`services/enrichment/pricing.ts`) và giả định 7,859 token system prompt đọc từ cache mỗi job: hóa đơn của Anthropic mới là số chính xác.
 
-Chi phí thực bằng 1.44 lần ước tính (dừng khẩn cấp khi vượt 2 lần) — đạt.
+Chi phí thực bằng 0.72 lần ước tính (dừng khẩn cấp khi vượt 2 lần) — đạt.
 
-Số lần chạy mỗi từ: trung bình 1.01 (theo hàng sổ); phân bố 1 lần: 497, 2 lần: 3.
+Số lần chạy mỗi từ: trung bình 1.05 (theo hàng sổ); phân bố 1 lần: 3,929, 2 lần: 31, 3 lần: 2, 4 lần: 14.
 
 ## 5. Thời gian
 
-Từ lúc bắt đầu gửi đến job xong cuối cùng: 72 phút cho 500 từ.
-Từ lúc job được tạo đến lúc xong (gồm thời gian chờ trong hàng đợi): trung vị 1827.8 giây, p95 3439.0 giây.
+Từ lúc bắt đầu gửi đến job xong cuối cùng: 84.3 giờ cho 3,976 từ.
+Từ lúc job được tạo đến lúc xong (gồm thời gian chờ trong hàng đợi): trung vị 976.6 giây, p95 8430.3 giây.
 
-Theo log của worker (`oxford-seed-phase2-worker.log`, 527 dòng `enrich`): thời gian chạy MỘT job trung vị 12.2 giây, p95 26.3 giây, lâu nhất 87.2 giây; lần gọi Haiku trung bình 9.9 giây; dòng `enrich_retry`: 2; theo lần chạy lần 1: 523, lần 2: 4.
+Theo log của worker (`oxford-seed-all-worker.log`, 4,089 dòng `enrich`): thời gian chạy MỘT job trung vị 8.6 giây, p95 18.3 giây, lâu nhất 87.2 giây; lần gọi Haiku trung bình 7.6 giây; dòng `enrich_retry`: 199; theo lần chạy lần 1: 4,053, lần 2: 34, lần 3: 2.
 
 ## 6. Phân bố CEFR: Oxford so với Haiku
 
 ```
-Haiku (hàng) so với Oxford (cột), 474 mục từ có mức Oxford:
-            A1   tổng
-  A1       221    221
-  A2       178    178
-  B1        70     70
-  B2         5      5
-  trùng 221 (47%) · lệch 1 bậc 178 · lệch từ 2 bậc 75 · Haiku không đề xuất 0
-  Haiku khó hơn Oxford 253 · dễ hơn 0
+Haiku (hàng) so với Oxford (cột), 3880 mục từ có mức Oxford:
+            A1   A2   B1   B2   C1   tổng
+  A1       278    8    0    0    0    286
+  A2       290  132   24   12    2    460
+  B1       125  353  243  157   34    912
+  B2        12  106  263  769  573   1723
+  C1         0    0    2   97  400    499
+  trùng 1822 (47%) · lệch 1 bậc 1765 · lệch từ 2 bậc 293 · Haiku không đề xuất 0
+  Haiku khó hơn Oxford 1248 · dễ hơn 810
 ```
 
-Mức CEFR đã được áp theo Oxford (`npm run oxford:apply-cefr`) cho 0/474 mục từ; phần còn lại vẫn mang mức Haiku ước tính. Cột "Haiku" của mục đã áp được đọc lại từ `entry_edit_history`.
+Mức CEFR đã được áp theo Oxford (`npm run oxford:apply-cefr`) cho 0/3,881 mục từ; phần còn lại vẫn mang mức Haiku ước tính. Cột "Haiku" của mục đã áp được đọc lại từ `entry_edit_history`.
 
 ## 7. Phân bố chủ đề
 
 | chủ đề | số mục từ |
 |---|---|
-| core_language | 283 |
-| time_calendar | 94 |
-| media_communication | 56 |
-| geography_places | 40 |
-| arts_entertainment | 38 |
-| work_career | 38 |
-| business_economy | 32 |
-| greetings_social | 29 |
-| education_school | 28 |
-| transport_travel | 27 |
-| family_relationships | 23 |
-| politics_law | 21 |
-| psychology_mind | 20 |
-| sports_recreation | 20 |
-| technology_digital | 20 |
-| emotions_feelings | 19 |
-| home_household | 18 |
-| body_appearance | 16 |
-| character_values | 16 |
-| health_medicine | 16 |
-| science_research | 16 |
-| shopping_commerce | 16 |
-| food_drink | 15 |
-| weather_climate | 15 |
-| plants_nature | 14 |
-| colors_shapes | 11 |
-| environment_society | 6 |
-| animals_wildlife | 5 |
-| clothes_fashion | 5 |
+| core_language | 1205 |
+| politics_law | 683 |
+| business_economy | 464 |
+| psychology_mind | 452 |
+| arts_entertainment | 400 |
+| work_career | 378 |
+| media_communication | 367 |
+| science_research | 296 |
+| character_values | 290 |
+| health_medicine | 268 |
+| emotions_feelings | 253 |
+| technology_digital | 253 |
+| geography_places | 229 |
+| time_calendar | 224 |
+| environment_society | 213 |
+| transport_travel | 175 |
+| sports_recreation | 164 |
+| home_household | 157 |
+| plants_nature | 151 |
+| education_school | 142 |
+| shopping_commerce | 142 |
+| food_drink | 127 |
+| body_appearance | 99 |
+| family_relationships | 80 |
+| greetings_social | 79 |
+| weather_climate | 77 |
+| animals_wildlife | 71 |
+| clothes_fashion | 64 |
+| colors_shapes | 46 |
+| academic_formal | 4 |
 
-474/474 mục từ có ít nhất một chủ đề; 0 mục không có chủ đề nào.
+3,891/3,891 mục từ có ít nhất một chủ đề; 0 mục không có chủ đề nào.
 
 ## 8. Mục thiếu IPA, audio, ví dụ; nghĩa và ghi chú
 
-| chỉ tiêu | số mục từ | trên 474 |
+| chỉ tiêu | số mục từ | trên 3891 |
 |---|---|---|
-| thiếu cả ipa_us và ipa_uk | 2 |  |
-| thiếu ipa_us | 23 |  |
-| thiếu cả audio_us_url và audio_uk_url | 2 |  |
+| thiếu cả ipa_us và ipa_uk | 51 |  |
+| thiếu ipa_us | 147 |  |
+| thiếu cả audio_us_url và audio_uk_url | 105 |  |
 | không có ví dụ nào | 0 |  |
 | không có chủ đề | (mục 7) |  |
-| đã xuất bản (published) | 0 |  |
+| đã xuất bản (published) | 23 |  |
 
-Số nghĩa (sense) trung bình: 4.45; số nghĩa tiếng Việt (tách `definition_vi` bằng ";") trung bình: 9.30.
+Số nghĩa (sense) trung bình: 3.78; số nghĩa tiếng Việt (tách `definition_vi` bằng ";") trung bình: 8.13.
 
-Mục từ có `notes_for_review` của Haiku: 474/474; trong đó 294 có ghi chú thuộc nhóm "cần xem" (chặn xuất bản hàng loạt). Theo nhóm: Nghĩa đã bỏ có chủ ý 783, Bộ kiểm tra của job báo lỗi 223, CEFR ước tính 220, Nghi ngờ nghĩa 108, Còn lại (không nhận ra) 106, Thẻ đã bị bộ kiểm tra bỏ 93, Nghĩa gần nhau đã gộp 92, Ghi chú về dữ liệu nguồn 52, Gợi ý biên tập 46, Lưu ý nhẹ về cách dùng 42, Giải thích điều đã giữ hay đã ghi 29, Từ nhạy cảm hoặc thô tục 24, Tên riêng 8.
+Mục từ có `notes_for_review` của Haiku: 3,891/3,891; trong đó 1,969 có ghi chú thuộc nhóm "cần xem" (chặn xuất bản hàng loạt). Theo nhóm: Nghĩa đã bỏ có chủ ý 5,256, CEFR ước tính 2,220, Thẻ đã bị bộ kiểm tra bỏ 1,251, Nghĩa gần nhau đã gộp 949, Bộ kiểm tra của job báo lỗi 945, Nghi ngờ nghĩa 928, Còn lại (không nhận ra) 714, Ghi chú về dữ liệu nguồn 583, Gợi ý biên tập 334, Giải thích điều đã giữ hay đã ghi 226, Lưu ý nhẹ về cách dùng 213, Từ nhạy cảm hoặc thô tục 176, Tên riêng 35.
 
 ## 9. Dung lượng cơ sở dữ liệu
 
 |  | trước lần gửi đầu | bây giờ | tăng |
 |---|---|---|---|
-| toàn cơ sở dữ liệu (pg_database_size) | 251.41 MB | 256.73 MB | 5.31 MB |
-| các bảng bị ghi (17, gồm chỉ mục và TOAST) | 6.23 MB | 11.25 MB | 5.02 MB |
+| toàn cơ sở dữ liệu (pg_database_size) | 251.10 MB | 290.10 MB | 39.00 MB |
+| các bảng bị ghi (17, gồm chỉ mục và TOAST) | 6.07 MB | 43.16 MB | 37.09 MB |
 
 Dung lượng trên đĩa gần như không đổi khi hàng mới dùng lại chỗ trống do các hàng đã xóa để lại (cơ sở dữ liệu vừa được dọn 38 mục từ), nên con số dưới đây mới là con số co giãn được: tổng kích thước DỮ LIỆU của các hàng thuộc những mục từ mới (chưa tính chỉ mục).
 
-Dữ liệu của 474 mục từ mới: 2.75 MB (trung bình 5.9 KB mỗi mục từ). Với 3,497 từ còn có thể gửi, dự kiến thêm khoảng 20.31 MB dữ liệu, chưa tính chỉ mục. Theo bảng: dictionary_entries 839, sense_examples 548, entry_senses 502, entry_answer_aliases 191, sense_synonyms 190, word_forms 173 (KB).
+Dữ liệu của 3,891 mục từ mới: 20.04 MB (trung bình 5.3 KB mỗi mục từ). Với 14 từ còn có thể gửi, dự kiến thêm khoảng 0.07 MB dữ liệu, chưa tính chỉ mục. Theo bảng: dictionary_entries 6,209, sense_examples 3,889, entry_senses 3,760, sense_synonyms 1,405, entry_answer_aliases 1,184, word_forms 1,143 (KB).
 
 ## 10. 30 từ ngẫu nhiên kèm nghĩa
 
 | từ | loại từ | CEFR | nghĩa (meaning_vi) |
 |---|---|---|---|
+| evil | adjective, noun | B2 | độc ác; khó chịu; cái ác; tai họa; xấu xa; tồi tệ |
+| painter | noun | B1 | họa sĩ; thợ sơn; người vẽ tranh; thợ quét sơn |
+| distance | noun, verb | B1 | khoảng cách; khoảng thời gian; sự xa cách; đặt xa; bỏ xa; tách mình ra |
+| shower | noun, verb | B1 | cơn mưa rào; vòi hoa sen; mưa; tiệc tặng quà; tắm vòi sen; tặng dồi dào |
+| vacation | noun, verb | A2 | kỳ nghỉ; kỳ nghỉ chính thức; sự rời khỏi; đi nghỉ; chuyến đi nghỉ; kỳ nghỉ học |
+| gentle | adjective, verb, noun | B2 | hiền hậu; nhẹ nhàng; thuần, dễ bảo; thoai thoải; làm dịu; sâu mồi câu |
+| mount | noun, verb | B2 | ngọn núi; leo lên; cưỡi; tăng dần; ngựa cưỡi; giá đỡ |
+| proposition | noun, verb | B2 | đề xuất; dự luật trưng cầu; mệnh đề; gạ gẫm; kiến nghị; đề án bỏ phiếu |
+| poison | noun, verb | B2 | chất độc; mối hại; rượu; đầu độc; làm ô nhiễm; làm hỏng |
+| meditation | noun | B2 | thiền; bài suy ngẫm; suy ngẫm; thiền định; tiểu luận triết lý; trầm tư |
+| storm | noun, verb | B1 | bão; trận mưa lớn; cuộc tấn công ồ ạt; xông vào; xông vào tấn công; cơn bão |
+| tear | verb, noun | B2 | xé; làm rách; giật mạnh; vết rách; giọt nước mắt; làm đứt |
+| huge | adjective | B1 | khổng lồ; mạnh mẽ; nổi tiếng; rất lớn; lớn lao; thành công rực rỡ |
+| mainland | noun | B2 | đất liền; đảo chính; đảo Great Britain; lục địa; đất liền Anh |
+| injection | noun | B2 | tiêm; mẫu tiêm; bơm ép; vốn rót vào; mũi tiêm; phun vữa |
+| critique | noun, verb | C1 | bài phê bình; lời chỉ trích; nghệ thuật phê bình; phê bình; bài bình luận; nhận xét phê phán |
+| eligible | adjective, noun | B2 | đủ điều kiện; đáng kết hôn; người đủ điều kiện; có quyền tham gia; giàu có, danh giá; ứng viên hợp lệ |
+| plain | adjective, noun, adverb | B1 | đơn giản; rõ ràng; không đẹp; đồng bằng; hoàn toàn; mộc mạc |
 | October | noun | A1 | tháng mười |
+| concrete | adjective, noun, verb | B2 | cụ thể; bê tông; phủ bê tông; thực tế; rõ ràng; đổ bê tông |
+| lifestyle | noun | B1 | lối sống; phong cách tiêu dùng; phong cách sống; thị hiếu tiêu dùng |
+| union | noun, adjective | B2 | sự hợp nhất; sự đoàn kết; công đoàn; thuộc công đoàn; sự kết hợp; sự hòa hợp |
+| controversy | noun | B2 | tranh cãi; tranh luận gay gắt; bất đồng |
+| prize | noun, verb, adjective | B1 | giải thưởng; chiến lợi phẩm; mục tiêu quý giá; quý trọng; cạy; đoạt giải |
+| overcome | verb, adjective | B2 | vượt qua; đánh bại; áp đảo; bị áp đảo; khắc phục; chiến thắng |
+| teens | noun | B1 | tuổi thiếu niên; số từ 13 đến 19; thập niên thứ hai; tuổi teen; khoảng từ 13 đến 19; những năm 10 |
+| pole | noun, verb | B1 | cột; cực; thái cực; chống sào; cọc; địa cực |
+| furniture | noun | A2 | đồ đạc; yên cương; phụ kiện; nội thất; bộ yên ngựa; đồ kim loại gắn |
 | fourth | adjective, noun, verb | A2 | thứ tư; một phần tư; người thứ tư; tán thành sau người thứ ba; vật thứ tư |
-| home | noun, adverb, adjective | A1 | nhà; quê hương; về nhà; trong nước; tổ ấm; quê nhà |
-| he | pronoun, noun, exclamation | A1 | anh ấy; trò chơi đuổi bắt; ha ha; ông ấy; hi hi; cậu ấy |
-| film | noun, verb | A2 | phim; cuộn phim; màng mỏng; quay phim; phủ màng; phim điện ảnh |
-| yes | exclamation, noun, verb, determiner | A1 | vâng; tuyệt; lời đồng ý; phiếu thuận; đồng ý; có đấy |
-| weekend | noun, verb, adjective | A1 | cuối tuần; nghỉ cuối tuần; ngày nghỉ cuối tuần; đi chơi cuối tuần; dành cho cuối tuần |
-| someone | pronoun, noun | A2 | ai đó; người nào đó; nhân vật quan trọng; người đặc biệt; người có tiếng |
-| difficult | adjective | B1 | khó; khó tính; không sẵn lòng; khó khăn; bướng bỉnh; hóc búa |
-| wait | verb, noun, exclamation | A1 | chờ; phục vụ; sự chờ đợi; cuộc phục kích; khoan đã; đợi |
-| remember | verb | A1 | nhớ lại; ghi nhớ; nhớ làm; để lại cho; gửi lời hỏi thăm; hồi tưởng |
-| hate | noun, verb | B1 | sự căm ghét; lời lẽ thù ghét; ghét; căm ghét; công kích; nỗi ghét |
-| glass | noun, verb | A2 | thủy tinh; ly; ly đầy; đồ thủy tinh; lắp kính; đập ly vào |
-| everything | pronoun, noun | A2 | tất cả; mọi thứ; mọi việc ổn; bánh bagel tổng hợp; tất cả mọi thứ; tình trạng tốt |
-| think | verb, noun | A1 | suy nghĩ; nghĩ rằng; hình dung; định; sự suy nghĩ; cân nhắc |
-| ride | verb, noun | A2 | cưỡi; đi nhờ xe; lướt đi; chuyến đi; chuyến đi nhờ; trò chơi cảm giác mạnh |
-| quickly | adverb | A2 | nhanh chóng; chẳng bao lâu; mau lẹ; ngay sau đó |
-| probably | adverb | A2 | có lẽ; chắc là; hầu như chắc chắn |
-| white | adjective, noun, verb | A1 | trắng; da trắng; màu trắng; người da trắng; bướm trắng; làm trắng |
-| meet | verb, noun, adjective | A1 | gặp; họp; cuộc thi đấu; thích hợp; gặp gỡ; tụ họp |
-| reason | noun, verb | A2 | lý do; lý trí; suy luận; tranh luận; nguyên nhân; cớ |
-| young | adjective, noun, verb | A1 | trẻ; mới mẻ; con non; trẻ hóa; non trẻ; còn non trẻ |
-| speak | verb, noun | A1 | nói; trò chuyện; phát biểu; biết nói; thể hiện; biệt ngữ |
-| travel | verb, noun | A2 | đi du lịch; lan truyền; đi khắp; du lịch; các chuyến đi; đi lại |
-| same | adjective, adverb, pronoun | A1 | giống nhau; tương tự; như nhau; điều tương tự; cùng một; giống như |
-| island | noun, verb | A2 | hòn đảo; ốc đảo; cô lập bằng nước; đảo; điểm khác biệt; biến thành đảo |
-| radio | noun, verb | A2 | sóng vô tuyến; máy thu thanh; gọi bằng bộ đàm; vô tuyến; radio; truyền tin qua vô tuyến |
-| two | number, noun | A1 | hai; chữ số 2; hai giờ; số hai; số 2 |
-| father | noun, verb | A1 | cha; tổ tiên; ông; làm cha; nuôi dưỡng; bố |
-| explain | verb | B1 | giải thích; lý giải; thanh minh; làm rõ; giải thích nguyên nhân; biện minh |
+| stall | noun, verb | B2 | quầy hàng; chuồng ngựa; sự trì hoãn; sự chết máy; chết máy; câu giờ |
 
 ## 10b. 30 mục ngẫu nhiên ĐỦ ĐIỀU KIỆN xuất bản (tiêu chí của nút xuất bản hàng loạt)
 
-180/474 mục từ mới đủ điều kiện (đủ tầng A, không có ghi chú "cần xem"); giữ lại 294 mục, một mục có thể có nhiều lý do: Bộ kiểm tra của job báo lỗi 155, Nghi ngờ nghĩa 100, Còn lại (không nhận ra) 99, Từ nhạy cảm hoặc thô tục 21, Tên riêng 8. Chưa mục nào được xuất bản.
+1,902/3,868 mục từ mới còn chờ duyệt đủ điều kiện (đủ tầng A, không có ghi chú "cần xem"); giữ lại 1,966 mục, một mục có thể có nhiều lý do: Nghi ngờ nghĩa 866, Bộ kiểm tra của job báo lỗi 715, Còn lại (không nhận ra) 668, Từ nhạy cảm hoặc thô tục 162, Tên riêng 35. 23 mục đã được xuất bản bằng tay ở giao diện (không phải do công cụ này) và không tính ở đây.
 
 | từ | loại từ | CEFR | các nghĩa tiếng Việt (mỗi sense một nhóm) |
 |---|---|---|---|
+| festival | noun | B1 | (noun) lễ hội; ngày hội; ngày lễ · (noun) liên hoan; hội diễn; festival · (noun) lễ hội thần thoại; lễ tế thần |
+| tale | noun, verb | B2 | (noun) câu chuyện; truyện kể; chuyện · (noun) lời đồn; chuyện bịa; lời nói dối · (verb) kể chuyện; nói chuyện |
+| supervision | noun | C1 | (noun) sự giám sát; sự quản lý · (noun) sự giám sát an toàn; sự kiểm soát · (noun) buổi hướng dẫn; buổi tư vấn học thuật |
 | nobody | pronoun, noun | A2 | (pronoun) không ai; chẳng ai · (noun) kẻ vô danh; người chẳng ra gì |
+| crude | adjective, noun | C1 | (adjective) thô; chưa tinh chế; nguyên chất · (adjective) thô sơ; sơ sài; kém tinh xảo · (adjective) thô lỗ; thiếu tế nhị; tục tĩu · (noun) dầu thô |
+| edit | noun, verb | B2 | (noun) chỉnh sửa; sửa đổi · (noun) bản dựng; bản cắt ghép · (verb) biên tập; chỉnh sửa · (verb) cắt ghép; dựng phim · (verb) biên tập; làm chủ biên · (verb) chỉnh sửa; cập nhật |
+| risk | noun, verb | B1 | (noun) rủi ro; nguy cơ · (noun) mối nguy; yếu tố rủi ro · (verb) mạo hiểm; liều; đánh cược |
+| spill | verb, noun | B1 | (verb) làm đổ; làm vung vãi · (verb) tràn ra; chảy ra · (verb) tràn ra; đổ ra · (noun) chỗ đổ; vết đổ · (noun) cú ngã; cú té |
+| prescription | noun | B2 | (noun) đơn thuốc; toa thuốc; đơn kê · (noun) thuốc theo đơn; thuốc kê toa · (noun) phương thuốc; giải pháp; công thức · (noun) sự ban hành; sự quy định · (noun) sự quy định chuẩn mực · (noun) thời hiệu |
+| vocal | adjective, noun | C1 | (adjective) thuộc giọng nói; bằng giọng nói; về âm thanh · (adjective) thẳng thắn; lớn tiếng; công khai · (noun) phần hát; giọng hát |
+| tunnel | noun, verb | B1 | (noun) đường hầm; hầm · (noun) hang; ụ · (verb) đào hầm; khoét đường hầm |
+| organize | verb | B2 | (verb) sắp xếp; tổ chức; bố trí · (verb) tổ chức; lên kế hoạch; điều phối · (verb) tổ chức công đoàn; liên kết |
+| lend | verb | B1 | (verb) cho mượn; cho vay · (verb) cho vay · (verb) phù hợp với; thích hợp cho |
+| moderate | adjective, noun, verb | B2 | (adjective) vừa phải; điều độ; chừng mực · (adjective) trung bình; tầm trung · (adjective) ôn hòa; nhẹ nhàng · (noun) người ôn hòa; người theo phái ôn hòa · (verb) làm dịu; giảm bớt; điều tiết |
+| nerve | noun, verb | B2 | (noun) dây thần kinh · (noun) gan dạ; sự táo bạo; sự trơ tráo · (noun) sự bình tĩnh; sự kiên nhẫn · (noun) sự lo lắng; sự căng thẳng · (verb) tiếp thêm can đảm; tiếp thêm sức mạnh |
+| self | noun, pronoun, verb, adjective | B1 | (noun) bản thân; bản chất; tính cách · (noun) cái tôi; bản ngã · (pronoun) chính nó; chính anh ấy; chính cô ấy · (verb) tự thụ phấn; giao phối cận huyết · (adjective) đơn sắc; thuần chất |
+| founder | noun, verb | B2 | (noun) người sáng lập; người thành lập · (verb) chìm; đắm · (verb) thất bại; sụp đổ · (verb) vấp ngã; què |
+| fantastic | adjective | B1 | (adjective) tuyệt vời; tuyệt diệu · (adjective) hoang đường; viển vông · (adjective) viển vông; phi thực tế |
+| mountain | noun | A2 | (noun) núi; ngọn núi · (noun) núi; đống lớn · (noun) thử thách lớn; việc khó khăn |
+| resolution | noun | C1 | (noun) quyết định; nghị quyết · (noun) quyết tâm; kiên quyết · (noun) lời hứa quyết tâm; quyết định cá nhân · (noun) độ phân giải · (noun) độ phân giải; số điểm ảnh |
+| whoever | pronoun | B2 | (pronoun) bất cứ ai; ai; người nào · (pronoun) rốt cuộc là ai; ai thế nhỉ |
+| congregation | noun | C1 | (noun) hội chúng; giáo đoàn; tín đồ · (noun) đám đông; cuộc tụ họp · (noun) đàn chim tụ họp |
+| suddenly | adverb | B1 | (adverb) đột ngột; bỗng nhiên; bất ngờ |
+| pass | verb, noun | B1 | (verb) đi qua; vượt qua; đi ngang qua · (verb) đưa; chuyển · (verb) thi đỗ; qua môn · (noun) đèo; hẻm núi · (noun) giấy thông hành; thẻ ra vào |
+| descent | noun | B2 | (noun) sự đi xuống; sự hạ xuống; sự xuống dốc · (noun) lối xuống; đường dốc xuống · (noun) dòng dõi; gốc gác; nguồn gốc tổ tiên · (noun) sự suy giảm; sự sa sút; sự đi xuống |
+| superior | adjective, noun | B2 | (adjective) cao cấp; vượt trội; ưu việt · (adjective) không hề nao núng; bất khuất · (noun) cấp trên; người bề trên |
 | partner | noun, verb | B1 | (noun) đối tác; bạn đồng hành; bạn nhảy · (noun) bạn đời; người yêu; vợ chồng · (verb) hợp tác; cộng tác; kết đối tác |
-| future | noun, adjective | B1 | (noun) tương lai; thời gian sắp tới · (noun) triển vọng; số phận · (noun) thì tương lai · (adjective) tương lai; sau này |
-| land | noun, verb | A2 | (noun) đất liền; mặt đất · (noun) đất đai; thửa đất · (noun) đất nước; vùng đất · (noun) đất canh tác; đất trồng · (verb) hạ cánh; đáp xuống · (verb) cập bờ; đưa vào bờ |
-| hour | noun | A1 | (noun) giờ; tiếng · (noun) thời điểm; giờ · (noun) giờ làm; số giờ làm việc |
-| hotel | noun | A1 | (noun) khách sạn; nhà nghỉ · (noun) dinh thự; biệt thự lớn · (noun) quán rượu; quán bia |
-| march | noun, verb | B1 | (noun) bước đều; diễu hành · (noun) cuộc tuần hành; cuộc biểu tình · (verb) đi đều bước; diễu hành · (verb) áp giải; dẫn đi · (verb) tuần hành; biểu tình |
-| sorry | adjective, exclamation | A1 | (adjective) xin lỗi; hối hận; ân hận · (adjective) thương hại; buồn; tiếc · (adjective) tồi tàn; thảm hại; đáng thương · (adjective) tệ hại; kém cỏi · (exclamation) xin lỗi; rất tiếc · (exclamation) xin lỗi, bạn nói gì cơ; cho hỏi lại |
-| traffic | noun, verb | B2 | (noun) giao thông; xe cộ qua lại · (noun) buôn bán; buôn lậu · (noun) lượng khách; lượng truy cập · (noun) lưu lượng dữ liệu; lưu lượng truyền tải · (verb) buôn bán; buôn lậu |
-| from | preposition | A1 | (preposition) từ; của; đến từ · (preposition) từ; kể từ · (preposition) từ; đến |
-| him | pronoun, noun | A1 | (pronoun) anh ấy; ông ấy; cậu ấy · (noun) con đực; người đàn ông |
-| each | determiner, adverb, pronoun, noun | A1 | (determiner) mỗi; từng · (adverb) mỗi cái; mỗi người · (adverb) riêng từng người; mỗi người · (pronoun) mỗi người; mỗi cái · (noun) một đơn vị; một cái lẻ |
-| October | noun | A1 | (noun) tháng mười |
-| wonderful | adjective, adverb | A2 | (adjective) tuyệt vời; tuyệt diệu; rất tốt · (adjective) kỳ diệu; phi thường; đáng kinh ngạc · (adverb) vô cùng; cực kỳ |
-| live | verb, adjective, adverb | A2 | (verb) sống; còn sống · (verb) sống ở; cư trú; ở · (verb) tồn tại; sống sót · (adjective) sống; đang sống · (adjective) trực tiếp · (adverb) trực tiếp |
-| house | noun, verb | A1 | (noun) ngôi nhà; căn nhà · (noun) công ty; hãng · (noun) hạ viện; viện · (noun) khán giả; buổi diễn · (verb) cho ở; chứa; đặt vào |
-| design | noun, verb | B1 | (noun) bản thiết kế; kế hoạch; mẫu thiết kế · (noun) kiểu dáng; họa tiết; mẫu hoa văn · (noun) ý đồ; mưu đồ · (verb) thiết kế; phác thảo |
-| fact | noun | A2 | (noun) sự thật; thực tế · (noun) thông tin; dữ kiện · (noun) hành vi phạm tội |
-| style | noun, verb | B1 | (noun) phong cách; lối; kiểu · (noun) phong độ; gu; vẻ sang · (noun) kiểu dáng; mốt · (noun) kim đồng hồ mặt trời; vòi nhụy · (verb) thiết kế; tạo kiểu · (verb) gọi là; phong tước |
-| remember | verb | A1 | (verb) nhớ lại; hồi tưởng; gợi nhớ · (verb) ghi nhớ; nhớ kỹ; thuộc lòng · (verb) nhớ làm; đừng quên · (verb) để lại cho; tặng tiền · (verb) gửi lời hỏi thăm; gửi lời chào |
-| little | adjective, adverb, determiner, noun | A1 | (adjective) nhỏ; bé; nhỏ bé · (adjective) ngắn; không xa · (adverb) ít; một chút · (adverb) hoàn toàn không; chẳng hề · (determiner) ít; một chút · (noun) một chút; chút ít |
-| think | verb, noun | A1 | (verb) suy nghĩ; cân nhắc · (verb) nghĩ rằng; cho rằng; tin rằng · (verb) hình dung; nghĩ tới · (verb) định; dự định · (noun) sự suy nghĩ; lần suy nghĩ |
-| word | noun, verb, exclamation | A1 | (noun) từ; chữ · (noun) lời hứa; tin tức · (verb) diễn đạt; viết · (exclamation) đúng vậy; chuẩn luôn |
-| date | noun, verb | A2 | (noun) ngày tháng; ngày · (noun) quả chà là; trái chà là · (noun) buổi hẹn hò; cuộc hẹn; người hẹn hò · (verb) ghi ngày; đề ngày · (verb) xác định niên đại; định tuổi · (verb) hẹn hò |
-| else | adjective, adverb, conjunction | A2 | (adjective) khác; thêm · (adverb) cách khác; thời điểm khác; nếu không · (conjunction) nếu không thì; kẻo |
-| follow | verb | A2 | (verb) đi theo; bám theo; đuổi theo · (verb) xảy ra sau; nối theo; tiếp theo · (verb) làm theo; tuân theo; thực hiện theo · (verb) hiểu; theo kịp; nắm được · (verb) theo dõi; chú ý đến · (verb) theo dõi; đăng ký theo dõi |
-| here | adverb, noun | A1 | (adverb) ở đây; tại đây · (adverb) đến đây; lúc này · (adverb) về điểm này; trong vấn đề này · (adverb) đã đến; hiện tại · (noun) nơi này; chỗ này |
-| ride | verb, noun | A2 | (verb) cưỡi; đi xe · (verb) đi nhờ xe; được chở · (verb) lướt đi; bay đi · (noun) chuyến đi; buổi cưỡi · (noun) chuyến đi nhờ; sự đưa đón · (noun) trò chơi cảm giác mạnh; trò chơi tàu lượn |
-| ready | adjective, verb, noun | A2 | (adjective) sẵn sàng; chuẩn bị xong · (adjective) sẵn lòng; vui lòng · (adjective) nhanh nhạy; lanh lợi · (verb) chuẩn bị; sửa soạn · (noun) tiền mặt |
-| pay | verb, noun | A2 | (verb) trả tiền; thanh toán · (verb) gửi tiền; nộp vào · (verb) có lợi; đáng công · (noun) tiền lương; lương bổng |
+| landlord | noun, verb | B1 | (noun) chủ nhà; chủ cho thuê · (noun) chủ quán rượu · (verb) cho thuê |
+| trust | noun, verb | B1 | (noun) niềm tin; sự tin cậy; lòng tin · (noun) sự mua chịu; tín dụng · (noun) quỹ ủy thác; tài sản ủy thác · (verb) tin tưởng; tin cậy · (verb) tin rằng; mong rằng |
+| interval | noun | B2 | (noun) khoảng thời gian; quãng thời gian · (noun) khoảng cách; quãng cách · (noun) quãng nhạc; khoảng cách âm · (noun) giờ nghỉ giữa; màn nghỉ |
 
 ## 11. Mười mục từ đầy đủ nội dung (ngẫu nhiên)
 
@@ -381,6 +845,23 @@ Dữ liệu của 474 mục từ mới: 2.75 MB (trung bình 5.9 KB mỗi mục 
   - She admitted that she has a drinking problem. — Cô ấy thừa nhận mình có vấn đề nghiện rượu.
 - admin_note: [auto] nguồn: wiktionary, ref_word_frequency, datamuse (chỉ là ứng viên của Haiku), haiku · model: claude-haiku-5-5 · job: 67ed51f2-f4b3-4283-906f-fd8cc671f914 · published=false: chờ duyệt (ENRICHMENT_PUBLISH_POLICY=review) · ước tính: cefr_level=A2 · loại từ của Wiktionary không có trong mục: adjective · ghi chú của Haiku: Nghĩa tính từ và động từ trong dữ liệu nguồn là nghĩa hiếm, không tiêu chu
 
+### mud  _(noun, verb · B2 · chờ duyệt)_
+
+- IPA: /mʌd/ / - · audio: có · `meaning_vi`: bùn; làm bẩn bùn; bùn lầy; phủ bùn
+- (noun) A wet mixture of water and soil or fine earth that becomes soft and sticky. → **bùn; bùn lầy**
+  - The children came home covered in mud after playing in the rain. — Bọn trẻ về nhà dính đầy bùn sau khi chơi dưới mưa.
+- (verb) To make something dirty or muddy, or to cover something with mud. → **làm bẩn bùn; phủ bùn**
+  - The heavy truck mudded the road after the storm. — Chiếc xe tải nặng làm bẩn cả con đường sau cơn bão.
+- admin_note: [auto] nguồn: wiktionary, ref_word_frequency, datamuse (chỉ là ứng viên của Haiku), haiku · model: claude-haiku-5-5 · job: d062838b-51e1-4c49-9a6c-aa28e3e3eea7 · published=false: chờ duyệt (ENRICHMENT_PUBLISH_POLICY=review) · ước tính: cefr_level=B2 · [ipa-untagged] ipa_us lấy từ IPA đầu tiên không gắn thẻ giọng của Wiktionary, không rõ giọng · ghi chú của Haiku: Nghĩa 'vữa trát tường' và 'bê tông
+
+### tonne  _(noun · B2 · chờ duyệt)_
+
+- IPA: - / /tʌn/ · audio: có · `meaning_vi`: tấn; tấn mét
+- (noun) A unit of mass equal to 1000 kilograms, used for measuring heavy weights such as cargo. → **tấn; tấn mét**
+  - The ship can carry up to 500 tonnes of cargo. — Con tàu có thể chở tối đa 500 tấn hàng hóa.
+  - Global steel production reached over 1,800 million tonnes last year. — Sản lượng thép toàn cầu đạt hơn 1.800 triệu tấn năm ngoái.
+- admin_note: [auto] nguồn: wiktionary, ref_word_frequency, datamuse (chỉ là ứng viên của Haiku), haiku · model: claude-haiku-5-5 · job: c1f120a0-eda8-4162-a141-de67de27333e · published=false: chờ duyệt (ENRICHMENT_PUBLISH_POLICY=review) · ước tính: cefr_level=B2 · ghi chú của Haiku: Mục 'Tonne' là họ người Đức (tên riêng) nên không lập nội dung; chỉ lập mục cho danh từ chung. | Dữ liệu nguồn chỉ có một nghĩa; 
+
 ### stand  _(verb, noun · A2 · chờ duyệt)_
 
 - IPA: - / /ˈstænd/ · audio: có · `meaning_vi`: đứng; đứng dậy; đặt thẳng đứng; sự đứng; lập trường; giá đỡ
@@ -397,6 +878,19 @@ Dữ liệu của 474 mục từ mới: 2.75 MB (trung bình 5.9 KB mỗi mục 
 - (noun) A support or frame on which something is placed or hung upright. → **giá đỡ; chân đế**
   - He placed the music sheets on the music stand. — Anh ấy đặt bản nhạc lên giá nhạc.
 - admin_note: [auto] nguồn: wiktionary, ref_word_frequency, datamuse (chỉ là ứng viên của Haiku), haiku · model: claude-haiku-5-5 · job: 0491bf62-e2e2-4dca-b57e-c2d265934eaa · published=false: chờ duyệt (ENRICHMENT_PUBLISH_POLICY=review) · thiếu tầng B: is_countable · ước tính: cefr_level=A2 · ghi chú của Haiku: Đã gộp nghĩa 'quầy hàng' vào nghĩa 'giá đỡ' để đủ giới hạn 6 sense; nghĩa 'quầy hàng' và 'buổi biểu 
+
+### democratic  _(adjective, noun · B2 · chờ duyệt)_
+
+- IPA: /ˌdɛməˈkɹætɪk/ / /ˌdɛməˈkɹætɪk/ · audio: có · `meaning_vi`: dân chủ; bình đẳng; thuộc Đảng Dân chủ; người ủng hộ dân chủ; thuộc về dân chủ
+- (adjective) Relating to democracy; based on or in line with government chosen by the people. → **dân chủ; thuộc về dân chủ**
+  - The country adopted a democratic system after the election. — Đất nước đã áp dụng hệ thống dân chủ sau cuộc bầu cử.
+- (adjective) Showing social equality; treating everyone as equal, without privilege. → **bình đẳng; dân chủ**
+  - She has a democratic style of leadership that values everyone's opinion. — Cô ấy có phong cách lãnh đạo dân chủ, coi trọng ý kiến của mọi người.
+- (adjective) Of or relating to the Democratic Party of the United States. → **thuộc Đảng Dân chủ**
+  - He was elected as a Democratic senator from California. — Ông được bầu làm thượng nghị sĩ Đảng Dân chủ đến từ California.
+- (noun) A supporter or advocate of democracy or democratic politics. → **người ủng hộ dân chủ**
+  - The democratics demanded a greater voice for ordinary citizens. — Những người ủng hộ dân chủ đòi hỏi tiếng nói lớn hơn cho người dân thường.
+- admin_note: [auto] nguồn: wiktionary, ref_word_frequency, datamuse (chỉ là ứng viên của Haiku), haiku · model: claude-haiku-5-5 · job: b185175c-ed43-46bf-a08b-e357fef1e1fd · published=false: chờ duyệt (ENRICHMENT_PUBLISH_POLICY=review) · thiếu tầng B: is_countable · ước tính: cefr_level=B2 · ghi chú của Haiku: Nghĩa 3 (Đảng Dân chủ Mỹ) là nghĩa viết hoa, được tách riêng; cân nhắc thêm nếu cần. | Nghĩa 4 (danh
 
 ### here  _(adverb, noun · A1 · chờ duyệt)_
 
@@ -415,124 +909,55 @@ Dữ liệu của 474 mục từ mới: 2.75 MB (trung bình 5.9 KB mỗi mục 
   - Here is where I met my spouse twelve years ago. — Chính nơi này là nơi tôi gặp vợ/chồng mình mười hai năm trước.
 - admin_note: [auto] nguồn: wiktionary, ref_word_frequency, haiku · model: claude-haiku-5-5 · job: 9c42b119-358e-4254-8865-34c6a880edff · published=false: chờ duyệt (ENRICHMENT_PUBLISH_POLICY=review) · ước tính: cefr_level=A1 · loại từ của Wiktionary không có trong mục: adjective, exclamation · ghi chú của Haiku: Từ điển nguồn có mục adjective nghĩa 'alive' (còn sống) với ví dụ hợp lệ, nhưng đây là cách dùng th
 
-### modern  _(adjective, noun · B1 · chờ duyệt)_
+### highly  _(adverb · B2 · chờ duyệt)_
 
-- IPA: /ˈmɑ.dɚn/ / /ˈmɒd.ən/ · audio: có · `meaning_vi`: hiện đại; thuộc thời kỳ hiện đại; người hiện đại; đương đại; cận hiện đại; người thời nay
-- (adjective) Relating to the present time or recent times, and to the style of today; not ancient or old-fashioned. → **hiện đại; đương đại; mới**
-  - The museum has a modern wing with bright galleries. — Bảo tàng có một cánh hiện đại với những phòng trưng bày sáng sủa.
-  - She prefers modern furniture to antiques. — Cô ấy thích đồ nội thất hiện đại hơn đồ cổ.
-- (adjective) Relating to the period from about 1800 until today, especially in the study of history. → **thuộc thời kỳ hiện đại; cận hiện đại**
-  - Historians often study modern politics separately from earlier periods. — Các nhà sử học thường nghiên cứu chính trị hiện đại tách biệt với các giai đoạn trước.
-  - This course covers modern European history. — Khóa học này bao quát lịch sử châu Âu hiện đại.
-- (noun) A person who lives in modern times, especially one with modern attitudes. → **người hiện đại; người thời nay**
-  - The moderns often rely on technology in their daily lives. — Những người hiện đại thường dựa vào công nghệ trong đời sống hằng ngày.
-  - Some writers criticised the moderns for losing old traditions. — Một số nhà văn chỉ trích người hiện đại vì đánh mất truyền thống xưa.
-- admin_note: [auto] nguồn: wiktionary, ref_word_frequency, datamuse (chỉ là ứng viên của Haiku), haiku · model: claude-haiku-5-5 · job: d92c7531-05a4-4a47-815d-a4a1d520f1d7 · published=false: chờ duyệt (ENRICHMENT_PUBLISH_POLICY=review) · thiếu tầng B: is_countable · ước tính: cefr_level=B1 · ghi chú của Haiku: Sense 2 (lịch sử học) là nghĩa chuyên ngành; có thể cân nhắc gộp với sense 1. | Sense 3 (danh từ) có
+- IPA: /ˈhaɪli/ / - · audio: có · `meaning_vi`: đánh giá cao; rất; khen ngợi; vô cùng; cực kỳ
+- (adverb) In a way that shows high respect or approval; favourably. → **đánh giá cao; khen ngợi**
+  - She spoke highly of her former teacher. — Cô ấy đánh giá rất cao người thầy cũ của mình.
+  - He is highly regarded by his colleagues. — Anh ấy được đồng nghiệp đánh giá rất cao.
+- (adverb) To a great degree; extremely or very much. → **rất; vô cùng; cực kỳ**
+  - The results of the experiment were highly significant. — Kết quả thí nghiệm có ý nghĩa rất lớn.
+  - The job requires highly specialised skills. — Công việc này đòi hỏi kỹ năng chuyên môn cao.
+- admin_note: [auto] nguồn: wiktionary, ref_word_frequency, datamuse (chỉ là ứng viên của Haiku), haiku · model: claude-haiku-5-5 · job: da38aa99-7275-4ee1-b5f0-847a8cf5a073 · published=false: chờ duyệt (ENRICHMENT_PUBLISH_POLICY=review) · ước tính: cefr_level=B2 · [ipa-untagged] ipa_us lấy từ IPA đầu tiên không gắn thẻ giọng của Wiktionary, không rõ giọng · ghi chú của Haiku: Đã rút gọn sense 'highly visible/c
 
-### statement  _(noun, adjective, verb · B1 · chờ duyệt)_
+### terminal  _(noun, adjective · B2 · chờ duyệt)_
 
-- IPA: /ˈsteɪtmənt/ / /ˈsteɪtm(ə)nt/ · audio: có · `meaning_vi`: tuyên bố; sao kê; câu lệnh; quyết định; lập văn bản chính thức; lời tuyên bố
-- (noun) A remark or declaration that is made publicly or formally, giving someone's opinion or position. → **tuyên bố; lời tuyên bố; phát biểu**
-  - The company issued a statement denying the rumours. — Công ty đã ra một thông cáo phủ nhận những tin đồn.
-  - She made a statement to the press about the decision. — Bà ấy đã có một tuyên bố với báo chí về quyết định đó.
-- (noun) A printed document that lists the money paid in and out of a bank or credit account over a period. → **sao kê; bản kê khoản**
-  - Your monthly bank statement arrives by email. — Bản sao kê ngân hàng hàng tháng của bạn được gửi qua email.
-  - Check your credit card statement for any unfamiliar charges. — Hãy kiểm tra bản sao kê thẻ tín dụng xem có khoản phí lạ nào không.
-- (noun) An instruction in a computer program that performs an action but does not return a value. → **câu lệnh**
-  - Each statement in the loop runs once per iteration. — Mỗi câu lệnh trong vòng lặp chạy một lần mỗi vòng.
-  - A missing semicolon can cause a syntax error in this statement. — Thiếu dấu chấm phẩy có thể gây lỗi cú pháp trong câu lệnh này.
-- (adjective) Decisive and impressive, often showing strength or a clear message. → **quyết định; gây ấn tượng mạnh**
-  - They secured a statement win against the reigning champions. — Họ giành được chiến thắng gây ấn tượng mạnh trước nhà vô địch.
-  - The designer's statement jacket turned heads at the event. — Chiếc áo khoác nổi bật của nhà thiết kế thu hút mọi ánh nhìn tại sự kiện.
-- (verb) To officially provide a formal written document setting out a proposition, especially a special educational needs statement in the UK. → **lập văn bản chính thức**
-  - The council decided to statement the child's special educational needs. — Hội đồng quyết định lập văn bản chính thức về nhu cầu giáo dục đặc biệt của đứa trẻ.
-  - They were statemented after a long assessment. — Họ đã được lập văn bản chính thức sau một đợt đánh giá dài.
-- admin_note: [auto] nguồn: wiktionary, ref_word_frequency, datamuse (chỉ là ứng viên của Haiku), haiku · model: claude-haiku-5-5 · job: 075b407e-3f57-49c3-a2b0-82a57c2ce99e · published=false: chờ duyệt (ENRICHMENT_PUBLISH_POLICY=review) · ước tính: cefr_level=B1 · ghi chú của Haiku: Nghĩa 'quyết định, gây ấn tượng' của tính từ là nghĩa đặc thù, có thể cần xem lại mức phổ biến. | Nghĩa động từ thuộc ngữ cảnh An
+- IPA: /ˈtɝmɪnəl/ / /ˈtɜːmɪnəl/ · audio: có · `meaning_vi`: nhà ga; bến cuối; kho chứa; đầu cực; nan y; cuối cùng
+- (noun) A building at an airport where passengers go to get on or off airplanes. → **nhà ga; ga sân bay**
+  - Terminal 1 is for domestic flights, and Terminal 2 is for international flights. — Nhà ga số 1 dành cho chuyến bay nội địa, còn nhà ga số 2 dành cho chuyến bay quốc tế.
+- (noun) A station at the end of a railway line, or a place where ferries or buses start and finish their routes. → **bến cuối; ga cuối**
+  - The train goes to the terminal at the end of the line. — Tàu chạy đến ga cuối của tuyến.
+- (noun) A storage facility where oil or chemicals are kept before being distributed. → **kho chứa; bể chứa**
+  - The oil is stored in a large terminal near the port. — Dầu được chứa trong một kho lớn gần cảng.
+- (noun) The point where a wire or cable ends and signals or power are connected to a device. → **đầu cực; đầu nối**
+  - Connect the red wire to the positive terminal of the battery. — Nối dây đỏ với cực dương của pin.
+- (adjective) Causing death; certain to end in death, especially of a disease. → **nan y; không thể chữa**
+  - He was diagnosed with terminal cancer last year. — Năm ngoái ông được chẩn đoán mắc ung thư giai đoạn cuối.
+- (adjective) Happening at the end of something, such as a period of time or a series. → **cuối cùng; ở cuối**
+  - The terminal stage of the project was the most difficult. — Giai đoạn cuối cùng của dự án là khó khăn nhất.
+- admin_note: [auto] nguồn: wiktionary, ref_word_frequency, datamuse (chỉ là ứng viên của Haiku), haiku · model: claude-haiku-5-5 · job: 80ca0e85-9b71-48d7-9ec5-c5b429304c6c · published=false: chờ duyệt (ENRICHMENT_PUBLISH_POLICY=review) · ước tính: cefr_level=B2 · loại từ của Wiktionary không có trong mục: verb · ghi chú của Haiku: Đã gộp sense máy trạm (computer terminal) vào sense thiết bị đầu cuối để giới h
 
-### fun  _(noun, adjective, verb · A2 · chờ duyệt)_
+### resemble  _(verb · B2 · chờ duyệt)_
 
-- IPA: /fʌn/ / /fʌn/ · audio: có · `meaning_vi`: niềm vui; trò đùa nghịch; vui vẻ; sặc sỡ; trêu chọc; sự thú vị
-- (noun) Enjoyment, amusement or pleasure that you get from an activity or experience. → **niềm vui; sự thú vị; sự giải trí**
-  - Grafting your boss's face onto the hind end of a donkey is fun, but serious fun is when you create the impossible and it looks real. — Ghép mặt sếp lên mông lừa thì thật vui, nhưng niềm vui thật sự là khi bạn tạo ra điều không thể mà trông vẫn chân thực.
-  - We had great fun at the beach all afternoon. — Chúng tôi đã có những giờ phút vui vẻ tuyệt vời ở bãi biển cả buổi chiều.
-- (noun) Playful activity that is often noisy and energetic. → **trò đùa nghịch; sự nô đùa**
-  - The children's fun in the garden got a little too loud for the neighbours. — Trò nô đùa của bọn trẻ trong vườn làm hàng xóm thấy hơi ồn ào.
-  - Stop the fun before someone gets hurt. — Dừng trò đùa nghịch lại trước khi ai đó bị thương.
-- (adjective) Enjoyable, entertaining or amusing to be with or to do. → **vui vẻ; thú vị**
-  - We had a fun time at the party. — Chúng tôi đã có một buổi tiệc rất vui.
-  - He is such a fun person to be with. — Anh ấy là người rất thú vị khi ở cạnh.
-- (adjective) Bright, playful or flamboyant in style, especially clothing. → **sặc sỡ; lạ mắt**
-  - This year's fashion style is much more fun than recent seasons. — Phong cách thời trang năm nay sặc sỡ hơn nhiều so với các mùa gần đây.
-  - She wore a fun pair of striped socks with her suit. — Cô ấy đi đôi tất kẻ sọc lạ mắt cùng bộ vest.
-- (verb) To tease someone or make fun of them in a light-hearted way. → **trêu chọc; đùa cợt**
-  - Don't get upset; I was only funning you. — Đừng bực mình; tôi chỉ trêu bạn thôi.
-  - My brother spent the whole evening funning me about my haircut. — Anh trai tôi trêu tôi suốt buổi tối về kiểu tóc của tôi.
-- admin_note: [auto] nguồn: wiktionary, ref_word_frequency, datamuse (chỉ là ứng viên của Haiku), haiku · model: claude-haiku-5-5 · job: 9f453d9c-ecc0-48f4-97de-7417cf326b1f · published=false: chờ duyệt (ENRICHMENT_PUBLISH_POLICY=review) · ước tính: cefr_level=A2 · ghi chú của Haiku: Dạng so sánh funner, funnest chỉ là không chuẩn, không đưa vào senses. | Nghĩa động từ thuộc khẩu ngữ, cần kiểm tra lại mức độ ph
+- IPA: /ɹɪˈzɛmbəl/ / /ɹɪˈzɛmbəl/ · audio: có · `meaning_vi`: giống; na ná; mang nét giống
+- (verb) To be like or similar to someone or something in appearance or qualities. → **giống; na ná; mang nét giống**
+  - The twins resemble each other so closely that even their teachers confuse them. — Hai anh em sinh đôi giống nhau đến mức ngay cả giáo viên cũng nhầm lẫn.
+  - The new building resembles a large ship floating above the city streets. — Tòa nhà mới trông giống một con tàu lớn lơ lửng trên các con phố thành phố.
+- admin_note: [auto] nguồn: wiktionary, ref_word_frequency, haiku · model: claude-haiku-5-5 · job: 0f58550e-336a-4d80-97d7-a5ea3c91fe1f · published=false: chờ duyệt (ENRICHMENT_PUBLISH_POLICY=review) · ước tính: cefr_level=B2 · ghi chú của Haiku: Dữ liệu nguồn có nhiều nghĩa cổ hoặc lỗi thời (liken, counterfeit, cause to imitate) đã bỏ qua vì không phổ biến với người học hiện đại. | Chỉ ghi một sense vì các ngh
 
-### hotel  _(noun · A1 · chờ duyệt)_
+### mask  _(noun, verb · B2 · chờ duyệt)_
 
-- IPA: - / /həʊˈtɛl/ · audio: có · `meaning_vi`: khách sạn; dinh thự; quán rượu; nhà nghỉ; biệt thự lớn; quán bia
-- (noun) A building where paying guests can stay overnight, with rooms, meals and other services. → **khách sạn; nhà nghỉ**
-  - We booked a room at a hotel near the beach. — Chúng tôi đặt một phòng ở khách sạn gần bãi biển.
-  - The hotel offers free breakfast to all guests. — Khách sạn cung cấp bữa sáng miễn phí cho mọi khách.
-- (noun) A large, grand private house in France, especially one belonging to a wealthy family in the past. → **dinh thự; biệt thự lớn**
-  - The old hotel in Paris had been home to a noble family. — Dinh thự cũ ở Paris từng là nơi ở của một gia đình quý tộc.
-- (noun) A public house where people go to drink alcohol, used in Australia, Canada and western regions. → **quán rượu; quán bia**
-  - After work, we went to the hotel for a quick drink. — Sau giờ làm, chúng tôi ghé quán rượu uống nhanh một ly.
-- admin_note: [auto] nguồn: wiktionary, ref_word_frequency, haiku · model: claude-haiku-5-5 · job: fa87e36d-a3f3-4324-90c5-c1fd671185a3 · published=false: chờ duyệt (ENRICHMENT_PUBLISH_POLICY=review) · ước tính: cefr_level=A1 · ghi chú của Haiku: Nghĩa 'nhà khách/restaurant' ở Nam Á và nghĩa 'quân hiệu Hotel' bị bỏ qua vì hiếm hoặc không phổ biến. | Nghĩa 'khách sạn lớn trong Monopoly' bị bỏ vì chuyên biệt. | N
-
-### easy  _(adjective, adverb, noun · A1 · chờ duyệt)_
-
-- IPA: /ˈiːzi/ / - · audio: có · `meaning_vi`: dễ dàng; thoải mái; dễ tính; việc dễ dàng; đơn giản; thanh thản
-- (adjective) Requiring little skill, effort, or work to do or achieve. → **dễ dàng; đơn giản**
-  - The teacher gave an easy test to her students. — Giáo viên đã cho học sinh một bài kiểm tra dễ.
-  - Fixing the bike was easy once I found the right tool. — Sửa chiếc xe đạp rất dễ khi tôi tìm được đúng dụng cụ.
-- (adjective) Relaxed and free from worry, discomfort, or strain. → **thoải mái; thanh thản**
-  - Now that the exams are over, I can finally feel easy. — Giờ kỳ thi đã xong, cuối cùng tôi cũng thấy thanh thản.
-  - She lives an easy life in the countryside. — Cô ấy sống một cuộc đời thoải mái ở vùng quê.
-- (adjective) Free from strictness, harshness, or formality; relaxed in manner. → **dễ tính; nhẹ nhàng**
-  - Her easy manners made everyone feel welcome. — Cách cư xử dễ tính của cô ấy khiến mọi người cảm thấy được chào đón.
-  - The coach was easy on the players after the long season. — Huấn luyện viên nhẹ nhàng với các cầu thủ sau mùa giải dài.
-- (adverb) In a relaxed or casual way; without hurry or strain. → **thoải mái; nhẹ nhàng**
-  - After his illness, John decided to take it easy. — Sau khi ốm, John quyết định nghỉ ngơi thoải mái.
-  - Just go easy on the sugar in your tea. — Chỉ cần cho ít đường vào trà thôi.
-- (noun) Something that is easy to do or achieve. → **việc dễ dàng**
-  - For him, the final round was an easy. — Với anh ấy, vòng cuối là việc dễ dàng.
-- admin_note: [auto] nguồn: wiktionary, ref_word_frequency, datamuse (chỉ là ứng viên của Haiku), haiku · model: claude-haiku-5-5 · job: 43263ad2-2b1d-49bc-9c76-8f3ef221bb0d · published=false: chờ duyệt (ENRICHMENT_PUBLISH_POLICY=review) · thiếu tầng B: is_countable · ước tính: cefr_level=A1 · [ipa-untagged] ipa_us lấy từ IPA đầu tiên không gắn thẻ giọng của Wiktionary, không rõ giọng · loại từ của Wiktionary k
-
-### need  _(noun, verb · A2 · chờ duyệt)_
-
-- IPA: /nid/ / /niːd/ · audio: có · `meaning_vi`: nhu cầu; nhu cầu thiết yếu; cảnh nghèo khó; cần; muốn; phải
-- (noun) A requirement for something; something that is necessary or wanted. → **nhu cầu; sự cần thiết**
-  - There is no need to speculate; we can easily find out for sure. — Không cần phải suy đoán; chúng ta có thể dễ dàng tìm ra chắc chắn.
-  - She grew irritated with his constant need for attention. — Cô ấy trở nên khó chịu vì anh ấy luôn đòi hỏi được chú ý.
-- (noun) A strong desire or craving for something considered essential or basic. → **nhu cầu thiết yếu; sự thôi thúc**
-  - Humans have a basic need for food, water and shelter. — Con người có nhu cầu cơ bản về thức ăn, nước uống và chỗ ở.
-- (noun) A state of having too little money or resources to live properly. → **cảnh nghèo khó; sự túng thiếu**
-  - The charity helps families living in need. — Tổ chức từ thiện giúp đỡ các gia đình đang túng thiếu.
-- (verb) To require something because it is essential for existence or success. → **cần; đòi hỏi**
-  - Living things need water to survive. — Sinh vật sống cần nước để tồn tại.
-  - You do not always need to go to the library to study. — Bạn không nhất thiết phải đến thư viện để học.
-- (verb) To want something very much or feel that you must have it. → **muốn; mong cần**
-  - After ten days of hiking, I needed a shower and a shave. — Sau mười ngày đi bộ đường dài, tôi rất cần tắm và cạo râu.
-- (verb) To be obliged or required to do something; used with a bare infinitive, mainly in negatives and questions. → **phải; cần phải**
-  - I need not go if I don't want to. — Tôi không nhất thiết phải đi nếu tôi không muốn.
-  - Need I fill in more forms? — Tôi có cần điền thêm mẫu đơn nào không?
-- admin_note: [auto] nguồn: wiktionary, ref_word_frequency, haiku · model: claude-haiku-5-5 · job: adf0be2f-859c-4ce4-a356-225f61367186 · published=false: chờ duyệt (ENRICHMENT_PUBLISH_POLICY=review) · ước tính: cefr_level=A2 · ghi chú của Haiku: Nghĩa danh từ 'poverty' được xếp là trang trọng và có thể cổ; cân nhắc giữ hoặc bỏ. | Nguồn Wiktionary có ghi nghĩa động từ 'need' là động từ khuyết thiếu; đã giữ nghĩ
-
-### fourth  _(adjective, noun, verb · A2 · chờ duyệt)_
-
-- IPA: /fɔɹθ/ / /fɔːθ/ · audio: có · `meaning_vi`: thứ tư; một phần tư; người thứ tư; tán thành sau người thứ ba; vật thứ tư
-- (adjective) Coming after the third one in a sequence or order. → **thứ tư**
-  - She is the fourth daughter in the family. — Cô ấy là con gái thứ tư trong gia đình.
-  - He finished the race in fourth place. — Anh ấy về thứ tư trong cuộc đua.
-- (noun) One of four equal parts of a whole. → **một phần tư**
-  - Cut the cake into fourths. — Cắt chiếc bánh thành bốn phần bằng nhau.
-- (noun) The person or thing in the fourth position. → **người thứ tư; vật thứ tư**
-  - He arrived as the fourth in line. — Anh ấy đến ở vị trí thứ tư trong hàng.
-- (verb) To agree with a proposal after others have already agreed to it. → **tán thành sau người thứ ba**
-  - After the third member agreed, he fourthed the motion without hesitation. — Sau khi người thứ ba đồng ý, anh ấy tán thành đề nghị mà không do dự.
-- admin_note: [auto] nguồn: wiktionary, ref_word_frequency, datamuse (chỉ là ứng viên của Haiku), haiku · model: claude-haiku-5-5 · job: 79b91bf9-7f58-44a5-8dee-2095f4a82ae5 · published=false: chờ duyệt (ENRICHMENT_PUBLISH_POLICY=review) · thiếu tầng B: is_transitive · ước tính: cefr_level=A2 · ghi chú của Haiku: Nghĩa 'tán thành sau người thứ ba' là cách dùng hiếm, đã giữ lại vì có trong dữ liệu nguồn; cân nhắ
+- IPA: /mæsk/ / /mɑːsk/ · audio: có · `meaning_vi`: mặt nạ; vỏ bọc; che phủ; che giấu; khẩu trang; lớp che đậy
+- (noun) A covering for all or part of the face, worn for disguise or protection. → **mặt nạ; khẩu trang**
+  - The dancer wore a painted mask during the performance. — Vũ công đeo một chiếc mặt nạ sơn màu trong suốt buổi biểu diễn.
+  - Doctors wear a mask to protect themselves from infection. — Bác sĩ đeo khẩu trang để tự bảo vệ khỏi lây nhiễm.
+- (noun) Something that hides the true nature of a situation or person. → **vỏ bọc; lớp che đậy**
+  - His cheerful manner was just a mask for his deep anxiety. — Vẻ vui vẻ của anh ấy chỉ là lớp vỏ bọc cho nỗi lo sâu sắc bên trong.
+- (verb) To cover the face or something else to hide identity or give protection. → **che phủ; đeo mặt nạ**
+  - The robbers masked their faces before entering the bank. — Bọn cướp che mặt trước khi vào ngân hàng.
+- (verb) To hide something from view or from knowledge. → **che giấu; che đậy**
+  - She masked her disappointment with a polite smile. — Cô ấy che giấu sự thất vọng bằng một nụ cười lịch sự.
+- admin_note: [auto] nguồn: wiktionary, ref_word_frequency, datamuse (chỉ là ứng viên của Haiku), haiku · model: claude-haiku-5-5 · job: 0853c2ec-f8e4-49cf-8367-bb1d987e63e6 · published=false: chờ duyệt (ENRICHMENT_PUBLISH_POLICY=review) · ước tính: cefr_level=B2 · ghi chú của Haiku: Các nghĩa kỹ thuật cổ hoặc phương ngữ (mesh, mash, bewilder, brewing) đã bỏ qua vì không phổ biến với người học. | Nghĩa poetic '
 
 ## 12. Câu SQL để tự kiểm tra
 
@@ -596,7 +1021,7 @@ SELECT pg_size_pretty(pg_database_size(current_database()));
 
 ### Giai đoạn 2: 500 từ (20/10/2026)
 
-Phần được sinh tự động ở trên (`--report --from-run 2`) chỉ nói về giai đoạn 2 (lần gửi #2 và #3); số liệu giai đoạn 1 nằm ở ghi chú giai đoạn 1.
+Khi viết ghi chú này, phần sinh tự động ở trên (`--report --from-run 2`) chỉ nói về giai đoạn 2 (lần gửi #2 và #3). Sau giai đoạn 3 phần đó được sinh lại cho **mọi lần gửi** (`--from-run 1`, #1 đến #12); số liệu riêng của từng giai đoạn nằm ở các ghi chú viết tay này.
 
 * **Cách chạy.** `ENRICHMENT_ENABLED=true`, `ENRICHMENT_PUBLISH_POLICY=review`, `ENRICHMENT_MAX_JOBS_PER_DAY=1000` (lệnh gửi), `ENRICHMENT_WORKER_CONCURRENCY=2` (worker); không sửa `.env`. `--limit 500`: 500 từ đầu theo thứ tự CEFR rồi tần suất, nên **cả 500 từ đều là A1 và là những từ thông dụng nhất** (`the`, `to`, `of`, `in`, `i`, `for`…). Đây là lát cắt khó nhất của danh sách (từ càng thông dụng càng nhiều nghĩa), nên tỉ lệ lỗi và chi phí dưới đây **không đại diện** cho 3.500 từ còn lại. Worker chạy ở tab Terminal của bạn (log `oxford-seed-phase2-worker.log`) và được tắt bằng **Ctrl-C (SIGINT)**: log có `shutdown_start SIGINT`, `pgboss.instance.stopped_on` có giá trị; không dùng `taskkill`. Một khác biệt nhỏ về thứ tự: worker phải được bật TRƯỚC khi gửi (kiểm tra "có worker của máy này" của chính công cụ), không phải sau.
 * **Lượt đầu (lần #2, 500 từ).** Gửi xong sau 455 giây (worker đã chạy song song). 455 `succeeded` (91,0%), 15 `skipped / exists`, 2 `rejected / proper_noun`, **28 `failed / invalid_output` = 5,6%**, dưới ngưỡng dừng 8% (40/500). Không có 429, không hết ngân sách, không `upstream_error`; hai job được pg-boss thử lại, cả hai sau đó thành công: `let` (Anthropic quá hạn 60 giây) và `guess` (Free Dictionary quá hạn 2,5 giây). Thời gian: từ job đầu đến job cuối **66,6 phút** (8,0 giây/từ trên đồng hồ treo tường); một job chạy trung vị 12,2 giây, p95 26,3 giây, lâu nhất 87,2 giây (log worker).
@@ -609,4 +1034,70 @@ Phần được sinh tự động ở trên (`--report --from-run 2`) chỉ nói
 * **Dữ liệu và dung lượng.** 474 mục từ mới có trung bình 4,45 sense và 9,30 nghĩa tiếng Việt; 23 mục thiếu `ipa_us` (2 thiếu cả hai IPA), 2 thiếu cả hai audio, không mục nào thiếu ví dụ. Cơ sở dữ liệu 251,41 MB → 256,73 MB (**+5,31 MB**, khoảng 11 KB mỗi mục từ với chỉ mục; dữ liệu thuần 2,75 MB, 5,9 KB mỗi mục). Với 3.497 từ còn lại, dự kiến thêm khoảng 38 MB trên đĩa (20 MB dữ liệu).
 * **Thay đổi công cụ trong lúc làm** (đều có test): (1) `--retry-last-run` và luật "`invalid_output` được thử thêm đúng một lần, hỏng hai lần thì coi là kết thúc" (trước đó `invalid_output` đóng từ ngay, nên chạy thử lần hai sẽ báo 0 từ gửi lại); (2) dòng log `enrich` của worker có thêm `issues` / `first_issues` (mã validator và đường dẫn trường, **không có nội dung bản nháp**) khi `invalid_output`, để trả lời "validator nào"; (3) ước tính thời gian dùng khoảng cách giữa hai job xong liên tiếp thay vì `finished_at - created_at` (số cũ gồm cả thời gian chờ trong hàng đợi và cho ra "52 giây/từ", 3,6 giờ cho 500 từ; số mới 5,1 giây/từ, 43 phút; thực tế 8,0 giây/từ vì từ thông dụng chậm hơn); (4) `--report --from-run N`, bảng theo từng lần gửi, phân tích `invalid_output` theo từng lần gửi, và mục 10b (30 mục đủ điều kiện).
 
-**Dừng ở đây. Chưa chạy giai đoạn 3, chưa `oxford:apply-cefr`, chưa `enrich:publish`, chưa sửa `.env`.**
+**Giai đoạn 2 dừng ở đây (đã duyệt); giai đoạn 3 ở ghi chú bên dưới.**
+
+### Giai đoạn 3: phần còn lại, 4 lô (22–23/10/2026)
+
+Phần sinh tự động ở trên nay là số liệu **tích lũy** của cả ba giai đoạn (lần gửi #1 đến #12: #4 đến #12 là giai đoạn 3).
+
+* **Cách chạy.** Mỗi lệnh gửi tối đa 1000 từ (`--limit 1000 --confirm`), `ENRICHMENT_ENABLED=true`, `ENRICHMENT_PUBLISH_POLICY=review`, `ENRICHMENT_MAX_JOBS_PER_DAY` đặt riêng cho từng lệnh (số đã dùng hôm nay + lô + dư), `ENRICHMENT_WORKER_CONCURRENCY=2` ở lô 1 và 4 ở lô 2 đến 4; không sửa `.env`. Sau mỗi lô: một lượt `--retry-last-run` (chạy thử, rồi `--confirm`) cho các từ chưa thành mục từ, rồi tắt worker bằng Ctrl-C (`shutdown_start SIGINT`, kết thúc gọn, không dùng `taskkill` cho worker). Cột "đồng thời" của bảng lần gửi ở mục 1 ghi 2 cho mọi dòng vì nó ghi biến của **lệnh gửi** (không đặt), không phải của worker.
+* **Bốn lô.**
+
+| lô | lần gửi | từ (lượt đầu) | mục từ mới | `invalid_output` lượt đầu | gửi lại | chi phí hàng sổ | so với ước tính |
+|---|---|---|---|---|---|---|---|
+| 1 (A1, A2, B1) | #4, #5, #6 | 996 | 965 | 27 (2,7%) | 27 từ → 19 qua | $1,128 | 0,87× |
+| 2 (B1, B2) | #7, #8 | 998 | 984 | 20 (2,0%) | 21 từ → 18 qua | $1,034 | 0,85× |
+| 3 (B2, C1) | #9, #10 | 999 | 984 | 14 (1,4%) | 18 từ → 12 qua | $0,935 | 0,83× |
+| 4 (C1, còn lại) | #11, #12 | 440 | 418 | 2 (0,5%) | 18 từ → 1 qua | $0,350 | 0,74× |
+
+  Giai đoạn 3 tạo **3.351 mục từ mới** (tất cả `published = false` do công cụ này), tổng **$3,45** theo hàng sổ (khoảng $0,00103 mỗi mục từ). Cả ba chỉ số dừng khẩn cấp đều đạt ở mọi lô: `invalid_output` lượt đầu tối đa 2,7% (ngưỡng 8%), không có một lỗi 429 hay hết ngân sách nào, chi phí trung bình luôn dưới ước tính.
+* **Kết quả cuối của cả đợt nạp (4.949 từ hợp lệ của Oxford).** 4.704 từ đã có mục từ (gồm các mục do đợt này tạo), 193 là dạng biến trong `word_forms`, 36 đã có kết quả cuối từ job trước, **16 từ chưa nạp được** (có dấu gạch nối, xem dưới); 4.704 + 193 + 36 + 16 = 4.949. Trong 36 từ đó: `failed / invalid_output` 22 (`drift flat function gut half handle help hit hollow hope into level opposite out overnight plus right slow underground warm welcome you`), `skipped / variant_form` 7 (`enrol favour forth halt licence ought sceptical`, phần lớn là chính tả Anh của từ Mỹ đã có), `skipped / lemma_mismatch` 1 (`counselling`), `rejected / proper_noun` 2 (`february`, `july`), và 4 từ có job đã ra mục từ nhưng dưới chính tả khác (`judgement`, `enquiry`…). Ngoài ra có 56 job `skipped / exists` ở mọi lần gửi: đó **không phải lỗi**, các dạng chia như `spelling`, `cooking`, `worried` đã thành `word_forms` của mục từ tạo cùng đợt nên S0 thấy "đã có".
+* **`invalid_output` theo nguyên nhân.** Lượt đầu của giai đoạn 2 và 3 cộng lại: bản nháp cuối vi phạm `schema_too_big @ senses` (hơn 6 sense) ở 69 trên 91 từ (76%), rồi `classifier_duplicate` (11), `too_many_syllables` (5), `too_long`, `parenthesis`, `duplicate` (mỗi loại 1 đến 3). Gần như mọi từ hỏng hai lần đều là từ rất nhiều nghĩa (`out`, `right`, `help`, `hit`, `level`, `flat`, `function`, `warm`…): lượt gửi lại chỉ cứu thêm các từ mà lần đầu Haiku lệch nhẹ. Theo loại từ tỉ lệ hỏng lượt đầu đồng đều (danh từ 0,5 đến 2,7% tùy lô, tính từ 0 đến 3,6%, động từ 0 đến 2,8%, trạng từ 0 đến 1,5%); giai đoạn 1 và 2 (500 từ A1 thông dụng nhất) khó hơn nhiều vì từ càng thông dụng càng nhiều nghĩa.
+* **16 từ có dấu gạch nối không nạp được.** `old-fashioned make-up part-time so-called decision-making film-maker high-profile large-scale line-up long-standing long-time non-profit post-war set-up thought-provoking well-being`: Free Dictionary trả **HTTP 530** nên job `failed / upstream_error` sau 4 lần chạy, không tốn token. **Nhận định ban đầu "mọi từ có dấu gạch nối đều 530" là sai**, đã sửa ở giai đoạn 4 bên dưới (2 trong 16 từ, `well-being` và `decision-making`, nạp được; nguyên nhân thật là Free Dictionary trả 530 cho từ nó không có).
+* **Sự cố trong lúc làm.**
+  1. 22/10 04:22, lô 1: mạng rơi (`ECONNRESET`, rồi DNS `ENOTFOUND`) và từ kế tiếp của lệnh gửi treo mãi. Tôi tắt đúng chuỗi tiến trình `seed-oxford` của mình (một `taskkill` theo PID, nói rõ lúc đó), dựng lại bản ghi lần gửi #4 (7 từ) từ log gửi và bảng job, rồi tiếp tục bằng lần #5. Từ `dear` bị `queue_error` đúng lúc đó đã qua ở lần sau.
+  2. 22/10 06:21 đến 08:10, lô 2: cả bốn slot của worker đứng **1 giờ 50 phút** vì một kết nối Neon chết âm thầm (mặc định keep-alive của Windows khoảng 2 giờ). Không mất job (hết hạn rồi được pg-boss xếp lại).
+  3. 22/10 09:56 đến 23/10 17:10, lô 4: không job nào xong trong **31 giờ**, nhiều khả năng máy ngủ; khi máy dậy worker tự chạy tiếp, không mất job.
+  4. 154 dòng `enrich_retry` trong các log worker, hầu hết `[anthropic] connection error` thoáng qua, đều được thử lại thành công (số lần chạy mỗi từ: trung bình 1,04).
+* **Thay đổi công cụ trong giai đoạn 3** (đều có test): (a) lệnh gửi có hạn 45 giây mỗi từ, thử lại lỗi mạng thoáng qua tối đa 2 lần, dừng sau 3 lỗi liên tiếp, và ghi tệp trạng thái trước khi gửi rồi cứ 10 từ; (b) TCP keep-alive cho mọi pool PostgreSQL (`config/keepAlive.ts`, gồm cả pool riêng của pg-boss); (c) kiểm tra "đúng một worker" chỉ đếm tên `enrichment-worker`, không đếm `enrichment-sender` của máy chủ đã triển khai (trước đó từng báo nhầm "hai worker lạ"); (d) job `succeeded` / `skipped exists` mà mục từ của nó còn tồn tại thì từ coi như xong, kể cả khi Haiku lưu dưới chính tả khác (`judgement` → `judgment`), trước đó các từ này bị gửi lại vô ích; (e) mục 10b chỉ tính mục còn chờ duyệt và ghi số mục đã được admin xuất bản bằng tay; (f) log worker ghi `issues` / `first_issues` cho `invalid_output` (làm ở giai đoạn 1 và dùng ở đây); (g) sửa hai lỗi trong test phụ thuộc dữ liệu (đếm job có dấu phân cách hàng nghìn, ngày giả định).
+* **Chất lượng nội dung.** 3.872 mục từ mới đều có ít nhất một chủ đề và ít nhất một ví dụ; trung bình 3,78 sense và 8,12 nghĩa tiếng Việt mỗi mục; thiếu cả hai IPA ở 49 mục, thiếu `ipa_us` ở 144 mục, thiếu cả hai audio ở 103 mục (IPA và audio của Oxford **không** được dùng, theo yêu cầu). Mọi mục đều có `notes_for_review`; **1.894/3.849** mục còn chờ duyệt (49%) đủ điều kiện của nút xuất bản hàng loạt, 1.955 bị giữ (nghi ngờ nghĩa 864, bộ kiểm tra của job báo lỗi 711, không nhận ra 663, từ nhạy cảm hoặc thô tục 162, tên riêng 35; một mục có thể có nhiều lý do). Nghĩa tiếng Việt vẫn cần người duyệt kỹ, như đã ghi ở giai đoạn 1.
+* **CEFR.** Haiku trùng Oxford ở 1.813/3.862 mục (47%), lệch 1 bậc 1.756, lệch từ 2 bậc 292; Haiku khó hơn Oxford 1.242 mục, dễ hơn 806. **Chưa áp `oxford:apply-cefr`**; mọi mục còn mang mức Haiku ước tính.
+* **Mục từ đã xuất bản.** 23 mục `[auto]` hiện có `published = true`; cả 23 do admin bấm ở giao diện `/lookup/review` (có dòng `entry_edit_history` với `admin_id`, từ 22/10 04:31 đến 23/10 17:15 UTC), không phải công cụ nạp (nó chỉ tạo `published = false` và `enrich:publish` chưa được chạy).
+* **Chi phí và dung lượng cả đợt.** Bộ đếm token tăng 40,22 triệu vào và 6,03 triệu ra, **$4,21** (hàng sổ $4,19) cho 3.872 mục từ, bằng **0,71 lần** tổng ước tính ($5,97), nên không chạm ngưỡng dừng 2 lần. Cơ sở dữ liệu từ 251,10 MB lên 289,38 MB; dữ liệu thật của 3.872 mục từ là 19,92 MB (5,3 KB mỗi mục); từ điển có 4.726 mục từ (3.881 `[auto]`).
+
+**Giai đoạn 3 dừng ở đây. Chưa `oxford:apply-cefr`, chưa `enrich:publish`, chưa sửa `.env`, không commit.**
+
+### Giai đoạn 4: kiểm tra lại tệp và nạp nốt (23/10/2026)
+
+Phần sinh tự động ở trên vẫn là số liệu tích lũy (lần gửi #1 đến #14); các lần gửi lại bằng `enrich:enqueue` không nằm trong danh sách lần gửi nhưng trạng thái cuối của từ luôn lấy từ job gần nhất trong DB.
+
+* **Tệp Oxford hiện hành không đổi.** Công cụ vẫn dùng `P:\Personal\WordyGo_Full\oxford_5000.json` (tệp duy nhất ở đó): 7.889.418 byte, sửa lần cuối 20/10/2026 05:25 UTC, **trước** lần gửi đầu tiên (05:58), 5.948 dòng, **4.958 từ khác nhau**, 4.949 từ hợp lệ sau bộ làm sạch. Con số "~6.000" là số **dòng**: 990 dòng là bản trùng của 883 từ (cùng từ ở nhiều mức CEFR hoặc loại từ). Bản gốc `P:\GRW\Finish_Done\oxford-5000-vocabulary-audio-definition\data\oxford_5000.json` (29/3/2026, 5.944 dòng, cấu trúc khác, không phải mảng) không được dùng. Phương án an toàn: dựa vào đúng tệp công cụ đang đọc và đối chiếu từng từ với `dictionary_entries`, `word_forms` và `word_enrichment_jobs`, không dùng chỉ số vị trí trong `.oxford-seed.local.json`.
+* **Trạng thái của 4.949 từ hợp lệ** (đối chiếu trực tiếp với DB sau khi nạp xong):
+
+| trạng thái | số từ |
+|---|---|
+| đã có mục từ (headword hoặc lemma) | 4.723 |
+| là dạng biến trong `word_forms` | 193 |
+| job đã ra mục từ dưới chính tả khác (`judgement` → `judgment`, `enquiry`, `enquire`, `counsellor`) | 4 |
+| **đã phủ (có mục từ hoặc dạng biến)** | **4.920 (99,4%)** |
+| `skipped / variant_form` | 7 (`enrol favour forth halt licence ought sceptical`) |
+| `skipped / lemma_mismatch` | 1 (`counselling`) |
+| `rejected / proper_noun` | 2 (`february`, `july`) |
+| `failed / invalid_output` (đã chạy từ 4 lần trở lên) | 5 (`half handle level out you`) |
+| `failed / upstream_error` | 14 (`film-maker high-profile large-scale line-up long-standing long-time make-up non-profit old-fashioned part-time post-war set-up so-called thought-provoking`) |
+
+  Cộng với 9 cụm nhiều từ mà bộ làm sạch từ chối (`according to`, `all right`, `any more`, `have to`, `ice cream`, `next to`, `no one`, `per cent`, `used to`): đường ống chỉ nhận từ đơn. Không có "hơn 1.000 từ chưa nạp": khi giai đoạn 3 xong thì chỉ còn 16 từ cần xử lý.
+* **Điều kiện trước khi gửi** (công cụ tự kiểm tra, không bỏ qua cái nào): `ENRICHMENT_ENABLED=true`, 30 chủ đề đủ, `ENRICHMENT_PUBLISH_POLICY=review`, chỉ một worker của máy này (`DESKTOP-C3OH1SK`). Biến đặt bằng shell, không sửa `.env`: `ENRICHMENT_MAX_JOBS_PER_DAY=3000` (lệnh gửi), `ENRICHMENT_WORKER_ENABLED=true`, `ENRICHMENT_WORKER_CONCURRENCY=2` (worker; 2 vì chỉ có 16 job). `pgboss.instance` chỉ có một `enrichment-worker` còn sống (của tôi); có thêm một `enrichment-sender` của máy chủ đã triển khai (`srv-…-hibernate-…`), là bên gửi chứ không phải worker, và không tính.
+* **7 job không phải của công cụ nạp.** Lúc 17:50 đến 17:55 UTC, 6 từ có dấu gạch nối (`well-being`, `thought-provoking`, `set-up`, `post-war`, `non-profit`, `long-time`) cùng `hadn't` tự vào hàng đợi (`requested_by` rỗng, không có lần gửi mới trong tệp trạng thái, và lúc đó chưa có worker); nhiều khả năng đó là các lần tra từ trong ứng dụng đi qua máy chủ đã triển khai. Worker của tôi xử lý chúng như mọi job: `well-being` ra mục từ, `hadn't` `skipped / lemma_mismatch` (dạng rút gọn, không thuộc Oxford), 5 từ còn lại `upstream_error`.
+* **Lần gửi lại các từ `upstream_error`.** Chạy thử rồi `--confirm` cho 10 từ (lần #13): chỉ `decision-making` đáng lẽ qua (Free Dictionary trả 200), nhưng 9 từ kia làm **cầu dao `free_dictionary` mở** nên nó cũng bị `circuit open` cả 4 lần chạy. Tôi tắt worker bằng SIGINT, bật lại (cầu dao nằm trong bộ nhớ của tiến trình), rồi gửi riêng `decision-making` (`--offset 4 --limit 1`, lần #14): ra mục từ. Còn lại 14 từ vẫn lỗi; lượt gửi lại thứ hai không có ích nên không chạy.
+* **Nguyên nhân thật của 14 từ `upstream_error` (đính chính nhận định ở giai đoạn 3).** Đường ống chỉ hỏi Free Dictionary khi Wiktionary không có hàng nào cho từ. Với từ mà **chính Free Dictionary không có**, API công cộng này hiện trả **HTTP 530** (Cloudflare "error code: 1033") thay vì 404: kiểm tra bằng `curl` ngày 23/10, `zebra`, `serendipity`, `well-being`, `decision-making` trả 200; `make-up`, `part-time`, `old-fashioned`, và cả `notaword`, `zzyzxqv`, `glimmering` trả 530. Vì vậy không phải "mọi từ có dấu gạch nối" mà là "từ Wiktionary và Free Dictionary đều không có" (ở Oxford 5000 hầu hết là từ ghép có dấu gạch nối). Đường ống coi 5xx là lỗi nhà cung cấp và thử lại; job `failed / upstream_error` sau 4 lần chạy, không tốn token.
+* **Lần gửi lại các từ `invalid_output` (tối đa 2 lượt, bằng `enrich:enqueue` vì công cụ nạp coi hai lần hỏng là kết thúc).** 22 từ: lượt 1 qua 14 (`drift flat gut help hit hollow into opposite overnight right slow underground warm welcome`), lượt 2 qua thêm 3 (`function hope plus`); **còn 5 từ hỏng**: `half handle level out you` (đều là từ rất nhiều nghĩa). Nguyên nhân của 13 lần hỏng trong hai lượt, bản nháp cuối vi phạm: `schema_too_big @ senses` 9 (hơn 6 sense), `classifier_duplicate @ senses[].meanings_vi[]` 4. Không có `too_long`, `parenthesis` hay `too_many_syllables`.
+* **Chi phí và thời gian giai đoạn 4.** 33 job gọi Haiku, 0,60 triệu token vào và 0,11 triệu ra, **$0,093** theo hàng sổ; bộ đếm cả đợt nạp lên **$4,31** (0,72 lần ước tính, ngưỡng dừng là 2 lần). Cầu dao của Free Dictionary mở vài lần; không có 429, hết ngân sách hay `upstream_budget_exceeded`. Hai worker (concurrency 2) chạy tổng cộng khoảng 20 phút, cả hai tắt bằng SIGINT (`shutdown_start SIGINT`), không `taskkill`; không còn `node.exe`.
+* **Kết quả.** **19 mục từ mới** (`decision-making drift flat function gut help hit hollow hope into opposite overnight plus right slow underground warm welcome well-being`), tất cả `published = false`. DB có **4.745** mục từ (không tính dữ liệu thử), trong đó **3.900 `[auto]`**: 23 đã được admin xuất bản bằng tay ở giao diện, **3.877 chờ duyệt**. Không còn job `queued`/`running`, hàng đợi pg-boss trống.
+* **Việc chờ bạn quyết** (tôi không làm vì cần sửa mã nguồn hoặc là quyết định nội dung):
+  1. **14 từ `upstream_error`.** (a) Cho `freeDictionaryClient` coi HTTP 530 là "không có dữ liệu" (như 404) để Haiku làm tiếp bằng dữ liệu tần suất; rủi ro là một sự cố thật của Free Dictionary (cũng 530) bị đọc nhầm thành "không có từ", nên cần bạn đồng ý và có test; (b) tạo tay trong `/dictionary`; (c) để nguyên.
+  2. **5 từ `invalid_output`** (`half handle level out you`): nới trần 6 sense cho từ chức năng, hoặc tạo tay bằng trình sửa mục từ.
+  3. **10 từ bị luật chặn.** `enrol favour sceptical` (và `counselling`) là chính tả Anh mà dạng Mỹ (`enroll`, `favor`, `skeptical`, `counseling`) **chưa có** trong từ điển (chỉ có `license`, `counselor`); `halt forth ought` là dương tính giả của luật S2; `february july` là tên riêng. Có thể tạo tay, hoặc nạp trước dạng Mỹ bằng `enrich:enqueue` rồi coi dạng Anh là biến thể.
+  4. `oxford:apply-cefr` (Haiku chỉ trùng mức CEFR của Oxford ở 47%) và `enrich:publish` vẫn chưa chạy, như đã dặn.
+
+**Giai đoạn 4 dừng ở đây. Không `oxford:apply-cefr`, không `enrich:publish`, không sửa `.env`, không sửa mã nguồn, không commit.**

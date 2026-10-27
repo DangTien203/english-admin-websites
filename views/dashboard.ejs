@@ -50,6 +50,7 @@
           <th>Role</th>
           <th>Status</th>
           <th>Last Login</th>
+          <% if (admin.role === 'super_admin') { %><th>Actions</th><% } %>
         </tr>
       </thead>
       <tbody>
@@ -74,10 +75,19 @@
                 </span>
               </td>
               <td><%= a.last_login_at ? new Date(a.last_login_at).toLocaleString('en-US') : 'Never logged in' %></td>
+              <% if (admin.role === 'super_admin') { %>
+                <td>
+                  <% if (a.id === admin.id) { %>
+                    <a href="/profile" class="btn btn-sm btn-secondary">My profile</a>
+                  <% } else { %>
+                    <a href="/admins/<%= a.id %>/edit" class="btn btn-sm btn-secondary">Edit</a>
+                  <% } %>
+                </td>
+              <% } %>
             </tr>
           <% }) %>
         <% } else { %>
-          <tr><td colspan="5" class="text-center">No data available</td></tr>
+          <tr><td colspan="<%= admin.role === 'super_admin' ? 6 : 5 %>" class="text-center">No data available</td></tr>
         <% } %>
       </tbody>
     </table>

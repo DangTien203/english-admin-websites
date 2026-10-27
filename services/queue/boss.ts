@@ -42,6 +42,9 @@ function connectionFromAppPool(): ConstructorOptions {
   if (o.user !== undefined) out.user = o.user;
   if (o.password !== undefined) out.password = o.password;
   if (o.ssl) out.ssl = o.ssl;
+  // pg-boss builds its OWN pool: it needs the same keep-alive as the app pool (config/keepAlive.ts)
+  if (o.keepAlive !== undefined) (out as any).keepAlive = o.keepAlive;
+  if (o.keepAliveInitialDelayMillis !== undefined) (out as any).keepAliveInitialDelayMillis = o.keepAliveInitialDelayMillis;
   return out;
 }
 

@@ -12,6 +12,7 @@ import { requireSameOrigin } from './middlewares/sameOrigin';
 import { webOnly } from './middlewares/webOnly';
 import { errorHandler } from './middlewares/errorHandler';
 import pool from './config/db';
+import { sessionStore } from './config/sessionStore';
 import { drainLookupBackground } from './services/lookup';
 import { startEnrichmentRuntime } from './services/queue';
 import { errMessage, logEvent } from './services/queue/log';
@@ -39,6 +40,7 @@ import authRoutes from './routes/auth';
 import dashboardRoutes from './routes/dashboard';
 import approvalsRoutes from './routes/approvals';
 import usersRoutes from './routes/users';
+import adminsRoutes from './routes/admins';
 import profileRoutes from './routes/profile';
 import dictionaryRoutes from './routes/dictionary';
 import lessonsRoutes from './routes/lessons';
@@ -90,7 +92,7 @@ if (process.env.NODE_ENV !== 'production') {
 // ── Session ──
 // The in-memory store (express-session's default), kept in a constant so tests can count the sessions in it.
 // Web pages only: /api/v1 authenticates with a JWT and must neither create a session nor answer with Set-Cookie.
-export const sessionStore = new session.MemoryStore();
+export { sessionStore };
 app.use(
   webOnly(
     session({
@@ -117,7 +119,7 @@ app.use(webOnly(flash()));
 // /api/v1/* is left out on purpose (JWT Bearer, no cookie). A new session-authenticated mount below must be added here too.
 app.use(
   [
-    '/auth', '/dashboard', '/approvals', '/users', '/profile', '/dictionary', '/lessons', '/decks',
+    '/auth', '/dashboard', '/approvals', '/users', '/admins', '/profile', '/dictionary', '/lessons', '/decks',
     '/ebooks', '/subscriptions', '/settings', '/games', '/ai-content', '/lookup',
   ],
   requireSameOrigin
@@ -131,6 +133,7 @@ app.use('/auth', authRoutes);
 app.use('/dashboard', dashboardRoutes);
 app.use('/approvals', approvalsRoutes);
 app.use('/users', usersRoutes);
+app.use('/admins', adminsRoutes);
 app.use('/profile', profileRoutes);
 app.use('/dictionary', dictionaryRoutes);
 app.use('/lessons', lessonsRoutes);

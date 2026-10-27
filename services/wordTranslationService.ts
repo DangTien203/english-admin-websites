@@ -23,17 +23,15 @@
  *   FREE_DICTIONARY_API_TIMEOUT_MS  (default 3000)
  */
 import pool from '../config/db';
+import { HEADWORD_MAX_LENGTH, headwordProblem } from '../utils/headword';
 
 const GOOGLE_TRANSLATE_URL = 'https://translation.googleapis.com/language/translate/v2';
 const FREE_DICTIONARY_URL = 'https://api.dictionaryapi.dev/api/v2/entries/en/';
 
-const MAX_WORD_LENGTH = 50;
+const MAX_WORD_LENGTH = HEADWORD_MAX_LENGTH;
 const MAX_DEFINITIONS = 3;
 const MAX_EXAMPLES = 3;
 
-// Single internal letter/hyphen/apostrophe class — covers don't, well-being.
-const WORD_CHAR = "[A-Za-z]+(?:[-'][A-Za-z]+)*";
-const WORD_REGEX = new RegExp(`^${WORD_CHAR}$`);
 // Surrounding punctuation we strip before validating (whitespace counts too).
 const STRIP_CHARS = new Set(".,!?;:'\"()[]‘’“”");
 const isStripChar = (ch: string): boolean => STRIP_CHARS.has(ch) || /\s/.test(ch);
@@ -74,13 +72,10 @@ export function normalizeWord(raw: string): NormalizeResult {
       reason: `word exceeds ${MAX_WORD_LENGTH} characters`,
     };
   }
-  if (!WORD_REGEX.test(stripped)) {
-    return {
-      normalized: '',
-      display: stripped,
-      isValid: false,
-      reason: 'word must contain only letters (digits/symbols not allowed)',
-    };
+  // the one headword rule (utils/headword.ts): letters, with a hyphen or apostrophe only between letters (don't, well-being, T-shirt)
+  const problem = headwordProblem(stripped);
+  if (problem) {
+    return { normalized: '', display: stripped, isValid: false, reason: problem };
   }
   return {
     normalized: stripped.toLowerCase(),
