@@ -1,5 +1,24 @@
 import pool from '../config/db';
 import { paginate } from '../helpers/pagination';
+import { invalidateGameCatalog } from '../utils/gameCatalogCache';
+
+/** The set items as the parallel arrays that unnest() takes (one statement for the whole set instead of one per item). */
+function setItemArrays(items: any[]) {
+  return {
+    entryIds: items.map((i) => i.entry_id as string),
+    orders: items.map((i) => i.correct_order as number),
+    hints: items.map((i) => (i.hint_vi || null) as string | null),
+  };
+}
+
+const INSERT_SET_ITEMS_SQL = `
+  INSERT INTO semantic_set_items (set_id, entry_id, correct_order, hint_vi)
+  SELECT $1, t.entry_id, t.correct_order, t.hint_vi
+    FROM unnest($2::uuid[], $3::int[], $4::text[]) AS t(entry_id, correct_order, hint_vi)`;
+
+const INSERT_LIST_ITEMS_SQL = `
+  INSERT INTO game_word_list_items (list_id, entry_id)
+  SELECT $1, e FROM unnest($2::uuid[]) AS e ON CONFLICT DO NOTHING`;
 
 const Game = {
   // ── Word Lists ────────────────────────────────────────────────────────────
@@ -70,13 +89,9 @@ const Game = {
         [data.game_type, data.name, data.topic || null, data.level, data.status, data.created_by]
       );
       const list = rows[0];
-      for (const eid of entryIds) {
-        await client.query(
-          `INSERT INTO game_word_list_items (list_id, entry_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
-          [list.id, eid]
-        );
-      }
+      if (entryIds.length > 0) await client.query(INSERT_LIST_ITEMS_SQL, [list.id, entryIds]);
       await client.query('COMMIT');
+      invalidateGameCatalog();
       return list;
     } catch (err) {
       await client.query('ROLLBACK');
@@ -97,13 +112,9 @@ const Game = {
       );
       if (!rows[0]) { await client.query('ROLLBACK'); return null; }
       await client.query('DELETE FROM game_word_list_items WHERE list_id=$1', [id]);
-      for (const eid of entryIds) {
-        await client.query(
-          `INSERT INTO game_word_list_items (list_id, entry_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
-          [id, eid]
-        );
-      }
+      if (entryIds.length > 0) await client.query(INSERT_LIST_ITEMS_SQL, [id, entryIds]);
       await client.query('COMMIT');
+      invalidateGameCatalog();
       return rows[0];
     } catch (err) {
       await client.query('ROLLBACK');
@@ -115,6 +126,7 @@ const Game = {
 
   async deleteWordList(id: string) {
     await pool.query('DELETE FROM game_word_lists WHERE id=$1', [id]);
+    invalidateGameCatalog();
   },
 
   // ── Levels ────────────────────────────────────────────────────────────────
@@ -133,6 +145,7 @@ const Game = {
        VALUES ($1,$2,$3,$4) RETURNING *`,
       [data.game_type, data.level_number, data.config_json, data.status || 'active']
     );
+    invalidateGameCatalog();
     return rows[0];
   },
 
@@ -141,11 +154,13 @@ const Game = {
       `UPDATE game_levels SET level_number=$1, config_json=$2, status=$3 WHERE id=$4 RETURNING *`,
       [data.level_number, data.config_json, data.status || 'active', id]
     );
+    invalidateGameCatalog();
     return rows[0] || null;
   },
 
   async deleteLevel(id: string) {
     await pool.query('DELETE FROM game_levels WHERE id=$1', [id]);
+    invalidateGameCatalog();
   },
 
   // ── Semantic Sets ─────────────────────────────────────────────────────────
@@ -199,14 +214,12 @@ const Game = {
         [data.name, data.scale_description, data.level, data.status, data.created_by]
       );
       const set = rows[0];
-      for (const item of items) {
-        await client.query(
-          `INSERT INTO semantic_set_items (set_id, entry_id, correct_order, hint_vi)
-           VALUES ($1,$2,$3,$4)`,
-          [set.id, item.entry_id, item.correct_order, item.hint_vi || null]
-        );
+      if (items.length > 0) {
+        const a = setItemArrays(items);
+        await client.query(INSERT_SET_ITEMS_SQL, [set.id, a.entryIds, a.orders, a.hints]);
       }
       await client.query('COMMIT');
+      invalidateGameCatalog();
       return set;
     } catch (err) {
       await client.query('ROLLBACK');
@@ -227,14 +240,12 @@ const Game = {
       );
       if (!rows[0]) { await client.query('ROLLBACK'); return null; }
       await client.query('DELETE FROM semantic_set_items WHERE set_id=$1', [id]);
-      for (const item of items) {
-        await client.query(
-          `INSERT INTO semantic_set_items (set_id, entry_id, correct_order, hint_vi)
-           VALUES ($1,$2,$3,$4)`,
-          [id, item.entry_id, item.correct_order, item.hint_vi || null]
-        );
+      if (items.length > 0) {
+        const a = setItemArrays(items);
+        await client.query(INSERT_SET_ITEMS_SQL, [id, a.entryIds, a.orders, a.hints]);
       }
       await client.query('COMMIT');
+      invalidateGameCatalog();
       return rows[0];
     } catch (err) {
       await client.query('ROLLBACK');
@@ -246,6 +257,7 @@ const Game = {
 
   async deleteSemanticSet(id: string) {
     await pool.query('DELETE FROM semantic_sets WHERE id=$1', [id]);
+    invalidateGameCatalog();
   },
 
   // ── Game Runs (read-only) ─────────────────────────────────────────────────

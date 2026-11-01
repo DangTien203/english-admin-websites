@@ -269,10 +269,11 @@ export class WordLookupService {
 
   private recordLookup(input: LookupInput, entryId: string | null, result: 'dictionary' | 'translation' | 'not_found'): void {
     this.afterResponse('word_lookups', input, async () => {
+      const paragraphId = await input.paragraphId;
       await this.deps.db.query(
         `INSERT INTO word_lookups (user_id, entry_id, word_text, source, lookup_result, ebook_id, paragraph_id)
          VALUES ($1, $2, $3, 'ebook', $4, $5, $6)`,
-        [input.userId, entryId, input.word.display, result, input.ebookId, input.paragraphId]
+        [input.userId, entryId, input.word.display, result, input.ebookId, paragraphId]
       );
     });
   }

@@ -16,7 +16,7 @@ afterAll(async () => {
 });
 
 describe('keep-alive', () => {
-  it('is on, and starts probing after 10 seconds of silence (a dead connection is found in about 20 seconds, not 2 hours)', () => {
+  it('is on, and starts probing after 10 seconds of silence (a dead connection is given up on in seconds to minutes depending on the OS, not 2 hours)', () => {
     expect(KEEP_ALIVE).toEqual({ keepAlive: true, keepAliveInitialDelayMillis: 10_000 });
   });
 

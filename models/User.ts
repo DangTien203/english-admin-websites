@@ -1,5 +1,6 @@
 import pool from '../config/db';
 import { paginate } from '../helpers/pagination';
+import { invalidateAuthUser } from '../utils/authUserCache';
 
 const User = {
   async getAll({ search = '', status = '', level = '', page = 1, limit = 20 }: { search?: string; status?: string; level?: string; page?: number; limit?: number } = {}) {
@@ -75,6 +76,7 @@ const User = {
       'UPDATE users SET full_name = $1, phone = $2, level = $3, status = $4 WHERE id = $5',
       [fullName, phone || null, level, status, id]
     );
+    invalidateAuthUser(id); // req.user of the mobile API is cached for a few seconds (utils/authUserCache.ts)
   },
 
   async setStatus(id: string, status: string) {
@@ -82,10 +84,12 @@ const User = {
       'UPDATE users SET status = $1 WHERE id = $2',
       [status, id]
     );
+    invalidateAuthUser(id); // a ban must show on the user's very next request
   },
 
   async delete(id: string) {
     await pool.query('DELETE FROM users WHERE id = $1', [id]);
+    invalidateAuthUser(id);
   },
 
   async countByStatus() {

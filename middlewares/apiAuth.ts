@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import pool from '../config/db';
+import { loadAuthUser } from '../utils/authUserCache';
 import { apiError } from '../utils/apiResponse';
 
 export interface ApiRequest extends Request {
@@ -27,6 +27,8 @@ interface JwtPayload {
  *  - Token invalid/expired/banned → next() bình thường (guest, không ném lỗi).
  *  - Token hợp lệ → req.user được set, y hệt requireApiAuth.
  * Dùng cho endpoints công khai nhưng muốn nhận context user nếu có (vd: log lookup).
+ *
+ * The user row comes from utils/authUserCache.ts: kept a few seconds instead of one database round trip per request.
  */
 export const optionalApiAuth = async (
   req: ApiRequest,
@@ -40,14 +42,9 @@ export const optionalApiAuth = async (
     const token = authHeader.split(' ')[1];
     const decoded = jwt.verify(token, process.env.JWT_SECRET!) as JwtPayload;
 
-    const { rows } = await pool.query(
-      `SELECT id, email, full_name, level, status,
-              streak_current, streak_longest, avatar_url
-       FROM users WHERE id = $1`,
-      [decoded.userId]
-    );
-    if (rows.length > 0 && rows[0].status !== 'banned') {
-      req.user = rows[0];
+    const user = await loadAuthUser(decoded.userId);
+    if (user && user.status !== 'banned') {
+      req.user = user;
     }
   } catch {
     // Token lỗi trong guest-mode → nuốt; coi như guest.
@@ -70,24 +67,19 @@ export const requireApiAuth = async (
     const token = authHeader.split(' ')[1];
     const decoded = jwt.verify(token, process.env.JWT_SECRET!) as JwtPayload;
 
-    const { rows } = await pool.query(
-      `SELECT id, email, full_name, level, status,
-              streak_current, streak_longest, avatar_url
-       FROM users WHERE id = $1`,
-      [decoded.userId]
-    );
+    const user = await loadAuthUser(decoded.userId);
 
-    if (rows.length === 0) {
+    if (!user) {
       apiError(res, 401, 'INVALID_TOKEN', 'User không tồn tại');
       return;
     }
 
-    if (rows[0].status === 'banned') {
+    if (user.status === 'banned') {
       apiError(res, 403, 'ACCOUNT_BANNED', 'Tài khoản đã bị khóa');
       return;
     }
 
-    req.user = rows[0];
+    req.user = user;
     next();
   } catch (err: any) {
     if (err.name === 'TokenExpiredError') {

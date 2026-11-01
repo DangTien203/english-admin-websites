@@ -106,12 +106,47 @@ describe('POST /ebooks/:id/lookup — unchanged steps F1–F3', () => {
   it('F2: a paragraph that belongs to the ebook is passed on; a foreign one becomes null', async () => {
     mockLookup.mockResolvedValue({ kind: 'not_found' });
     mockQuery.mockImplementation(async (sql: string) => (sql.includes('FROM paragraphs p') ? { rows: [{ id: 'p-1' }] } : { rows: [] }));
+    // the paragraph is checked while the word is looked up, so the service gets the pending answer (it needs it only for its log line)
     await post({ word: 'zorp', paragraph_id: 'p-1' });
-    expect(mockLookup.mock.calls[0][0].paragraphId).toBe('p-1');
+    await expect(mockLookup.mock.calls[0][0].paragraphId).resolves.toBe('p-1');
 
     mockQuery.mockImplementation(async () => ({ rows: [] }));
     await post({ word: 'zorp', paragraph_id: 'foreign' });
-    expect(mockLookup.mock.calls[1][0].paragraphId).toBeNull();
+    await expect(mockLookup.mock.calls[1][0].paragraphId).resolves.toBeNull();
+
+    // no paragraph asked for → nothing to check
+    await post({ word: 'zorp' });
+    await expect(mockLookup.mock.calls[2][0].paragraphId).resolves.toBeNull();
+  });
+
+  it('F2b: the paragraph is verified in parallel with the lookup, and its context is reported once both are done', async () => {
+    // the lookup starts before the paragraph answer is known to it, yet sees the verified id when it asks
+    const seenByLookup: Array<string | null> = [];
+    mockLookup.mockImplementation(async (input: any) => {
+      seenByLookup.push(await input.paragraphId);
+      return TEMPORARY;
+    });
+
+    mockQuery.mockImplementation(async (sql: string) => (sql.includes('FROM paragraphs p') ? { rows: [{ id: 'p-1' }] } : { rows: [] }));
+    const res = await post({ word: 'zorp', paragraph_id: 'p-1' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.lookup_context).toEqual({ source: 'ebook', ebook_id: 'ebook-1', paragraph_id: 'p-1' });
+
+    mockQuery.mockImplementation(async () => ({ rows: [] }));
+    const foreign = await post({ word: 'zorp', paragraph_id: 'foreign' });
+    expect(foreign.status).toBe(200);
+    expect(foreign.body.data.lookup_context.paragraph_id).toBeNull();
+    expect(seenByLookup).toEqual(['p-1', null]);
+  });
+
+  it('F2c: a failing paragraph check is a 500, even when the lookup itself answers first (no unhandled rejection)', async () => {
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('FROM paragraphs p')) throw new Error('db down');
+      return { rows: [] };
+    });
+    mockLookup.mockResolvedValue({ kind: 'not_found' });
+    const res = await post({ word: 'zorp', paragraph_id: 'p-1' });
+    expect(res.status).toBe(500);
   });
 
   it('F3: words_looked_up is bumped exactly once per valid lookup, for every outcome', async () => {

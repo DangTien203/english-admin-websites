@@ -1,6 +1,5 @@
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
-import Approval from '../models/Approval';
-import Subscription from '../models/Subscription';
+import { getPendingCounts } from '../utils/pendingCounts';
 
 type AdminRole = 'super_admin' | 'content_editor' | 'moderator';
 
@@ -44,10 +43,10 @@ export async function injectAdmin(req: Request, res: Response, next: NextFunctio
     res.locals.pendingTransactions = 0;
 
     if (res.locals.admin && res.locals.admin.role === 'super_admin') {
-      [res.locals.pendingApprovals, res.locals.pendingTransactions] = await Promise.all([
-        Approval.countPending(),
-        Subscription.getPendingTransactionsCount(),
-      ]);
+      // Sidebar badges: one cached statement (utils/pendingCounts.ts), not two COUNT queries on every page.
+      const pending = await getPendingCounts();
+      res.locals.pendingApprovals = pending.approvals;
+      res.locals.pendingTransactions = pending.transactions;
     }
 
     next();

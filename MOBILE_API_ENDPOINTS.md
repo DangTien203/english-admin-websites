@@ -588,6 +588,16 @@ If a session has fewer than 3 words and contains a box 4/5 word, the gap cannot 
   - `400 INSUFFICIENT_PAIRS`
   - `404 LEITNER_CARD_NOT_FOUND` with invalid ids in details
 
+## Health Endpoint
+
+### `GET /api/v1/health`
+
+- Auth: Public. Ignores Authorization headers; creates no session.
+- Default: HTTP 200, `{ "success": true, "data": { "status": "ok" } }`. No database query.
+- Query: only `db=1` opts into one `SELECT 1`; success adds `"db": "ok"` to `data`.
+- DB probe failure: HTTP 503, `DATABASE_UNAVAILABLE` (no connection details).
+- `Cache-Control: no-store` on all responses. Use the default for app warm-up/liveness and `?db=1` for database readiness.
+
 ## Practice Endpoints
 
 All practice endpoints are mounted behind `requireApiAuth`.
@@ -635,6 +645,22 @@ All practice endpoints are mounted behind `requireApiAuth`.
 - Errors:
   - `404 SESSION_NOT_FOUND`
   - `400 SESSION_ALREADY_COMPLETED`
+
+### `POST /api/v1/practice/questions`
+
+- Auth: Auth
+- Body: `{ "card_ids": ["<uuid>"], "type": "swift_choice" | "cloze", "level"?: 1 | 2 | 3 }`.
+- `card_ids`: 1–20 UUIDs. `level` defaults to 1 for Cloze and is ignored for SwiftChoice.
+- HTTP 200: `{ "success": true, "data": [...] }`, one result per input, in input order (duplicates preserved).
+- Success item: `{ "card_id": "<uuid>", ...question }`, with exactly the question fields of the existing single-question endpoint.
+- Error item: `{ "card_id": "<uuid>", "error": { "code": "...", "message": "..." } }`.
+  - `INSUFFICIENT_DISTRACTORS`: fewer than three SwiftChoice distractors.
+  - `NO_EXAMPLES`: no usable Cloze example, including no matching word/form.
+  - `CARD_NOT_FOUND`: missing card or no deck access. Does not disclose another user's card.
+- Private owned decks and published premade/system decks follow the same access rules as the single-question endpoints.
+- Loads card metadata and shared question data in one SQL statement; reuses the existing question builders. Does not create/answer a session or consume practice quota.
+- Invalid batch: HTTP 400 `VALIDATION_ERROR`; authentication errors and unexpected server failures still fail the whole request.
+- Clients can prefetch 5–10 cards with one request; existing single-question endpoints remain available.
 
 ### `POST /api/v1/practice/swift-choice/question`
 

@@ -1,4 +1,5 @@
 import pool from '../config/db';
+import { TtlCache } from '../utils/ttlCache';
 import { looksVietnamese, stripDiacritics } from '../utils/answerLanguage';
 import { normalizeEnglishAnswer, normalizeVietnameseAnswer } from '../utils/answerNormalizer';
 import {
@@ -42,7 +43,35 @@ interface EntryForCard {
   meaning_vi: string | null;
   meaning_en: string | null;
   leitner_box: number | null;
+  /**
+   * What the grader compares an answer with, read together with the card (see ENTRY_REFERENCE_SQL) instead of one query each:
+   * the Vietnamese sense definitions, the English sense definitions and the accepted aliases, in the order the grader always used.
+   */
+  sense_defs_vi: string[];
+  sense_defs_en: string[];
+  aliases: string[];
 }
+
+/**
+ * The three lists above as sub-selects of the card query. A graded answer used to cost: the card (1 round trip), then the Vietnamese
+ * definitions and aliases (a 2nd), then — on a miss — the answer cache (a 3rd); an exact match now needs just the first.
+ * `ARRAY(SELECT …)` is never NULL (an empty list), and the filters and orderings are the ones the separate queries had.
+ */
+const ENTRY_REFERENCE_SQL = `
+  ARRAY(SELECT es.definition_vi FROM entry_senses es
+         WHERE es.entry_id = de.id AND es.definition_vi IS NOT NULL
+         ORDER BY es.sense_order ASC)                                            AS sense_defs_vi,
+  ARRAY(SELECT es.definition_en FROM entry_senses es
+         WHERE es.entry_id = de.id AND es.definition_en IS NOT NULL AND TRIM(es.definition_en) <> ''
+         ORDER BY es.sense_order ASC)                                            AS sense_defs_en,
+  ARRAY(SELECT al.answer_text FROM entry_answer_aliases al
+         WHERE al.entry_id = de.id AND al.status = 'active'
+         ORDER BY al.created_at ASC)                                             AS aliases`;
+
+/** The columns of a Leitner card as the grader reads it (`lc` = leitner_cards, `de` = dictionary_entries), see EntryForCard. */
+const LEITNER_CARD_COLUMNS = `lc.id AS card_id, lc.entry_id, de.headword, de.pos, de.meaning_vi, de.meaning_en,
+            lc.box_number AS leitner_box,
+            ${ENTRY_REFERENCE_SQL}`;
 
 /** Leitner boxes at which BOTH the Vietnamese and the English meaning must be answered. */
 export const ENGLISH_CHECK_MIN_BOX = 4;
@@ -87,7 +116,24 @@ export async function gradePracticeCard(
   userAnswerVi: string,
   userAnswerEn?: string
 ): Promise<PracticeCardGradeResult> {
-  const entry = await fetchEntryForCard(cardId, userId);
+  return gradeLoadedPracticeCard(await fetchEntryForCard(cardId, userId), userAnswerVi, userAnswerEn);
+}
+
+/**
+ * The card of a practice session with everything the grader compares an answer with (and its Leitner box). Rejects with an Error whose
+ * message is 'CARD_NOT_FOUND' when there is no such card. Read it with the session in the same round trip, then grade with
+ * gradeLoadedPracticeCard().
+ */
+export function loadPracticeCardForGrading(cardId: string, userId: string): Promise<GradableLeitnerCard> {
+  return fetchEntryForCard(cardId, userId);
+}
+
+/** gradePracticeCard() for a card that was read already: Vietnamese meaning, plus the English one for box 4/5 cards. */
+export async function gradeLoadedPracticeCard(
+  entry: GradableLeitnerCard,
+  userAnswerVi: string,
+  userAnswerEn?: string
+): Promise<PracticeCardGradeResult> {
   const needsEnglish = requiresEnglishMeaning(entry.leitner_box);
 
   const [vi, en] = await Promise.all([
@@ -104,23 +150,46 @@ export async function gradePracticeCard(
   };
 }
 
-export async function gradeLeitnerAnswer(
-  leitnerCardId: string,
-  userId: string,
-  userAnswer: string
-): Promise<PracticeAnswerGradeResult> {
-  const entry = await fetchEntryForLeitnerCard(leitnerCardId, userId);
-  return gradeEntryAnswer(entry, userAnswer);
+/** A Leitner card with everything the grader compares an answer with, as read by loadLeitnerCardForGrading(). */
+export type GradableLeitnerCard = EntryForCard;
+
+/**
+ * The two halves of grading an answer to a Leitner card: read the card (with its box and the reference answers), then grade. A caller
+ * that must look at the box before it grades (POST /leitner/review refuses box 4/5 cards) reads the card once instead of twice.
+ * Rejects with an error whose statusCode is 404 when the card is not the user's.
+ */
+export function loadLeitnerCardForGrading(leitnerCardId: string, userId: string): Promise<GradableLeitnerCard> {
+  return fetchEntryForLeitnerCard(leitnerCardId, userId);
 }
 
-/** English-meaning check (definition / paraphrase / synonym) for a Leitner card in box 4/5. */
-export async function gradeLeitnerEnglishAnswer(
-  leitnerCardId: string,
-  userId: string,
-  userAnswer: string
-): Promise<PracticeAnswerGradeResult> {
-  const entry = await fetchEntryForLeitnerCard(leitnerCardId, userId);
-  return gradeEntryEnglishMeaning(entry, userAnswer);
+export function gradeLoadedLeitnerCard(card: GradableLeitnerCard, userAnswer: string): Promise<PracticeAnswerGradeResult> {
+  return gradeEntryAnswer(card, userAnswer);
+}
+
+/** gradeLoadedLeitnerCard() for the English-meaning check (definition / paraphrase / synonym) of a box 4/5 card. */
+export function gradeLoadedLeitnerEnglishCard(card: GradableLeitnerCard, userAnswer: string): Promise<PracticeAnswerGradeResult> {
+  return gradeEntryEnglishMeaning(card, userAnswer);
+}
+
+/**
+ * The card a step of a review session is about, as loadLeitnerCardForGrading() reads it, found through the session and the step index
+ * instead of the card id — so it can be asked in the same round trip as the session itself (the card id is not known yet). Resolves
+ * to null when the step does not exist or its card is not the user's.
+ */
+export async function loadLeitnerCardForStepGrading(
+  sessionId: string,
+  stepIndex: number,
+  userId: string
+): Promise<GradableLeitnerCard | null> {
+  const { rows } = await pool.query<EntryForCard>(
+    `SELECT ${LEITNER_CARD_COLUMNS}
+       FROM leitner_review_steps st
+       JOIN leitner_cards lc ON lc.id = st.leitner_card_id AND lc.user_id = $3
+       JOIN dictionary_entries de ON de.id = lc.entry_id
+      WHERE st.session_id = $1 AND st.step_index = $2`,
+    [sessionId, stepIndex, userId]
+  );
+  return rows[0] ?? null;
 }
 
 async function gradeEntryAnswer(
@@ -129,15 +198,10 @@ async function gradeEntryAnswer(
 ): Promise<PracticeAnswerGradeResult> {
   const normalizedUserAnswer = normalizeVietnameseAnswer(userAnswer);
 
-  const [senseDefinitions, aliases] = await Promise.all([
-    fetchSenseDefinitions(entry.entry_id),
-    fetchActiveAliases(entry.entry_id),
-  ]);
-
   const candidates = buildAnswerCandidates({
     meaningVi: entry.meaning_vi,
-    senseDefinitions,
-    aliases,
+    senseDefinitions: entry.sense_defs_vi,
+    aliases: entry.aliases,
   });
 
   const deterministic = matchVietnameseAnswer(userAnswer, candidates);
@@ -185,7 +249,7 @@ async function gradeEntryEnglishMeaning(
   userAnswer: string
 ): Promise<PracticeAnswerGradeResult> {
   const normalizedUserAnswer = normalizeEnglishAnswer(userAnswer);
-  const referenceAnswers = await fetchEnglishDefinitions(entry);
+  const referenceAnswers = englishDefinitions(entry);
 
   const miss = (reason_vi: string): PracticeAnswerGradeResult => ({
     correct: false,
@@ -221,7 +285,7 @@ async function gradeEntryEnglishMeaning(
 
   // The answer must be ENGLISH. Checked before the cache and the paid model: a Vietnamese translation of the word is not what was
   // asked, however correct it is (the model would call it correct — it only sees that the meaning matches).
-  if (looksVietnamese(userAnswer) || (await isVietnameseMeaning(entry, userAnswer))) {
+  if (looksVietnamese(userAnswer) || isVietnameseMeaning(entry, userAnswer)) {
     return {
       ...miss('Đang kiểm tra nghĩa tiếng Anh: hãy trả lời bằng tiếng Anh, không phải tiếng Việt.'),
       details: { normalized_user_answer: normalizedUserAnswer, wrong_language: 'vi' },
@@ -241,15 +305,11 @@ async function gradeEntryEnglishMeaning(
  * Is the answer one of the entry's Vietnamese meanings, typed with or without diacritics ("mau nau" for "màu nâu")? Text without any
  * diacritics cannot be recognised as Vietnamese by its letters alone (utils/answerLanguage.ts).
  */
-async function isVietnameseMeaning(entry: EntryForCard, userAnswer: string): Promise<boolean> {
+function isVietnameseMeaning(entry: EntryForCard, userAnswer: string): boolean {
   const target = stripDiacritics(normalizeVietnameseAnswer(userAnswer));
   if (!target) return false;
 
-  const [senseDefinitions, aliases] = await Promise.all([
-    fetchSenseDefinitions(entry.entry_id),
-    fetchActiveAliases(entry.entry_id),
-  ]);
-  return buildAnswerCandidates({ meaningVi: entry.meaning_vi, senseDefinitions, aliases }).some(
+  return buildAnswerCandidates({ meaningVi: entry.meaning_vi, senseDefinitions: entry.sense_defs_vi, aliases: entry.aliases }).some(
     (candidate) => stripDiacritics(candidate.normalized) === target
   );
 }
@@ -356,7 +416,8 @@ async function gradeSemantic(input: {
 async function fetchEntryForCard(cardId: string, userId: string): Promise<EntryForCard> {
   const { rows } = await pool.query<EntryForCard>(
     `SELECT c.id AS card_id, c.entry_id, de.headword, de.pos, de.meaning_vi, de.meaning_en,
-            lc.box_number AS leitner_box
+            lc.box_number AS leitner_box,
+            ${ENTRY_REFERENCE_SQL}
        FROM cards c
        JOIN dictionary_entries de ON de.id = c.entry_id
        LEFT JOIN leitner_cards lc ON lc.entry_id = c.entry_id AND lc.user_id = $2
@@ -376,8 +437,7 @@ async function fetchEntryForLeitnerCard(
   userId: string
 ): Promise<EntryForCard> {
   const { rows } = await pool.query<EntryForCard>(
-    `SELECT lc.id AS card_id, lc.entry_id, de.headword, de.pos, de.meaning_vi, de.meaning_en,
-            lc.box_number AS leitner_box
+    `SELECT ${LEITNER_CARD_COLUMNS}
        FROM leitner_cards lc
        JOIN dictionary_entries de ON de.id = lc.entry_id
       WHERE lc.id = $1 AND lc.user_id = $2`,
@@ -392,27 +452,9 @@ async function fetchEntryForLeitnerCard(
   return rows[0];
 }
 
-async function fetchSenseDefinitions(entryId: string): Promise<string[]> {
-  const { rows } = await pool.query<{ definition_vi: string }>(
-    `SELECT definition_vi
-       FROM entry_senses
-      WHERE entry_id = $1 AND definition_vi IS NOT NULL
-      ORDER BY sense_order ASC`,
-    [entryId]
-  );
-  return rows.map((row) => row.definition_vi);
-}
-
 /** Reference English definitions: per-sense definitions first, then the entry-level meaning. */
-async function fetchEnglishDefinitions(entry: EntryForCard): Promise<string[]> {
-  const { rows } = await pool.query<{ definition_en: string }>(
-    `SELECT definition_en
-       FROM entry_senses
-      WHERE entry_id = $1 AND definition_en IS NOT NULL AND TRIM(definition_en) <> ''
-      ORDER BY sense_order ASC`,
-    [entry.entry_id]
-  );
-  const definitions = rows.map((row) => row.definition_en);
+function englishDefinitions(entry: EntryForCard): string[] {
+  const definitions = [...entry.sense_defs_en];
   if (entry.meaning_en && entry.meaning_en.trim()) definitions.push(entry.meaning_en);
 
   const seen = new Set<string>();
@@ -422,17 +464,6 @@ async function fetchEnglishDefinitions(entry: EntryForCard): Promise<string[]> {
     seen.add(key);
     return true;
   });
-}
-
-async function fetchActiveAliases(entryId: string): Promise<string[]> {
-  const { rows } = await pool.query<{ answer_text: string }>(
-    `SELECT answer_text
-       FROM entry_answer_aliases
-      WHERE entry_id = $1 AND status = 'active'
-      ORDER BY created_at ASC`,
-    [entryId]
-  );
-  return rows.map((row) => row.answer_text);
 }
 
 async function fetchSemanticCache(
@@ -477,16 +508,23 @@ function fromSemanticCache(
   };
 }
 
+// The grader prompts change when an admin edits a template, not per answer; they used to be read from the database before every call
+// to the model. A minute is the longest an edit takes to show (a null is cached too: "no template, use the built-in prompt").
+const promptTemplates = new TtlCache<string | null>({ ttlMs: 60_000, max: 20 });
+
 async function fetchPromptTemplate(name: string): Promise<string | undefined> {
-  const { rows } = await pool.query<{ system_prompt: string }>(
-    `SELECT system_prompt
-       FROM prompt_templates
-      WHERE name = $1 AND status = 'active'
-      ORDER BY version DESC
-      LIMIT 1`,
-    [name]
-  );
-  return rows[0]?.system_prompt;
+  const prompt = await promptTemplates.getOrLoad(name, async () => {
+    const { rows } = await pool.query<{ system_prompt: string }>(
+      `SELECT system_prompt
+         FROM prompt_templates
+        WHERE name = $1 AND status = 'active'
+        ORDER BY version DESC
+        LIMIT 1`,
+      [name]
+    );
+    return rows[0]?.system_prompt ?? null;
+  });
+  return prompt ?? undefined;
 }
 
 async function saveSemanticCache(input: {

@@ -45,13 +45,15 @@
     "mock:upstream": "tsx scripts/mock-upstream/server.ts",
     "loadtest:lookup": "tsx --expose-gc scripts/loadtest/lookup-burst.ts",
     "health:snapshot": "tsx scripts/health-snapshot.ts",
-    "clean:test-data": "tsx scripts/dev/clean-test-data.ts"
+    "clean:test-data": "tsx scripts/dev/clean-test-data.ts",
+    "bench:api": "tsx scripts/dev/bench-api.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",
     "@aws-sdk/client-s3": "^3.1037.0",
     "@google-cloud/text-to-speech": "^6.4.0",
     "bcryptjs": "^2.4.3",
+    "compression": "^1.8.2",
     "connect-flash": "^0.1.1",
     "cors": "^2.8.6",
     "dotenv": "^16.6.1",
@@ -76,6 +78,7 @@
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
+    "@types/compression": "^1.8.1",
     "@types/connect-flash": "^0.0.40",
     "@types/cors": "^2.8.19",
     "@types/ejs": "^3.1.5",

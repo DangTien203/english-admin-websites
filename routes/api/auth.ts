@@ -29,7 +29,7 @@ const generateAccessToken = (userId: string, email: string): string =>
 const generateRefreshToken = (userId: string, tokenId: string): string =>
   jwt.sign({ userId, tokenId }, getSecret(), { expiresIn: REFRESH_TOKEN_TTL });
 
-async function buildUserResponse(row: any) {
+function toUserResponse(row: any, subscriptionBadge: string) {
   return {
     id:                 row.id,
     email:              row.email,
@@ -42,8 +42,12 @@ async function buildUserResponse(row: any) {
     streak_longest:     Number(row.streak_longest ?? 0),
     last_active_at:     row.last_active_at ?? null,
     created_at:         row.created_at,
-    subscription_badge: await computeSubscriptionBadge(row.id),
+    subscription_badge: subscriptionBadge,
   };
+}
+
+async function buildUserResponse(row: any) {
+  return toUserResponse(row, await computeSubscriptionBadge(row.id));
 }
 
 // Issue an access + refresh token pair and persist the refresh token record.
@@ -160,21 +164,22 @@ router.post(
       return apiError(res, 401, 'INVALID_CREDENTIALS', 'Email hoặc mật khẩu không đúng');
     }
 
-    // Update timestamps and fetch all fields in one query
-    const { rows: updatedRows } = await pool.query(
-      `UPDATE users
-          SET last_login_at = NOW(), last_active_at = NOW()
-        WHERE id = $1
-        RETURNING id, email, full_name, phone, level, status,
-                  streak_current, streak_longest, avatar_url,
-                  last_active_at, created_at`,
-      [authRow.id]
-    );
-
-    const [tokens, userResponse] = await Promise.all([
+    // Update timestamps and fetch all fields in one query — while the refresh token is stored and the badge is read: the three do not
+    // depend on each other (the badge only needs the id), so the sign-in costs two round trips after the password check, not three.
+    const [{ rows: updatedRows }, tokens, badge] = await Promise.all([
+      pool.query(
+        `UPDATE users
+            SET last_login_at = NOW(), last_active_at = NOW()
+          WHERE id = $1
+          RETURNING id, email, full_name, phone, level, status,
+                    streak_current, streak_longest, avatar_url,
+                    last_active_at, created_at`,
+        [authRow.id]
+      ),
       issueTokens(req, authRow),
-      buildUserResponse(updatedRows[0]),
+      computeSubscriptionBadge(authRow.id),
     ]);
+    const userResponse = toUserResponse(updatedRows[0], badge);
 
     return apiSuccess(
       res,

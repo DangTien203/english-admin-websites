@@ -4,59 +4,44 @@ import pool from '../../config/db';
 import { ApiRequest } from '../../middlewares/apiAuth';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { apiSuccess, apiError } from '../../utils/apiResponse';
-import { applyPracticeCorrectAnswers } from '../../utils/leitnerManager';
-import { updateStreak } from '../../utils/streakCalculator';
+import { PRACTICE_ADVANCE_COUNTS, getIntervals, practiceAdvanceCtes } from '../../utils/leitnerManager';
+import { recordActivity } from '../../utils/streakCalculator';
 import { parsePagination } from '../../utils/pagination';
+import { validateBody } from '../../middlewares/validateBody';
+import { buildPracticeQuestions } from '../../services/practiceQuestionService';
 import {
-  gradePracticeCard,
+  VI_COALESCE,
+  shuffleArray,
+  buildSwiftChoiceQuestion,
+  buildClozeQuestion,
+  InsufficientDistractorsError,
+  NoExamplesError,
+} from '../../utils/questionHelpers';
+import {
+  gradeLoadedPracticeCard,
+  loadPracticeCardForGrading,
   requiresEnglishMeaning,
   PracticeAnswerGradeResult,
 } from '../../services/answerGradingService';
 
 const router = Router();
 
-// ── Shared SQL helpers ────────────────────────────────────────────────────────
+const questionsSchema = z.object({
+  card_ids: z.array(z.string().uuid()).min(1).max(20),
+  type: z.enum(['swift_choice', 'cloze']),
+  level: z.union([z.literal(1), z.literal(2), z.literal(3)]).optional(),
+});
 
-const VI_COALESCE = `COALESCE(
-  (SELECT es.definition_vi FROM entry_senses es
-   WHERE es.entry_id = de.id AND es.definition_vi IS NOT NULL
-   ORDER BY es.sense_order ASC LIMIT 1),
-  de.meaning_vi
-)`;
-
-const HAS_VI = `(de.meaning_vi IS NOT NULL OR EXISTS (
-  SELECT 1 FROM entry_senses es
-  WHERE es.entry_id = de.id AND es.definition_vi IS NOT NULL
-))`;
-
-function shuffleArray<T>(arr: T[]): T[] {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
-
-function maskWord(sentence: string, word: string): string {
-  const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return sentence.replace(new RegExp(`\\b${escaped}\\b`, 'gi'), '___');
-}
-
-function findWordInSentence(
-  sentence: string,
-  candidates: string[]
-): { form: string } | null {
-  for (const candidate of candidates) {
-    const escaped = candidate.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const match = sentence.match(new RegExp(`\\b${escaped}\\b`, 'i'));
-    if (match) return { form: match[0] };
-  }
-  return null;
-}
+router.post('/questions', validateBody(questionsSchema), asyncHandler(async (req: ApiRequest, res: Response) => {
+  const { card_ids, type, level } = req.body as z.infer<typeof questionsSchema>;
+  return apiSuccess(res, await buildPracticeQuestions(req.user!.id, card_ids, type, level ?? 1));
+}));
 
 const VALID_MODES = ['flashcard', 'swift_choice', 'cloze_craft', 'pair_link'] as const;
 type PracticeMode = (typeof VALID_MODES)[number];
+
+// A card of a deck the user may use: its own deck, or a published premade / system-generated one.
+const DECK_ACCESS = `(d.user_id = $2 OR (d.deck_type IN ('premade','system_generated') AND d.status = 'published'))`;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  POST /api/v1/practice/session/start
@@ -82,6 +67,24 @@ const sessionStartSchema = z.object({
     .optional(),
 });
 
+// What a session card needs: the card, its entry, the user's progress on the card and the Leitner box of the word.
+const SESSION_CARD_SELECT = `
+  SELECT
+    c.id            AS card_id,
+    c.entry_id,
+    c.note_html,
+    de.headword,
+    de.ipa_us,
+    de.audio_us_url,
+    ${VI_COALESCE} AS meaning_vi,
+    ucp.times_seen,
+    ucp.times_correct,
+    lc.box_number   AS leitner_box_number
+  FROM cards c
+  JOIN dictionary_entries de ON de.id = c.entry_id
+  LEFT JOIN user_card_progress ucp ON ucp.card_id = c.id AND ucp.user_id = $2
+  LEFT JOIN leitner_cards lc ON lc.entry_id = c.entry_id AND lc.user_id = $2`;
+
 router.post(
   '/session/start',
   asyncHandler(async (req: ApiRequest, res: Response) => {
@@ -99,31 +102,38 @@ router.post(
     }
     const { deck_id, mode, limit, card_ids } = parsed.data;
 
-    // Verify deck access
-    const { rows: deckRows } = await pool.query(
-      `SELECT id FROM decks
-       WHERE id = $1 AND (user_id = $2 OR deck_type IN ('premade','system_generated'))`,
-      [deck_id, userId]
-    );
-    if (deckRows.length === 0) {
+    // ── Card selection ────────────────────────────────────────────────────────
+    // Manual selection wins over random when both provided. Dedupe silently (per spec — duplicates are not an error).
+    const manualIds = card_ids && card_ids.length > 0 ? Array.from(new Set(card_ids)) : null;
+    const safeLimit = Math.min(100, Math.max(1, limit ?? 20));
+
+    // The access check and the card query do not depend on each other, so they are asked together (one round trip, not two or three).
+    // The cards are only used when the deck turns out to be the user's to use.
+    const [deckRes, cardsRes] = await Promise.all([
+      pool.query(
+        `SELECT id FROM decks
+         WHERE id = $1 AND (user_id = $2 OR deck_type IN ('premade','system_generated'))`,
+        [deck_id, userId]
+      ),
+      manualIds
+        ? // Manual selection bypasses the mastered filter — user explicitly picked these. The deck filter makes the rows that come back
+          // exactly the ids that belong to the deck, so no separate "do they all belong?" query is needed.
+          pool.query(`${SESSION_CARD_SELECT} WHERE c.deck_id = $1 AND c.id = ANY($3::uuid[])`, [deck_id, userId, manualIds])
+        : // Random selection: unlearned words (no Leitner card) first, then learned words
+          // (any box 1–5, mastered included) to top up to `limit`. Both groups are random
+          // (RANDOM() tie-break inside each group); the final list is shuffled so new and
+          // review words are mixed. If the deck has fewer than `limit` cards, return all
+          // of them (no error — mobile shows snackbar with the actual count).
+          pool.query(`${SESSION_CARD_SELECT} WHERE c.deck_id = $1 ORDER BY (lc.id IS NOT NULL), RANDOM() LIMIT $3`, [deck_id, userId, safeLimit]),
+    ]);
+    if (deckRes.rows.length === 0) {
       return apiError(res, 404, 'DECK_NOT_FOUND', 'Deck không tồn tại');
     }
 
-    // ── Card selection ────────────────────────────────────────────────────────
-    // Manual selection wins over random when both provided.
-    let cards: any[];
-
-    if (card_ids && card_ids.length > 0) {
-      // Dedupe silently (per spec — duplicates are not an error).
-      const uniqueIds = Array.from(new Set(card_ids));
-
-      // Cross-check: all ids must belong to this deck.
-      const { rows: validRows } = await pool.query(
-        `SELECT id FROM cards WHERE deck_id = $1 AND id = ANY($2::uuid[])`,
-        [deck_id, uniqueIds]
-      );
-      const validSet = new Set(validRows.map((r: any) => r.id as string));
-      const invalidIds = uniqueIds.filter((id) => !validSet.has(id));
+    let cards: any[] = cardsRes.rows;
+    if (manualIds) {
+      const found = new Set(cards.map((c: any) => c.card_id as string));
+      const invalidIds = manualIds.filter((id) => !found.has(id));
       if (invalidIds.length > 0) {
         return apiError(
           res,
@@ -133,55 +143,7 @@ router.post(
           { invalid_card_ids: invalidIds }
         );
       }
-
-      // Manual selection bypasses the mastered filter — user explicitly picked these.
-      ({ rows: cards } = await pool.query(
-        `SELECT
-           c.id            AS card_id,
-           c.entry_id,
-           c.note_html,
-           de.headword,
-           de.ipa_us,
-           de.audio_us_url,
-           ${VI_COALESCE} AS meaning_vi,
-           ucp.times_seen,
-           ucp.times_correct,
-           lc.box_number   AS leitner_box_number
-         FROM cards c
-         JOIN dictionary_entries de ON de.id = c.entry_id
-         LEFT JOIN user_card_progress ucp ON ucp.card_id = c.id AND ucp.user_id = $2
-         LEFT JOIN leitner_cards lc ON lc.entry_id = c.entry_id AND lc.user_id = $2
-         WHERE c.deck_id = $1 AND c.id = ANY($3::uuid[])`,
-        [deck_id, userId, uniqueIds]
-      ));
     } else {
-      // Random selection: unlearned words (no Leitner card) first, then learned words
-      // (any box 1–5, mastered included) to top up to `limit`. Both groups are random
-      // (RANDOM() tie-break inside each group); the final list is shuffled so new and
-      // review words are mixed. If the deck has fewer than `limit` cards, return all
-      // of them (no error — mobile shows snackbar with the actual count).
-      const safeLimit = Math.min(100, Math.max(1, limit ?? 20));
-      ({ rows: cards } = await pool.query(
-        `SELECT
-           c.id            AS card_id,
-           c.entry_id,
-           c.note_html,
-           de.headword,
-           de.ipa_us,
-           de.audio_us_url,
-           ${VI_COALESCE} AS meaning_vi,
-           ucp.times_seen,
-           ucp.times_correct,
-           lc.box_number   AS leitner_box_number
-         FROM cards c
-         JOIN dictionary_entries de ON de.id = c.entry_id
-         LEFT JOIN user_card_progress ucp ON ucp.card_id = c.id AND ucp.user_id = $2
-         LEFT JOIN leitner_cards lc ON lc.entry_id = c.entry_id AND lc.user_id = $2
-         WHERE c.deck_id = $1
-         ORDER BY (lc.id IS NOT NULL), RANDOM()
-         LIMIT $3`,
-        [deck_id, userId, safeLimit]
-      ));
       cards = shuffleArray(cards);
     }
 
@@ -252,24 +214,29 @@ router.post(
       );
     }
 
-    // Fetch and validate session
-    const { rows: sessionRows } = await pool.query(
-      `SELECT id, user_id, total_count, answered_count, correct_count, wrong_count, completed_at
-       FROM practice_sessions WHERE id = $1`,
-      [session_id]
-    );
+    // Fetch and validate the session, and find the card: independent reads, asked together. A typed answer needs the card anyway,
+    // with what the grader compares it with, so that one read also tells whether the card exists; a client-graded answer only checks.
+    const [{ rows: sessionRows }, cardToGrade, cardExists] = await Promise.all([
+      pool.query(
+        `SELECT id, user_id, total_count, answered_count, correct_count, wrong_count, completed_at
+         FROM practice_sessions WHERE id = $1`,
+        [session_id]
+      ),
+      hasLegacyCorrect
+        ? Promise.resolve(null)
+        : loadPracticeCardForGrading(card_id, userId).catch((err) => {
+            if (err?.message === 'CARD_NOT_FOUND') return null;
+            throw err;
+          }),
+      hasLegacyCorrect ? pool.query(`SELECT 1 FROM cards WHERE id = $1`, [card_id]).then((r) => r.rows.length > 0) : Promise.resolve(true),
+    ]);
     if (sessionRows.length === 0 || sessionRows[0].user_id !== userId) {
       return apiError(res, 404, 'SESSION_NOT_FOUND', 'Session không tồn tại');
     }
     if (sessionRows[0].completed_at !== null) {
       return apiError(res, 400, 'SESSION_ALREADY_COMPLETED', 'Session đã hoàn thành');
     }
-
-    // Verify card exists
-    const { rows: cardRows } = await pool.query(
-      `SELECT id FROM cards WHERE id = $1`, [card_id]
-    );
-    if (cardRows.length === 0) {
+    if (!cardExists || (!hasLegacyCorrect && !cardToGrade)) {
       return apiError(res, 404, 'CARD_NOT_FOUND', 'Card không tồn tại');
     }
 
@@ -289,9 +256,8 @@ router.post(
     let needsEnglish = false;
 
     if (!hasLegacyCorrect) {
-      const cardGrade = await gradePracticeCard(
-        card_id,
-        userId,
+      const cardGrade = await gradeLoadedPracticeCard(
+        cardToGrade!,
         user_answer ?? '',
         typeof user_answer_en === 'string' ? user_answer_en : undefined
       );
@@ -301,12 +267,32 @@ router.post(
       finalCorrect = cardGrade.correct;
     }
 
-    // Record answer
-    await pool.query(
-      `INSERT INTO practice_answers
-         (session_id, card_id, correct, time_ms, user_answer,
-          grading_source, verdict, confidence, matched_answer, accepted_answers, grading_details)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+    // Record the answer, bump the session counters and the card progress in ONE statement: the three used to be three round trips,
+    // one after the other, and could half-apply. The counters come back from the UPDATE.
+    const { rows: updated } = await pool.query(
+      `WITH ans AS (
+         INSERT INTO practice_answers
+           (session_id, card_id, correct, time_ms, user_answer,
+            grading_source, verdict, confidence, matched_answer, accepted_answers, grading_details)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+       ), upd AS (
+         UPDATE practice_sessions
+            SET answered_count = answered_count + 1,
+                correct_count  = correct_count  + $13::int,
+                wrong_count    = wrong_count    + (1 - $13::int)
+          WHERE id = $1 AND user_id = $12
+      RETURNING answered_count, correct_count, wrong_count, total_count
+       ), prog AS (
+         -- Track card progress (idempotent — creates row if missing)
+         INSERT INTO user_card_progress (user_id, card_id, times_seen, times_correct, first_seen_at)
+         VALUES ($12, $2, 1, $13::int, NOW())
+         ON CONFLICT (user_id, card_id) DO UPDATE SET
+           times_seen    = user_card_progress.times_seen + 1,
+           times_correct = user_card_progress.times_correct + $13::int,
+           last_review   = NOW(),
+           updated_at    = NOW()
+       )
+       SELECT answered_count, correct_count, wrong_count, total_count FROM upd`,
       [
         session_id,
         card_id,
@@ -334,32 +320,11 @@ router.post(
               }
             : null,
         }),
+        userId,
+        finalCorrect ? 1 : 0,
       ]
     );
-
-    // Update session counters
-    const { rows: updated } = await pool.query(
-      `UPDATE practice_sessions
-       SET answered_count = answered_count + 1,
-           correct_count  = correct_count  + $3::int,
-           wrong_count    = wrong_count    + (1 - $3::int)
-       WHERE id = $1 AND user_id = $2
-       RETURNING answered_count, correct_count, wrong_count, total_count`,
-      [session_id, userId, finalCorrect ? 1 : 0]
-    );
     const s = updated[0];
-
-    // Track card progress (idempotent — creates row if missing)
-    await pool.query(
-      `INSERT INTO user_card_progress (user_id, card_id, times_seen, times_correct, first_seen_at)
-       VALUES ($1, $2, 1, $3, NOW())
-       ON CONFLICT (user_id, card_id) DO UPDATE SET
-         times_seen    = user_card_progress.times_seen + 1,
-         times_correct = user_card_progress.times_correct + $3,
-         last_review   = NOW(),
-         updated_at    = NOW()`,
-      [userId, card_id, finalCorrect ? 1 : 0]
-    );
 
     return apiSuccess(res, {
       progress: `${s.answered_count}/${s.total_count}`,
@@ -404,12 +369,24 @@ router.post(
       return apiError(res, 400, 'VALIDATION_ERROR', 'session_id là bắt buộc');
     }
 
-    const { rows: sessionRows } = await pool.query(
-      `SELECT id, user_id, deck_id, mode, correct_count, wrong_count, total_count,
-              started_at, completed_at
-       FROM practice_sessions WHERE id = $1`,
-      [session_id]
-    );
+    // The session, the distinct correctly-answered cards of it (both keyed by the session id) and the box intervals are read
+    // together. (The cards of a session that turns out not to be the user's are simply not used.)
+    const [{ rows: sessionRows }, { rows: correctRows }, intervals] = await Promise.all([
+      pool.query(
+        `SELECT id, user_id, deck_id, mode, correct_count, wrong_count, total_count,
+                started_at, completed_at
+         FROM practice_sessions WHERE id = $1`,
+        [session_id]
+      ),
+      pool.query(
+        `SELECT DISTINCT pa.card_id, c.entry_id
+         FROM practice_answers pa
+         JOIN cards c ON c.id = pa.card_id
+         WHERE pa.session_id = $1 AND pa.correct = true`,
+        [session_id]
+      ),
+      getIntervals(),
+    ]);
     if (sessionRows.length === 0 || sessionRows[0].user_id !== userId) {
       return apiError(res, 404, 'SESSION_NOT_FOUND', 'Session không tồn tại');
     }
@@ -423,50 +400,48 @@ router.post(
     const wrongCount: number = session.wrong_count;
     const xpEarned = correctCount * 10 + 20; // +20 completion bonus
 
-    // Get distinct entry_ids for correctly-answered cards
-    const { rows: correctRows } = await pool.query(
-      `SELECT DISTINCT pa.card_id, c.entry_id
-       FROM practice_answers pa
-       JOIN cards c ON c.id = pa.card_id
-       WHERE pa.session_id = $1 AND pa.correct = true`,
-      [session_id]
-    );
     const correctCardIds = [...new Set(correctRows.map((r: any) => r.card_id as string))];
     const correctEntryIds = [...new Set(correctRows.map((r: any) => r.entry_id as string))];
 
-    // Correct entries: new words → Leitner box 1, words already in a box → next box.
-    // (`correct` already means "Vietnamese AND English right" for box 4/5 cards.)
-    const leitnerResult = await applyPracticeCorrectAnswers(userId, correctEntryIds, session.mode);
-
-    // Mark session complete
-    await pool.query(
-      `UPDATE practice_sessions
-       SET completed_at = NOW(), time_total_ms = $2, xp_earned = $3
-       WHERE id = $1`,
-      [session_id, timeTotalMs, xpEarned]
-    );
-
-    // Log activity
-    await pool.query(
-      `INSERT INTO user_activity_log (user_id, action, details)
-       VALUES ($1, 'practice_session', $2)`,
-      [userId, JSON.stringify({
+    // Marking the session complete and applying its correct answers to Leitner are ONE statement: the claim comes first and only
+    // the request that wins it moves the cards (new words → Leitner box 1, words already in a box → next box; `correct` already
+    // means "Vietnamese AND English right" for box 4/5 cards). Two completions at once, or a client that retries a slow one, used to
+    // read the session as open, both advance the cards, and push every word up two boxes. Atomic: a failure leaves the session open.
+    // Beside it (they do not depend on each other) the activity is logged and the streak updated; non-critical streak work must
+    // not fail the request.
+    const [{ rows: [done] }, streakUpdated] = await Promise.all([
+      pool.query(
+        `WITH claim AS (
+           UPDATE practice_sessions
+              SET completed_at = NOW(), time_total_ms = $2, xp_earned = $3
+            WHERE id = $1 AND user_id = $4 AND completed_at IS NULL
+        RETURNING id
+         ), ${practiceAdvanceCtes({
+           user: '$4::uuid',
+           entryIds: '$5::uuid[]',
+           intervals: '$6::float8[]',
+           mode: '$7::text',
+           gate: 'EXISTS (SELECT 1 FROM claim)',
+         })}
+         SELECT (SELECT COUNT(*) FROM claim)::int AS claimed, ${PRACTICE_ADVANCE_COUNTS}`,
+        [session_id, timeTotalMs, xpEarned, userId, correctEntryIds, intervals, session.mode]
+      ),
+      recordActivity(userId, 'practice_session', {
         mode: session.mode,
         deck_id: session.deck_id,
         session_id,
         correct_count: correctCount,
         xp_earned: xpEarned,
-      })]
-    );
-
-    // Update streak
-    let streakUpdated = false;
-    try {
-      await updateStreak(userId);
-      streakUpdated = true;
-    } catch {
-      // Non-critical — don't fail the request
+      }).then(
+        () => true,
+        () => false
+      ),
+    ]);
+    if (done.claimed === 0) {
+      // Another request completed this session between our read and our claim.
+      return apiError(res, 400, 'SESSION_ALREADY_COMPLETED', 'Session đã hoàn thành');
     }
+    const leitnerResult = { added: done.added, skipped: correctEntryIds.length - done.added, advanced: done.advanced, mastered_now: done.mastered_now };
 
     const accuracy = (correctCount + wrongCount) > 0
       ? Math.round((correctCount / (correctCount + wrongCount)) * 100) / 100
@@ -503,8 +478,6 @@ router.post(
       return apiError(res, 400, 'VALIDATION_ERROR', 'card_id là bắt buộc');
     }
 
-    const DECK_ACCESS = `(d.user_id = $2 OR (d.deck_type IN ('premade','system_generated') AND d.status = 'published'))`;
-
     const { rows: cardRows } = await pool.query(
       `SELECT c.entry_id, de.headword, de.ipa_us, de.pos, de.cefr_level,
          ${VI_COALESCE} AS correct_vi
@@ -519,80 +492,24 @@ router.post(
     }
 
     const card = cardRows[0];
-    const posArray: string[] | null =
-      Array.isArray(card.pos) && card.pos.length > 0 ? card.pos : null;
 
-    const DISTRACTOR_SELECT = `
-      SELECT ${VI_COALESCE} AS display_vi
-      FROM dictionary_entries de`;
-    let distractors: any[] = [];
-
-    if (posArray) {
-      ({ rows: distractors } = await pool.query(
-        `${DISTRACTOR_SELECT}
-         WHERE de.cefr_level = $1 AND de.id != $2 AND de.pos && $3::varchar[] AND ${HAS_VI}
-         ORDER BY RANDOM() LIMIT 3`,
-        [card.cefr_level, card.entry_id, posArray]
-      ));
-      if (distractors.length < 3) {
-        ({ rows: distractors } = await pool.query(
-          `${DISTRACTOR_SELECT}
-           WHERE de.id != $1 AND de.pos && $2::varchar[] AND ${HAS_VI}
-           ORDER BY RANDOM() LIMIT 3`,
-          [card.entry_id, posArray]
-        ));
+    // The same question builder as /leitner/swift-choice/question (the two surfaces share the question shape).
+    try {
+      const question = await buildSwiftChoiceQuestion({
+        entry_id: card.entry_id,
+        headword: card.headword,
+        ipa_us: card.ipa_us,
+        pos: card.pos,
+        cefr_level: card.cefr_level,
+        correct_vi: card.correct_vi,
+      });
+      return apiSuccess(res, { card_id, ...question });
+    } catch (err) {
+      if (err instanceof InsufficientDistractorsError) {
+        return apiError(res, 422, 'INSUFFICIENT_DISTRACTORS', 'Không đủ distractors');
       }
-    } else {
-      ({ rows: distractors } = await pool.query(
-        `${DISTRACTOR_SELECT}
-         WHERE de.cefr_level = $1 AND de.id != $2 AND ${HAS_VI}
-         ORDER BY RANDOM() LIMIT 3`,
-        [card.cefr_level, card.entry_id]
-      ));
-      if (distractors.length < 3) {
-        ({ rows: distractors } = await pool.query(
-          `${DISTRACTOR_SELECT}
-           WHERE de.id != $1 AND ${HAS_VI}
-           ORDER BY RANDOM() LIMIT 3`,
-          [card.entry_id]
-        ));
-      }
+      throw err;
     }
-
-    if (distractors.length < 3) {
-      return apiError(res, 422, 'INSUFFICIENT_DISTRACTORS', 'Không đủ distractors');
-    }
-
-    const { rows: exRows } = await pool.query(
-      `SELECT se.example_en
-       FROM sense_examples se
-       JOIN entry_senses es ON es.id = se.sense_id
-       WHERE es.entry_id = $1 AND se.example_en IS NOT NULL
-       ORDER BY es.sense_order ASC, se.sort_order ASC LIMIT 1`,
-      [card.entry_id]
-    );
-
-    const hintExample = exRows.length > 0
-      ? `e.g., ${maskWord(exRows[0].example_en, card.headword)}`
-      : null;
-
-    const optionItems = shuffleArray([
-      { text: card.correct_vi || '', correct: true },
-      { text: distractors[0].display_vi || '', correct: false },
-      { text: distractors[1].display_vi || '', correct: false },
-      { text: distractors[2].display_vi || '', correct: false },
-    ]);
-    const options = optionItems.map((opt, idx) => ({ index: idx, text: opt.text }));
-    const correct_index = optionItems.findIndex(opt => opt.correct);
-
-    return apiSuccess(res, {
-      card_id,
-      question_type: 'meaning_from_word',
-      prompt: { word: card.headword, ipa_us: card.ipa_us || null, pos: posArray?.[0] ?? null },
-      hint_example: hintExample,
-      options,
-      correct_index,
-    });
   })
 );
 
@@ -613,8 +530,6 @@ router.post(
       return apiError(res, 400, 'VALIDATION_ERROR', 'level phải là 1, 2, hoặc 3');
     }
 
-    const DECK_ACCESS = `(d.user_id = $2 OR (d.deck_type IN ('premade','system_generated') AND d.status = 'published'))`;
-
     const { rows: cardRows } = await pool.query(
       `SELECT c.entry_id, de.headword, de.pos
        FROM cards c
@@ -629,99 +544,23 @@ router.post(
 
     const card = cardRows[0];
 
-    const [{ rows: wfRows }, { rows: examples }] = await Promise.all([
-      pool.query(`SELECT form_value, form_type FROM word_forms WHERE entry_id = $1`, [card.entry_id]),
-      pool.query(
-        `SELECT example_en FROM (
-           SELECT se.example_en, 0 AS priority, es.sense_order, se.sort_order
-           FROM sense_examples se
-           JOIN entry_senses es ON es.id = se.sense_id
-           WHERE es.entry_id = $1 AND se.example_en IS NOT NULL
-           UNION ALL
-           SELECT TRIM(unnest) AS example_en, 1 AS priority, 0 AS sense_order, ordinality::int AS sort_order
-           FROM dictionary_entries de,
-                LATERAL unnest(string_to_array(de.example_en, E'\\n')) WITH ORDINALITY AS unnest
-           WHERE de.id = $1 AND de.example_en IS NOT NULL AND TRIM(unnest) != ''
-         ) AS combined
-         ORDER BY priority ASC, sense_order ASC, sort_order ASC`,
-        [card.entry_id]
-      ),
-    ]);
-
-    if (examples.length === 0) {
-      return apiError(res, 422, 'NO_EXAMPLES', 'Card này không có câu ví dụ');
-    }
-
-    const wordForms: Array<{ value: string; type: string }> = wfRows.map((r: any) => ({
-      value: r.form_value,
-      type: r.form_type,
-    }));
-    const candidates = [
-      card.headword,
-      ...wordForms.sort((a, b) => b.value.length - a.value.length).map(wf => wf.value),
-    ];
-
-    let targetWord: string | null = null;
-    let targetExample: string | null = null;
-    let matchedFormType: string | null = null;
-
-    for (const ex of shuffleArray(examples)) {
-      const found = findWordInSentence(ex.example_en, candidates);
-      if (found) {
-        targetWord = found.form;
-        targetExample = ex.example_en;
-        const lowerForm = found.form.toLowerCase();
-        const matchedWF = wordForms.find(wf => wf.value.toLowerCase() === lowerForm);
-        matchedFormType = matchedWF ? matchedWF.type : null;
-        break;
+    try {
+      const question = await buildClozeQuestion(
+        { entry_id: card.entry_id, headword: card.headword, pos: card.pos },
+        level
+      );
+      return apiSuccess(res, { card_id, ...question });
+    } catch (err) {
+      if (err instanceof NoExamplesError) {
+        return apiError(
+          res,
+          422,
+          'NO_EXAMPLES',
+          err.reason === 'none' ? 'Card này không có câu ví dụ' : 'Không tìm được câu ví dụ phù hợp'
+        );
       }
+      throw err;
     }
-
-    if (!targetWord || !targetExample) {
-      return apiError(res, 422, 'NO_EXAMPLES', 'Không tìm được câu ví dụ phù hợp');
-    }
-
-    const sentenceMasked = maskWord(targetExample, targetWord);
-    const hintPos = Array.isArray(card.pos) && card.pos.length > 0 ? card.pos[0] : null;
-
-    let wordChoices: string[] | null = null;
-    let scrambledLetters: string[] | null = null;
-
-    if (level === 1) {
-      const { rows: wrongWords } = hintPos
-        ? await pool.query(
-            `SELECT de.headword FROM dictionary_entries de
-             WHERE de.id != $1
-             ORDER BY CASE WHEN $2 = ANY(de.pos) THEN 0 ELSE 1 END, RANDOM() LIMIT 3`,
-            [card.entry_id, hintPos]
-          )
-        : await pool.query(
-            `SELECT de.headword FROM dictionary_entries de
-             WHERE de.id != $1 ORDER BY RANDOM() LIMIT 3`,
-            [card.entry_id]
-          );
-      wordChoices = shuffleArray([targetWord, ...wrongWords.map((r: any) => r.headword as string)]);
-    } else if (level === 2) {
-      const CONSONANTS = 'bcdfghjklmnpqrstvwxyz';
-      const letters = targetWord.split('');
-      const decoyCount = letters.length <= 4 ? 1 : 2;
-      for (let i = 0; i < decoyCount; i++) {
-        letters.push(CONSONANTS[Math.floor(Math.random() * CONSONANTS.length)]);
-      }
-      scrambledLetters = shuffleArray(letters);
-    }
-
-    return apiSuccess(res, {
-      card_id,
-      level,
-      target_word: targetWord,
-      sentence_masked: sentenceMasked,
-      sentence_full: targetExample,
-      hint_pos: hintPos,
-      hint_tense: matchedFormType,
-      word_choices: wordChoices,
-      scrambled_letters: scrambledLetters,
-    });
   })
 );
 
@@ -751,27 +590,29 @@ router.post(
       return apiError(res, 400, 'VALIDATION_ERROR', 'deck_id là bắt buộc');
     }
 
-    const { rows: deckRows } = await pool.query(
-      `SELECT id FROM decks WHERE id = $1
-       AND (user_id = $2 OR deck_type IN ('premade','system_generated'))`,
-      [deck_id, userId]
-    );
+    const safeCount = Math.min(10, Math.max(1, count || 5));
+
+    // Deck access and the pairs are independent reads: asked together (the pairs are only used when the deck is accessible).
+    const [{ rows: deckRows }, { rows }] = await Promise.all([
+      pool.query(
+        `SELECT id FROM decks WHERE id = $1
+         AND (user_id = $2 OR deck_type IN ('premade','system_generated'))`,
+        [deck_id, userId]
+      ),
+      pool.query(
+        `SELECT c.id AS card_id, de.headword, ${VI_COALESCE} AS vi_text
+         FROM cards c
+         JOIN dictionary_entries de ON de.id = c.entry_id
+         LEFT JOIN leitner_cards lc ON lc.entry_id = c.entry_id AND lc.user_id = $2
+         WHERE c.deck_id = $1
+         ORDER BY ${PAIR_ORDER}
+         LIMIT $3`,
+        [deck_id, userId, safeCount]
+      ),
+    ]);
     if (deckRows.length === 0) {
       return apiError(res, 404, 'DECK_NOT_FOUND', 'Deck không tồn tại');
     }
-
-    const safeCount = Math.min(10, Math.max(1, count || 5));
-
-    const { rows } = await pool.query(
-      `SELECT c.id AS card_id, de.headword, ${VI_COALESCE} AS vi_text
-       FROM cards c
-       JOIN dictionary_entries de ON de.id = c.entry_id
-       LEFT JOIN leitner_cards lc ON lc.entry_id = c.entry_id AND lc.user_id = $2
-       WHERE c.deck_id = $1
-       ORDER BY ${PAIR_ORDER}
-       LIMIT $3`,
-      [deck_id, userId, safeCount]
-    );
 
     const pairs = rows.map((row: any, idx: number) => ({
       card_id: row.card_id,

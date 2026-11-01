@@ -103,10 +103,10 @@ const Deck = {
         ]
       );
       const deck = rows[0];
-      for (const tid of tagIds) {
+      if (tagIds.length > 0) {
         await client.query(
-          'INSERT INTO deck_tags (deck_id, tag_id) VALUES ($1,$2) ON CONFLICT DO NOTHING',
-          [deck.id, tid]
+          'INSERT INTO deck_tags (deck_id, tag_id) SELECT $1, t FROM unnest($2::uuid[]) AS t ON CONFLICT DO NOTHING',
+          [deck.id, tagIds]
         );
       }
       await client.query('COMMIT');
@@ -148,10 +148,10 @@ const Deck = {
         ]
       );
       await client.query('DELETE FROM deck_tags WHERE deck_id = $1', [id]);
-      for (const tid of tagIds) {
+      if (tagIds.length > 0) {
         await client.query(
-          'INSERT INTO deck_tags (deck_id, tag_id) VALUES ($1,$2) ON CONFLICT DO NOTHING',
-          [id, tid]
+          'INSERT INTO deck_tags (deck_id, tag_id) SELECT $1, t FROM unnest($2::uuid[]) AS t ON CONFLICT DO NOTHING',
+          [id, tagIds]
         );
       }
       await client.query('COMMIT');
@@ -169,25 +169,24 @@ const Deck = {
   },
 
   async addCards(deckId: string, entryIds: string[] = []) {
-    let added = 0;
-    let skipped = 0;
-    for (const entryId of entryIds) {
-      // Get current max sort_order
-      const { rows } = await pool.query(
-        'SELECT COALESCE(MAX(sort_order), -1)::int AS max_order FROM cards WHERE deck_id = $1',
-        [deckId]
-      );
-      const nextOrder = rows[0].max_order + 1;
-      const { rowCount } = await pool.query(
-        `INSERT INTO cards (deck_id, entry_id, sort_order)
-         VALUES ($1,$2,$3)
-         ON CONFLICT (deck_id, entry_id) DO NOTHING`,
-        [deckId, entryId, nextOrder]
-      );
-      if (rowCount > 0) added++;
-      else skipped++;
-    }
-    return { added, skipped };
+    if (entryIds.length === 0) return { added: 0, skipped: 0 };
+
+    // ONE statement for the whole batch. It used to read the highest sort_order and insert for EVERY entry (two round trips each:
+    // adding 100 words to a deck took about 12 seconds against the remote database). The new cards are numbered one after another from
+    // the highest position, in the order given; entries already in the deck, and repeats within the batch, are skipped and use no number.
+    const { rowCount } = await pool.query(
+      `INSERT INTO cards (deck_id, entry_id, sort_order)
+       SELECT $1::uuid, n.entry_id, base.max_order + ROW_NUMBER() OVER (ORDER BY n.ord)
+         FROM (SELECT t.entry_id, MIN(t.ord) AS ord
+                 FROM unnest($2::uuid[]) WITH ORDINALITY AS t(entry_id, ord)
+                WHERE NOT EXISTS (SELECT 1 FROM cards c WHERE c.deck_id = $1::uuid AND c.entry_id = t.entry_id)
+                GROUP BY t.entry_id) n
+        CROSS JOIN (SELECT COALESCE(MAX(sort_order), -1)::int AS max_order FROM cards WHERE deck_id = $1::uuid) base
+       ON CONFLICT (deck_id, entry_id) DO NOTHING`,
+      [deckId, entryIds]
+    );
+    const added = rowCount ?? 0;
+    return { added, skipped: entryIds.length - added };
   },
 
   async removeCard(deckId: string, entryId: string) {

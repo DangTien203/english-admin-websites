@@ -30,6 +30,13 @@ async function waitFor<T>(fn: () => Promise<T | false | null | undefined> | T | 
   }
 }
 
+/**
+ * What the cron does at a tick. The queue is exclusive: it takes a new tick only once the previous job is completed in pg-boss, which
+ * happens a moment AFTER the pass has reported itself through onPass. A send right behind a handled tick can therefore come back
+ * null (nothing created, and the test would wait for a pass that never comes) — so it is repeated until the queue takes it.
+ */
+const tick = () => waitFor(async () => (await boss.send(RECONCILE_QUEUE)) ?? false, 'a tick accepted by the queue');
+
 const status = async (w: string) => (await pool.query(`SELECT status, reason FROM word_enrichment_jobs WHERE word = $1`, [w])).rows[0];
 async function insertBackdated(w: string): Promise<string> {
   // an explicit updated_at is kept on INSERT (the trigger only fires on UPDATE)
@@ -88,7 +95,7 @@ describe('a tick', () => {
     expect(sent).not.toBeNull();
 
     const before = passes.length;
-    expect(await boss.send(RECONCILE_QUEUE)).not.toBeNull(); // what the cron does at a tick
+    await tick();
     const pass = await waitFor(() => passes[before], 'a reconcile pass');
 
     expect(didRun(pass)).toBe(true);
@@ -107,7 +114,7 @@ describe('a tick', () => {
       await holder.query(`SELECT pg_advisory_xact_lock(hashtextextended('enrich:reconcile', 0))`); // another pass, somewhere
 
       const before = passes.length;
-      await boss.send(RECONCILE_QUEUE);
+      await tick();
       const skipped = await waitFor(() => passes[before], 'the skipped pass');
       expect(skipped).toEqual({ ran: false, reason: 'lock_held' });
       expect(await status(w)).toEqual({ status: 'queued', reason: null });
@@ -117,7 +124,7 @@ describe('a tick', () => {
     }
 
     const before = passes.length;
-    await boss.send(RECONCILE_QUEUE);
+    await tick();
     const pass = await waitFor(() => passes[before], 'the next pass');
     expect(didRun(pass)).toBe(true);
     expect(await status(w)).toEqual({ status: 'failed', reason: 'stale' });
@@ -140,7 +147,7 @@ describe('two processes on the same database (two pg-boss instances, same schema
 
       const firstBefore = passes.length;
       for (let i = 0; i < 4; i++) {
-        await boss.send(RECONCILE_QUEUE);
+        await tick();
         await waitFor(() => passes.length + secondPasses.length > firstBefore + i, `tick ${i + 1} handled`);
       }
       await new Promise((r) => setTimeout(r, 2500)); // nothing else may show up afterwards

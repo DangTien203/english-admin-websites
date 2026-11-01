@@ -15,8 +15,11 @@ export interface NormalizedWord {
 export interface LookupInput {
   userId: string;
   ebookId: string;
-  /** Already verified to belong to the ebook (or null). */
-  paragraphId: string | null;
+  /**
+   * Verified to belong to the ebook (or null). May still be on its way: the route checks the paragraph while the lookup is already
+   * running, and the service only needs the answer for the line it writes to word_lookups after the response.
+   */
+  paragraphId: string | null | Promise<string | null>;
   word: NormalizedWord;
 }
 

@@ -55,7 +55,8 @@ export class InsufficientDistractorsError extends Error {
 }
 
 export class NoExamplesError extends Error {
-  constructor() {
+  /** 'none': the word has no example sentence at all; 'no_match': it has some, but none contains the word (or a form of it) */
+  constructor(public readonly reason: 'none' | 'no_match' = 'none') {
     super('NO_EXAMPLES');
     this.name = 'NoExamplesError';
   }
@@ -80,6 +81,11 @@ export interface SwiftChoiceQuestion {
   correct_index: number;
 }
 
+export interface SwiftChoiceData {
+  distractors: Array<{ display_vi: string | null }>;
+  examples: Array<{ example_en: string }>;
+}
+
 /**
  * Generate a SwiftChoice multi-choice question for the given entry.
  * Distractors are drawn from a cross-deck pool: same cefr_level + overlapping
@@ -87,57 +93,61 @@ export interface SwiftChoiceQuestion {
  *
  * Throws InsufficientDistractorsError when fewer than 3 distractors can be found.
  */
+/**
+ * Three random wrong answers, in ONE statement. The preferred set is same CEFR level (+ overlapping pos when the word has one);
+ * only when it does not yield three is the fallback set drawn instead (any level / same pos), exactly the old two-step logic —
+ * the second query used to be a second round trip. PostgreSQL skips the fallback altogether when the preferred set is complete
+ * (its branch sits behind a one-time filter).
+ */
+async function fetchDistractors(entry: SwiftChoiceEntry, posArray: string[] | null): Promise<Array<{ display_vi: string | null }>> {
+  const preferred = posArray
+    ? `SELECT ${VI_COALESCE} AS display_vi FROM dictionary_entries de
+        WHERE de.cefr_level = $1 AND de.id != $2 AND de.pos && $3::varchar[] AND ${HAS_VI}
+        ORDER BY RANDOM() LIMIT 3`
+    : `SELECT ${VI_COALESCE} AS display_vi FROM dictionary_entries de
+        WHERE de.cefr_level = $1 AND de.id != $2 AND ${HAS_VI}
+        ORDER BY RANDOM() LIMIT 3`;
+  const fallback = posArray
+    ? `SELECT ${VI_COALESCE} AS display_vi FROM dictionary_entries de
+        WHERE de.id != $2 AND de.pos && $3::varchar[] AND ${HAS_VI}
+        ORDER BY RANDOM() LIMIT 3`
+    : `SELECT ${VI_COALESCE} AS display_vi FROM dictionary_entries de
+        WHERE de.id != $2 AND ${HAS_VI}
+        ORDER BY RANDOM() LIMIT 3`;
+
+  const { rows } = await pool.query(
+    `WITH preferred AS (${preferred}), fallback AS (${fallback})
+     SELECT display_vi FROM preferred WHERE (SELECT COUNT(*) FROM preferred) = 3
+     UNION ALL
+     SELECT display_vi FROM fallback  WHERE (SELECT COUNT(*) FROM preferred) < 3`,
+    posArray ? [entry.cefr_level, entry.entry_id, posArray] : [entry.cefr_level, entry.entry_id]
+  );
+  return rows;
+}
+
 export async function buildSwiftChoiceQuestion(
-  entry: SwiftChoiceEntry
+  entry: SwiftChoiceEntry,
+  data?: SwiftChoiceData
 ): Promise<SwiftChoiceQuestion> {
   const posArray =
     Array.isArray(entry.pos) && entry.pos.length > 0 ? entry.pos : null;
 
-  const DISTRACTOR_SELECT = `SELECT ${VI_COALESCE} AS display_vi FROM dictionary_entries de`;
-  let distractors: any[] = [];
-
-  if (posArray) {
-    ({ rows: distractors } = await pool.query(
-      `${DISTRACTOR_SELECT}
-       WHERE de.cefr_level = $1 AND de.id != $2 AND de.pos && $3::varchar[] AND ${HAS_VI}
-       ORDER BY RANDOM() LIMIT 3`,
-      [entry.cefr_level, entry.entry_id, posArray]
-    ));
-    if (distractors.length < 3) {
-      ({ rows: distractors } = await pool.query(
-        `${DISTRACTOR_SELECT}
-         WHERE de.id != $1 AND de.pos && $2::varchar[] AND ${HAS_VI}
-         ORDER BY RANDOM() LIMIT 3`,
-        [entry.entry_id, posArray]
-      ));
-    }
-  } else {
-    ({ rows: distractors } = await pool.query(
-      `${DISTRACTOR_SELECT}
-       WHERE de.cefr_level = $1 AND de.id != $2 AND ${HAS_VI}
-       ORDER BY RANDOM() LIMIT 3`,
-      [entry.cefr_level, entry.entry_id]
-    ));
-    if (distractors.length < 3) {
-      ({ rows: distractors } = await pool.query(
-        `${DISTRACTOR_SELECT}
-         WHERE de.id != $1 AND ${HAS_VI}
-         ORDER BY RANDOM() LIMIT 3`,
-        [entry.entry_id]
-      ));
-    }
-  }
+  // The distractors and the hint example do not depend on each other: one round trip for both (they were up to four in a row).
+  const [distractors, { rows: exRows }] = data
+    ? [data.distractors, { rows: data.examples }]
+    : await Promise.all([
+        fetchDistractors(entry, posArray),
+        pool.query(
+          `SELECT se.example_en
+           FROM sense_examples se
+           JOIN entry_senses es ON es.id = se.sense_id
+           WHERE es.entry_id = $1 AND se.example_en IS NOT NULL
+           ORDER BY es.sense_order ASC, se.sort_order ASC LIMIT 1`,
+          [entry.entry_id]
+        ),
+      ]);
 
   if (distractors.length < 3) throw new InsufficientDistractorsError();
-
-  const { rows: exRows } = await pool.query(
-    `SELECT se.example_en
-     FROM sense_examples se
-     JOIN entry_senses es ON es.id = se.sense_id
-     WHERE es.entry_id = $1 AND se.example_en IS NOT NULL
-     ORDER BY es.sense_order ASC, se.sort_order ASC LIMIT 1`,
-    [entry.entry_id]
-  );
 
   const hintExample = exRows.length > 0
     ? `e.g., ${maskWord(exRows[0].example_en, entry.headword)}`
@@ -184,33 +194,63 @@ export interface ClozeQuestion {
   scrambled_letters: string[] | null;
 }
 
+export interface ClozeData {
+  wordForms: Array<{ form_value: string; form_type: string }>;
+  examples: Array<{ example_en: string }>;
+  wrongWords: Array<{ headword: string }> | null;
+}
+
 /**
  * Generate a Cloze question. Searches the entry's sense_examples first, then
  * falls back to legacy `dictionary_entries.example_en` (newline-split).
  * Throws NoExamplesError when no usable example sentence is found.
  */
+/** Three random other headwords, the ones sharing the part of speech first. */
+async function fetchWrongWords(entryId: string, hintPos: string | null): Promise<Array<{ headword: string }>> {
+  const { rows } = hintPos
+    ? await pool.query(
+        `SELECT de.headword FROM dictionary_entries de
+         WHERE de.id != $1
+         ORDER BY CASE WHEN $2 = ANY(de.pos) THEN 0 ELSE 1 END, RANDOM() LIMIT 3`,
+        [entryId, hintPos]
+      )
+    : await pool.query(
+        `SELECT de.headword FROM dictionary_entries de
+         WHERE de.id != $1 ORDER BY RANDOM() LIMIT 3`,
+        [entryId]
+      );
+  return rows;
+}
+
 export async function buildClozeQuestion(
   entry: ClozeEntry,
-  level: 1 | 2 | 3
+  level: 1 | 2 | 3,
+  data?: ClozeData
 ): Promise<ClozeQuestion> {
-  const [{ rows: wfRows }, { rows: examples }] = await Promise.all([
-    pool.query(`SELECT form_value, form_type FROM word_forms WHERE entry_id = $1`, [entry.entry_id]),
-    pool.query(
-      `SELECT example_en FROM (
-         SELECT se.example_en, 0 AS priority, es.sense_order, se.sort_order
-         FROM sense_examples se
-         JOIN entry_senses es ON es.id = se.sense_id
-         WHERE es.entry_id = $1 AND se.example_en IS NOT NULL
-         UNION ALL
-         SELECT TRIM(unnest) AS example_en, 1 AS priority, 0 AS sense_order, ordinality::int AS sort_order
-         FROM dictionary_entries de,
-              LATERAL unnest(string_to_array(de.example_en, E'\\n')) WITH ORDINALITY AS unnest
-         WHERE de.id = $1 AND de.example_en IS NOT NULL AND TRIM(unnest) != ''
-       ) AS combined
-       ORDER BY priority ASC, sense_order ASC, sort_order ASC`,
-      [entry.entry_id]
-    ),
-  ]);
+  const hintPosForChoices = Array.isArray(entry.pos) && entry.pos.length > 0 ? entry.pos[0] : null;
+
+  // The wrong words of level 1 only need the entry, so they are read with the word forms and the examples (one round trip, not two).
+  const [{ rows: wfRows }, { rows: examples }, wrongWordRows] = data
+    ? [{ rows: data.wordForms }, { rows: data.examples }, data.wrongWords]
+    : await Promise.all([
+        pool.query(`SELECT form_value, form_type FROM word_forms WHERE entry_id = $1`, [entry.entry_id]),
+        pool.query(
+          `SELECT example_en FROM (
+             SELECT se.example_en, 0 AS priority, es.sense_order, se.sort_order
+             FROM sense_examples se
+             JOIN entry_senses es ON es.id = se.sense_id
+             WHERE es.entry_id = $1 AND se.example_en IS NOT NULL
+             UNION ALL
+             SELECT TRIM(unnest) AS example_en, 1 AS priority, 0 AS sense_order, ordinality::int AS sort_order
+             FROM dictionary_entries de,
+                  LATERAL unnest(string_to_array(de.example_en, E'\\n')) WITH ORDINALITY AS unnest
+             WHERE de.id = $1 AND de.example_en IS NOT NULL AND TRIM(unnest) != ''
+           ) AS combined
+           ORDER BY priority ASC, sense_order ASC, sort_order ASC`,
+          [entry.entry_id]
+        ),
+        level === 1 ? fetchWrongWords(entry.entry_id, hintPosForChoices) : Promise.resolve(null),
+      ]);
 
   if (examples.length === 0) throw new NoExamplesError();
 
@@ -236,7 +276,7 @@ export async function buildClozeQuestion(
     }
   }
 
-  if (!targetWord || !targetExample) throw new NoExamplesError();
+  if (!targetWord || !targetExample) throw new NoExamplesError('no_match');
 
   const sentenceMasked = maskWord(targetExample, targetWord);
   const hintPos = Array.isArray(entry.pos) && entry.pos.length > 0 ? entry.pos[0] : null;
@@ -245,21 +285,9 @@ export async function buildClozeQuestion(
   let scrambledLetters: string[] | null = null;
 
   if (level === 1) {
-    const { rows: wrongWords } = hintPos
-      ? await pool.query(
-          `SELECT de.headword FROM dictionary_entries de
-           WHERE de.id != $1
-           ORDER BY CASE WHEN $2 = ANY(de.pos) THEN 0 ELSE 1 END, RANDOM() LIMIT 3`,
-          [entry.entry_id, hintPos]
-        )
-      : await pool.query(
-          `SELECT de.headword FROM dictionary_entries de
-           WHERE de.id != $1 ORDER BY RANDOM() LIMIT 3`,
-          [entry.entry_id]
-        );
     wordChoices = shuffleArray([
       targetWord,
-      ...wrongWords.map((r: any) => r.headword as string),
+      ...(wrongWordRows ?? []).map((r: any) => r.headword as string),
     ]);
   } else if (level === 2) {
     const CONSONANTS = 'bcdfghjklmnpqrstvwxyz';

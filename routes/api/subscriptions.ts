@@ -9,10 +9,12 @@ import { validateBody } from '../../middlewares/validateBody';
 import { validatePaymentMethodConfig } from '../../utils/paymentMethodValidator';
 import {
   getActiveSubscription,
-  getFeaturesForUser,
+  featuresForSubscription,
   getUsage,
   calcPeriodEnd,
+  invalidateSubscriptionCache,
 } from '../../utils/subscriptionHelper';
+import { invalidatePendingCounts } from '../../utils/pendingCounts';
 
 const router = Router();
 
@@ -135,46 +137,22 @@ router.get(
   asyncHandler(async (req: ApiRequest, res: Response) => {
     const userId = req.user!.id;
 
-    const sub      = await getActiveSubscription(userId);
-    const features = await getFeaturesForUser(userId);
+    const sub = await getActiveSubscription(userId);
+
+    // The feature map and the current plan only need the subscription, so they are read together; the usage counters need the
+    // feature keys and are read together too (they were one query after another).
+    const [features, currentPlan] = await Promise.all([
+      featuresForSubscription(sub),
+      loadCurrentPlan(sub?.plan_id ?? null),
+    ]);
 
     // Usage for all feature keys — always a number, never null
+    const keys = Object.keys(features);
+    const usages = await Promise.all(keys.map((key) => getUsage(userId, key)));
     const usageMap: Record<string, number> = {};
-    for (const key of Object.keys(features)) {
-      usageMap[key] = Number((await getUsage(userId, key)) ?? 0);
-    }
-
-    let currentPlan: any = null;
-    if (sub) {
-      const cached = planCache.get<any>(CACHE_KEY_ID(sub.plan_id));
-      if (cached) {
-        currentPlan = cached;
-      } else {
-        const { rows } = await pool.query(
-          `SELECT id, name, description, icon_color,
-                  price_monthly, price_yearly, price_weekly,
-                  trial_days, promo_price, is_recommended, sort_order
-             FROM subscription_plans WHERE id = $1`,
-          [sub.plan_id]
-        );
-        if (rows[0]) {
-          const p = rows[0];
-          currentPlan = {
-            id:            p.id,
-            name:          p.name,
-            description:   p.description   ?? null,
-            icon_color:    p.icon_color     ?? null,
-            price_monthly: Number(p.price_monthly ?? 0),
-            price_yearly:  Number(p.price_yearly  ?? 0),
-            price_weekly:  Number(p.price_weekly  ?? 0),
-            trial_days:    Number(p.trial_days    ?? 0),
-            promo_price:   p.promo_price != null ? Number(p.promo_price) : null,
-            is_recommended: Boolean(p.is_recommended),
-            sort_order:    Number(p.sort_order ?? 0),
-          };
-        }
-      }
-    }
+    keys.forEach((key, i) => {
+      usageMap[key] = Number(usages[i] ?? 0);
+    });
 
     return apiSuccess(res, {
       current_plan: currentPlan,
@@ -194,6 +172,36 @@ router.get(
     });
   })
 );
+
+/** The plan card for GET /subscriptions/me: from the plan cache when it is warm, else one read. Null without a subscription. */
+async function loadCurrentPlan(planId: string | null) {
+  if (!planId) return null;
+  const cached = planCache.get<any>(CACHE_KEY_ID(planId));
+  if (cached) return cached;
+
+  const { rows } = await pool.query(
+    `SELECT id, name, description, icon_color,
+            price_monthly, price_yearly, price_weekly,
+            trial_days, promo_price, is_recommended, sort_order
+       FROM subscription_plans WHERE id = $1`,
+    [planId]
+  );
+  if (!rows[0]) return null;
+  const p = rows[0];
+  return {
+    id:            p.id,
+    name:          p.name,
+    description:   p.description   ?? null,
+    icon_color:    p.icon_color     ?? null,
+    price_monthly: Number(p.price_monthly ?? 0),
+    price_yearly:  Number(p.price_yearly  ?? 0),
+    price_weekly:  Number(p.price_weekly  ?? 0),
+    trial_days:    Number(p.trial_days    ?? 0),
+    promo_price:   p.promo_price != null ? Number(p.promo_price) : null,
+    is_recommended: Boolean(p.is_recommended),
+    sort_order:    Number(p.sort_order ?? 0),
+  };
+}
 
 // ── Checkout schemas ──────────────────────────────────────────────────────────
 
@@ -448,6 +456,8 @@ router.post(
       }
 
       await client.query('COMMIT');
+      invalidateSubscriptionCache(userId);
+      invalidatePendingCounts(); // a payment now waits for the super admins
 
       return apiSuccess(res, {
         subscription_id: subscriptionId,
@@ -484,6 +494,7 @@ router.post(
     if (rows.length === 0) {
       return apiError(res, 404, 'NOT_FOUND', 'Không tìm thấy subscription active để cancel');
     }
+    invalidateSubscriptionCache(userId);
 
     return res.status(204).send();
   })

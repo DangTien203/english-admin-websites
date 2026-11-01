@@ -97,19 +97,14 @@ router.get(
   asyncHandler(async (req: ApiRequest, res: Response) => {
     const userId = req.user!.id;
 
-    const [timeRows, booksRows, lookupRows, topBooksRows, topWordsRows, streakRows] =
+    const [progressRows, lookupRows, topBooksRows, topWordsRows] =
       await Promise.all([
-        // Total reading time
-        pool.query<{ total_time_minutes: number }>(
-          `SELECT COALESCE(SUM(total_time_sec), 0)::float / 60 AS total_time_minutes
-           FROM user_reading_progress WHERE user_id = $1`,
-          [userId]
-        ),
-        // Finished vs in-progress
-        pool.query<{ books_finished: number; books_in_progress: number }>(
-          `SELECT
-             COUNT(*) FILTER (WHERE progress >= 1)::int        AS books_finished,
-             COUNT(*) FILTER (WHERE progress > 0 AND progress < 1)::int AS books_in_progress
+        // Total reading time, finished vs in-progress, and the reading streak (distinct active days) in one pass over the user's rows
+        pool.query<{ total_time_minutes: number; books_finished: number; books_in_progress: number; days_streak: number }>(
+          `SELECT COALESCE(SUM(total_time_sec), 0)::float / 60                                   AS total_time_minutes,
+                  COUNT(*) FILTER (WHERE progress >= 1)::int                                      AS books_finished,
+                  COUNT(*) FILTER (WHERE progress > 0 AND progress < 1)::int                      AS books_in_progress,
+                  COUNT(DISTINCT DATE(last_read_at)) FILTER (WHERE last_read_at >= NOW() - INTERVAL '30 days')::int AS days_streak
            FROM user_reading_progress WHERE user_id = $1`,
           [userId]
         ),
@@ -141,19 +136,12 @@ router.get(
            LIMIT 5`,
           [userId]
         ),
-        // Reading streak (distinct active days)
-        pool.query<{ days_streak: number }>(
-          `SELECT COUNT(DISTINCT DATE(last_read_at))::int AS days_streak
-           FROM user_reading_progress
-           WHERE user_id = $1 AND last_read_at >= NOW() - INTERVAL '30 days'`,
-          [userId]
-        ),
       ]);
 
     return apiSuccess(res, {
-      total_time_minutes: Math.round(timeRows.rows[0]?.total_time_minutes ?? 0),
-      books_finished: booksRows.rows[0]?.books_finished ?? 0,
-      books_in_progress: booksRows.rows[0]?.books_in_progress ?? 0,
+      total_time_minutes: Math.round(progressRows.rows[0]?.total_time_minutes ?? 0),
+      books_finished: progressRows.rows[0]?.books_finished ?? 0,
+      books_in_progress: progressRows.rows[0]?.books_in_progress ?? 0,
       words_looked_up: lookupRows.rows[0]?.words_looked_up ?? 0,
       top_books: topBooksRows.rows.map((r: any) => ({
         ebook_id: r.ebook_id,
@@ -166,7 +154,7 @@ router.get(
         headword: r.headword,
         lookup_count: r.lookup_count,
       })),
-      days_streak: streakRows.rows[0]?.days_streak ?? 0,
+      days_streak: progressRows.rows[0]?.days_streak ?? 0,
     });
   })
 );
@@ -292,13 +280,6 @@ router.get(
       countParams = countOnlyParams; // may be empty [] — that's fine
     }
 
-    if (process.env.NODE_ENV !== 'production') {
-      console.log('[DEBUG ebooks list] itemsQuery:', itemsQuery.trim());
-      console.log('[DEBUG ebooks list] itemsParams:', itemsParams);
-      console.log('[DEBUG ebooks list] countQuery:', countQuery.trim());
-      console.log('[DEBUG ebooks list] countParams:', countParams);
-    }
-
     const [dataRows, countRows] = await Promise.all([
       pool.query(itemsQuery, itemsParams),
       pool.query(countQuery, countParams),
@@ -334,7 +315,7 @@ router.get(
     const userId = req.user!.id;
     const ebookId = req.params.id;
 
-    const [ebookRows, chaptersRows, progressRows, favoriteRows] = await Promise.all([
+    const [ebookRows, chaptersRows, progressRows, favoriteRows, userTier] = await Promise.all([
       pool.query(
         `SELECT id, title, author, isbn, description, cover_url,
                 level, genre, required_plan,
@@ -365,6 +346,7 @@ router.get(
         `SELECT 1 FROM user_ebook_favorites WHERE ebook_id = $1 AND user_id = $2`,
         [ebookId, userId]
       ),
+      getUserPlanTier(userId),
     ]);
 
     if (ebookRows.rows.length === 0) {
@@ -373,7 +355,6 @@ router.get(
 
     const ebook = ebookRows.rows[0];
     const requiredTier = PLAN_TIER[ebook.required_plan] ?? 0;
-    const userTier = await getUserPlanTier(userId);
     const locked = userTier < requiredTier;
 
     const chapters = chaptersRows.rows.map((c: any) => ({
@@ -448,8 +429,9 @@ router.get(
     const userId = req.user!.id;
     const { id: ebookId, chapter_id: chapterId } = req.params;
 
-    // Fetch ebook + chapter in parallel
-    const [ebookRows, chapterRows] = await Promise.all([
+    // Everything the page needs is asked at once (it was three rounds of round trips, one after the other); the paragraphs and the
+    // progress are simply not used when the ebook or the chapter turns out not to exist, or the chapter is locked.
+    const [ebookRows, chapterRows, paragraphRows, progressRows, userTier] = await Promise.all([
       pool.query(
         `SELECT id, required_plan, status FROM ebooks WHERE id = $1`,
         [ebookId]
@@ -461,30 +443,6 @@ router.get(
          FROM chapters WHERE id = $1 AND ebook_id = $2`,
         [chapterId, ebookId]
       ),
-    ]);
-
-    if (ebookRows.rows.length === 0 || ebookRows.rows[0].status !== 'published') {
-      return apiError(res, 404, 'NOT_FOUND', 'Ebook không tồn tại');
-    }
-    if (chapterRows.rows.length === 0) {
-      return apiError(res, 404, 'NOT_FOUND', 'Chapter không tồn tại');
-    }
-
-    const ebook = ebookRows.rows[0];
-    const chapter = chapterRows.rows[0];
-
-    // Access check: non-free ebook → only chapter_index 0 is free preview
-    const requiredTier = PLAN_TIER[ebook.required_plan] ?? 0;
-    const userTier = await getUserPlanTier(userId);
-
-    if (userTier < requiredTier && chapter.chapter_index > 0) {
-      return apiError(
-        res, 403, 'FEATURE_NOT_AVAILABLE',
-        'Upgrade required to read this chapter'
-      );
-    }
-
-    const [paragraphRows, progressRows] = await Promise.all([
       pool.query(
         `SELECT id, paragraph_index, text, word_count, translation_vi,
                 audio_url,
@@ -499,7 +457,28 @@ router.get(
          FROM user_reading_progress WHERE ebook_id = $1 AND user_id = $2`,
         [ebookId, userId]
       ),
+      getUserPlanTier(userId),
     ]);
+
+    if (ebookRows.rows.length === 0 || ebookRows.rows[0].status !== 'published') {
+      return apiError(res, 404, 'NOT_FOUND', 'Ebook không tồn tại');
+    }
+    if (chapterRows.rows.length === 0) {
+      return apiError(res, 404, 'NOT_FOUND', 'Chapter không tồn tại');
+    }
+
+    const ebook = ebookRows.rows[0];
+    const chapter = chapterRows.rows[0];
+
+    // Access check: non-free ebook → only chapter_index 0 is free preview
+    const requiredTier = PLAN_TIER[ebook.required_plan] ?? 0;
+
+    if (userTier < requiredTier && chapter.chapter_index > 0) {
+      return apiError(
+        res, 403, 'FEATURE_NOT_AVAILABLE',
+        'Upgrade required to read this chapter'
+      );
+    }
 
     // Update last_read_at (fire-and-forget)
     void pool.query(
@@ -551,7 +530,10 @@ router.get(
     const userId = req.user!.id;
     const { id: ebookId, chapter_id: chapterId } = req.params;
 
-    const [ebookRows, chapterRows] = await Promise.all([
+    // The ebook, the chapter, the plan tier and the chapter's paragraphs are independent reads: asked at once. The paragraphs come as
+    // light rows (the first 100 characters of the text is all the playlist shows); the count and the playable ones are told apart here,
+    // which replaces a separate COUNT(*) query and a second scan of the same paragraphs.
+    const [ebookRows, chapterRows, paragraphRows, userTier] = await Promise.all([
       pool.query(
         `SELECT id, required_plan, status FROM ebooks WHERE id = $1`,
         [ebookId]
@@ -561,6 +543,15 @@ router.get(
          FROM chapters WHERE id = $1 AND ebook_id = $2`,
         [chapterId, ebookId]
       ),
+      pool.query(
+        `SELECT id, paragraph_index, LEFT(text, 100) AS text_preview, audio_url, duration_ms,
+                (audio_status = 'ready' AND audio_url IS NOT NULL AND audio_url <> '') AS playable
+           FROM paragraphs
+          WHERE chapter_id = $1
+          ORDER BY paragraph_index ASC`,
+        [chapterId]
+      ),
+      getUserPlanTier(userId),
     ]);
 
     if (ebookRows.rows.length === 0 || ebookRows.rows[0].status !== 'published') {
@@ -575,7 +566,6 @@ router.get(
 
     // Access check: same rule as chapter detail — preview chapter is free.
     const requiredTier = PLAN_TIER[ebook.required_plan] ?? 0;
-    const userTier = await getUserPlanTier(userId);
     if (userTier < requiredTier && chapter.chapter_index > 0) {
       return apiError(
         res, 403, 'FEATURE_NOT_AVAILABLE',
@@ -583,25 +573,8 @@ router.get(
       );
     }
 
-    const [totalRows, playableRows] = await Promise.all([
-      pool.query<{ total: number }>(
-        `SELECT COUNT(*)::int AS total
-           FROM paragraphs WHERE chapter_id = $1`,
-        [chapterId]
-      ),
-      pool.query(
-        `SELECT id, paragraph_index, text, audio_url, duration_ms
-           FROM paragraphs
-          WHERE chapter_id = $1
-            AND audio_status = 'ready'
-            AND audio_url IS NOT NULL
-            AND audio_url <> ''
-          ORDER BY paragraph_index ASC`,
-        [chapterId]
-      ),
-    ]);
-
-    const totalParagraphs = n(totalRows.rows[0]?.total);
+    const playableRows = { rows: paragraphRows.rows.filter((p: any) => p.playable === true) };
+    const totalParagraphs = paragraphRows.rows.length;
     const playableCount = playableRows.rows.length;
     const totalDurationMs = playableRows.rows.reduce(
       (sum: number, row: any) => sum + n(row.duration_ms),
@@ -613,7 +586,7 @@ router.get(
       paragraph_index: n(p.paragraph_index),
       audio_url: s(p.audio_url),
       duration_ms: n(p.duration_ms),
-      text_preview: s(p.text).slice(0, 100),
+      text_preview: s(p.text_preview),
     }));
 
     return apiSuccess(res, {
@@ -645,48 +618,42 @@ router.post(
       return apiError(res, 400, 'VALIDATION_ERROR', 'current_paragraph_index phải là số nguyên >= 0');
     }
 
-    // Verify chapter belongs to ebook
-    const { rows: chRows } = await pool.query(
-      `SELECT chapter_index FROM chapters WHERE id = $1 AND ebook_id = $2`,
-      [chapterId, ebookId]
+    // ONE statement (it was: check the chapter, count paragraphs and chapters, then upsert — three round trips in a row, and this
+    // endpoint is called all the time while someone reads):
+    //   ch    the chapter, only when it belongs to this ebook (no row → 404), with its paragraph count and the ebook's chapter count
+    //   calc  progress = (completed chapters + fraction of the current chapter) / total chapters, as before; a chapter without
+    //         paragraphs counts as read through (the old (index + 1) / 0 was Infinity, capped to 1)
+    //   up    the upsert of the user's reading progress (progress never goes down)
+    const { rows } = await pool.query(
+      `WITH ch AS (
+         SELECT c.chapter_index,
+                (SELECT COUNT(*) FROM paragraphs p WHERE p.chapter_id = c.id)::float8   AS total_paragraphs,
+                (SELECT COUNT(*) FROM chapters x WHERE x.ebook_id = c.ebook_id)::float8 AS total_chapters
+           FROM chapters c
+          WHERE c.id = $3 AND c.ebook_id = $2
+       ), calc AS (
+         SELECT chapter_index,
+                LEAST(1, (chapter_index + CASE WHEN total_paragraphs = 0 THEN 1
+                                               ELSE LEAST(1, ($4::int + 1) / total_paragraphs) END) / total_chapters) AS progress
+           FROM ch
+       ), up AS (
+         INSERT INTO user_reading_progress
+           (user_id, ebook_id, current_chapter, current_paragraph_index, progress,
+            total_time_sec, last_read_at, started_at)
+         SELECT $1::uuid, $2::uuid, chapter_index, $4::int, progress, $5::int, NOW(), NOW() FROM calc
+         ON CONFLICT (user_id, ebook_id) DO UPDATE SET
+           current_chapter          = EXCLUDED.current_chapter,
+           current_paragraph_index  = EXCLUDED.current_paragraph_index,
+           progress                 = GREATEST(user_reading_progress.progress, EXCLUDED.progress),
+           total_time_sec           = user_reading_progress.total_time_sec + $5::int,
+           last_read_at             = NOW()
+       )
+       SELECT (SELECT COUNT(*) FROM ch)::int AS found`,
+      [userId, ebookId, chapterId, current_paragraph_index, time_spent_sec ?? 0]
     );
-    if (chRows.length === 0) {
+    if (rows[0].found === 0) {
       return apiError(res, 404, 'NOT_FOUND', 'Chapter không tồn tại');
     }
-
-    // Get total paragraphs to compute progress ratio
-    const [totalParaRows, totalChapRows] = await Promise.all([
-      pool.query<{ cnt: number }>(
-        `SELECT COUNT(*)::int AS cnt FROM paragraphs WHERE chapter_id = $1`,
-        [chapterId]
-      ),
-      pool.query<{ cnt: number }>(
-        `SELECT COUNT(*)::int AS cnt FROM chapters WHERE ebook_id = $1`,
-        [ebookId]
-      ),
-    ]);
-
-    const totalParagraphs = totalParaRows.rows[0]?.cnt ?? 1;
-    const totalChapters = totalChapRows.rows[0]?.cnt ?? 1;
-    const chapterIndex = chRows[0].chapter_index as number;
-
-    // Progress = (completed chapters + fractional current chapter) / total chapters
-    const paraFraction = Math.min(1, (current_paragraph_index + 1) / totalParagraphs);
-    const progress = Math.min(1, (chapterIndex + paraFraction) / totalChapters);
-
-    await pool.query(
-      `INSERT INTO user_reading_progress
-         (user_id, ebook_id, current_chapter, current_paragraph_index, progress,
-          total_time_sec, last_read_at, started_at)
-       VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
-       ON CONFLICT (user_id, ebook_id) DO UPDATE SET
-         current_chapter          = EXCLUDED.current_chapter,
-         current_paragraph_index  = EXCLUDED.current_paragraph_index,
-         progress                 = GREATEST(user_reading_progress.progress, EXCLUDED.progress),
-         total_time_sec           = user_reading_progress.total_time_sec + $6,
-         last_read_at             = NOW()`,
-      [userId, ebookId, chapterIndex, current_paragraph_index, progress, time_spent_sec ?? 0]
-    );
 
     return res.status(204).send();
   })
@@ -712,23 +679,20 @@ router.post(
       return apiError(res, 400, 'INVALID_WORD', `Invalid word: ${normalized.reason}`);
     }
 
-    // Verify paragraph belongs to this ebook (optional context validation).
-    let verifiedParagraphId: string | null = null;
-    if (paragraph_id) {
-      const { rows: pRows } = await pool.query(
-        `SELECT p.id FROM paragraphs p
-         JOIN chapters c ON c.id = p.chapter_id
-         WHERE p.id = $1 AND c.ebook_id = $2`,
-        [paragraph_id, ebookId]
-      );
-      verifiedParagraphId = pRows.length > 0 ? paragraph_id : null;
-    }
-
-    const lookupContext = {
-      source: 'ebook' as const,
-      ebook_id: ebookId,
-      paragraph_id: verifiedParagraphId,
-    };
+    // Verify paragraph belongs to this ebook (optional context validation). It is asked WHILE the word is looked up — the lookup only
+    // needs the answer for the line it logs after the response — so it costs no round trip of its own.
+    const verifyingParagraph: Promise<string | null> = paragraph_id
+      ? pool
+          .query(
+            `SELECT p.id FROM paragraphs p
+             JOIN chapters c ON c.id = p.chapter_id
+             WHERE p.id = $1 AND c.ebook_id = $2`,
+            [paragraph_id, ebookId]
+          )
+          .then(({ rows: pRows }) => (pRows.length > 0 ? paragraph_id! : null))
+      : Promise.resolve(null);
+    // A failure surfaces where the answer is awaited below (a 500, as before) — not as an unhandled rejection if the lookup fails first.
+    verifyingParagraph.catch(() => undefined);
 
     // Fire-and-forget: bump words_looked_up counter regardless of dict/translation path.
     void pool.query(
@@ -744,9 +708,15 @@ router.post(
     const result = await getWordLookupService().lookup({
       userId,
       ebookId: String(ebookId),
-      paragraphId: verifiedParagraphId,
+      paragraphId: verifyingParagraph,
       word: { normalized: normalized.normalized, display: normalized.display },
     });
+
+    const lookupContext = {
+      source: 'ebook' as const,
+      ebook_id: ebookId,
+      paragraph_id: await verifyingParagraph,
+    };
 
     switch (result.kind) {
       case 'dictionary':
@@ -849,19 +819,21 @@ router.post(
     const userId = req.user!.id;
     const ebookId = req.params.id;
 
+    // The published check and the insert in one statement (an unpublished or unknown ebook inserts nothing and answers 404).
     const { rows } = await pool.query(
-      `SELECT 1 FROM ebooks WHERE id = $1 AND status = 'published'`,
-      [ebookId]
-    );
-    if (rows.length === 0) {
-      return apiError(res, 404, 'NOT_FOUND', 'Ebook không tồn tại');
-    }
-
-    await pool.query(
-      `INSERT INTO user_ebook_favorites (user_id, ebook_id)
-       VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+      `WITH e AS (
+         SELECT id FROM ebooks WHERE id = $2 AND status = 'published'
+       ), ins AS (
+         INSERT INTO user_ebook_favorites (user_id, ebook_id)
+         SELECT $1::uuid, id FROM e
+         ON CONFLICT DO NOTHING
+       )
+       SELECT (SELECT COUNT(*) FROM e)::int AS found`,
       [userId, ebookId]
     );
+    if (rows[0].found === 0) {
+      return apiError(res, 404, 'NOT_FOUND', 'Ebook không tồn tại');
+    }
 
     return res.status(201).json({ success: true });
   })

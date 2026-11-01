@@ -10,6 +10,7 @@ import { asyncHandler } from '../../utils/asyncHandler';
 import { apiSuccess, apiError } from '../../utils/apiResponse';
 import { uploadAvatar } from '../../middlewares/upload';
 import { computeSubscriptionBadge } from '../../utils/subscriptionHelper';
+import { invalidateAuthUser } from '../../utils/authUserCache';
 
 const router = Router();
 
@@ -36,28 +37,24 @@ router.get(
   asyncHandler(async (req: ApiRequest, res: Response) => {
     const userId = req.user!.id;
 
-    const { rows } = await pool.query(
-      `SELECT id, email, full_name, phone, avatar_url, level, status,
-              streak_current, streak_longest,
-              last_active_at, last_login_at, created_at, updated_at
-       FROM users WHERE id = $1`,
-      [userId]
-    );
-    if (rows.length === 0) {
-      return apiError(res, 404, 'USER_NOT_FOUND', 'User không tồn tại');
-    }
-    const user = rows[0];
-
-    // Computed: days_active trong 30 ngày qua
-    const [daysRes, badge] = await Promise.all([
+    // One round trip for the row AND days_active (distinct days with activity in the last 30 days); the badge is read alongside.
+    const [{ rows }, badge] = await Promise.all([
       pool.query(
-        `SELECT COUNT(DISTINCT DATE(created_at AT TIME ZONE 'UTC'))::int AS days_active
-         FROM user_activity_log
-         WHERE user_id = $1 AND created_at >= NOW() - INTERVAL '30 days'`,
+        `SELECT id, email, full_name, phone, avatar_url, level, status,
+                streak_current, streak_longest,
+                last_active_at, last_login_at, created_at, updated_at,
+                (SELECT COUNT(DISTINCT DATE(a.created_at AT TIME ZONE 'UTC'))::int
+                   FROM user_activity_log a
+                  WHERE a.user_id = users.id AND a.created_at >= NOW() - INTERVAL '30 days') AS days_active
+         FROM users WHERE id = $1`,
         [userId]
       ),
       computeSubscriptionBadge(userId),
     ]);
+    if (rows.length === 0) {
+      return apiError(res, 404, 'USER_NOT_FOUND', 'User không tồn tại');
+    }
+    const user = rows[0];
 
     // TODO: bảng bookmarks chưa có — tạm trả 0.
     const total_words_saved = 0;
@@ -76,7 +73,7 @@ router.get(
       created_at:         user.created_at,
       subscription_badge: badge,
       total_words_saved,
-      days_active: daysRes.rows[0]?.days_active ?? 0,
+      days_active: user.days_active ?? 0,
     });
   })
 );
@@ -108,6 +105,7 @@ router.patch(
                  streak_current, streak_longest, last_active_at, created_at, updated_at`,
       values
     );
+    invalidateAuthUser(userId); // name / level / avatar are part of req.user (utils/authUserCache.ts)
 
     return apiSuccess(res, rows[0], 'Profile đã được cập nhật');
   })
@@ -181,6 +179,7 @@ router.post(
       'UPDATE users SET avatar_url = $1, updated_at = NOW() WHERE id = $2',
       [relativePath, userId]
     );
+    invalidateAuthUser(userId);
 
     // Xóa file cũ (best-effort) nếu khác file mới và nằm trong /uploads/avatars/
     if (oldPath && oldPath.startsWith('/uploads/avatars/') && oldPath !== relativePath) {
@@ -211,6 +210,7 @@ router.delete(
       'UPDATE users SET avatar_url = NULL, updated_at = NOW() WHERE id = $1',
       [userId]
     );
+    invalidateAuthUser(userId);
 
     if (oldPath && oldPath.startsWith('/uploads/avatars/')) {
       const diskPath = path.join(process.cwd(), 'public', oldPath);
@@ -231,27 +231,15 @@ router.get(
   asyncHandler(async (req: ApiRequest, res: Response) => {
     const userId = req.user!.id;
 
-    const [userR, reviewR, activityR, learnedR, dailyR] = await Promise.all([
+    // The four totals are one statement (they were four). "Words learned" = the words in Leitner box 4 or 5: it used to count
+    // user_card_progress.leitner_box, a column that no longer exists, so this whole endpoint answered 500.
+    // The streak is the one on req.user (the same columns, kept current by updateStreak).
+    const [totalsR, dailyR] = await Promise.all([
       pool.query(
-        'SELECT streak_current, streak_longest FROM users WHERE id = $1',
-        [userId]
-      ),
-      pool.query(
-        `SELECT COUNT(*)::int AS total,
-                COUNT(*) FILTER (WHERE correct = true)::int AS correct
-         FROM reviews WHERE user_id = $1`,
-        [userId]
-      ),
-      pool.query(
-        `SELECT COALESCE(SUM(duration_sec), 0)::int AS total_sec
-         FROM user_activity_log WHERE user_id = $1`,
-        [userId]
-      ),
-      pool.query(
-        `SELECT COUNT(DISTINCT c.entry_id)::int AS words
-         FROM user_card_progress ucp
-         JOIN cards c ON c.id = ucp.card_id
-         WHERE ucp.user_id = $1 AND ucp.leitner_box >= 4`,
+        `SELECT (SELECT COUNT(*)::int FROM reviews WHERE user_id = $1)                                   AS reviews_total,
+                (SELECT COUNT(*) FILTER (WHERE correct = true)::int FROM reviews WHERE user_id = $1)      AS reviews_correct,
+                (SELECT COALESCE(SUM(duration_sec), 0)::int FROM user_activity_log WHERE user_id = $1)   AS total_sec,
+                (SELECT COUNT(*)::int FROM leitner_cards WHERE user_id = $1 AND box_number >= 4)         AS words`,
         [userId]
       ),
       pool.query(
@@ -286,16 +274,17 @@ router.get(
       ),
     ]);
 
-    const total = reviewR.rows[0]?.total ?? 0;
-    const correct = reviewR.rows[0]?.correct ?? 0;
+    const totals = totalsR.rows[0];
+    const total = totals?.reviews_total ?? 0;
+    const correct = totals?.reviews_correct ?? 0;
 
     return apiSuccess(res, {
-      streak_current: userR.rows[0]?.streak_current ?? 0,
-      streak_longest: userR.rows[0]?.streak_longest ?? 0,
+      streak_current: req.user!.streak_current ?? 0,
+      streak_longest: req.user!.streak_longest ?? 0,
       total_reviews: total,
       correct_rate: total > 0 ? +(correct / total).toFixed(4) : 0,
-      total_study_time_minutes: Math.round((activityR.rows[0]?.total_sec ?? 0) / 60),
-      total_words_learned: learnedR.rows[0]?.words ?? 0,
+      total_study_time_minutes: Math.round((totals?.total_sec ?? 0) / 60),
+      total_words_learned: totals?.words ?? 0,
       last_30_days_activity: dailyR.rows.map((r: any) => ({
         date: r.date,
         review_count: r.review_count,

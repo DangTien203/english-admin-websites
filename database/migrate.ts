@@ -63,6 +63,7 @@ const migrations: MigrationDef[] = [
   { key: '31_leitner_review_sessions', name: 'Leitner review sessions (box 4/5 checked on both meanings)', file: './migrations/31_leitner_review_sessions' },
   { key: '32_leitner_session_box',    name: 'Leitner review sessions can target one box',              file: './migrations/32_leitner_session_box' },
   { key: '33_lookup_foundation',      name: 'Word lookup foundation: ref_* tables, enrichment jobs, usage counters', file: './migrations/33_lookup_foundation' },
+  { key: '34_performance_indexes',    name: 'Performance indexes: dictionary trigram search, cards.entry_id, leaderboard, pending counts', file: './migrations/34_performance_indexes' },
 ];
 
 /**

@@ -2,6 +2,21 @@ import pool from '../config/db';
 import { paginate } from '../helpers/pagination';
 import type { PoolClient } from 'pg';
 import { fireNotification } from '../services/notificationService';
+import { invalidatePlanCache, invalidateSubscriptionCache } from '../utils/subscriptionHelper';
+import { invalidatePendingCounts } from '../utils/pendingCounts';
+
+/**
+ * The features of a plan as the two parallel arrays that `unnest($2::text[], $3::text[])` takes, without blank keys. A feature key that
+ * appears twice keeps its LAST value when `lastWins` (what a loop of "insert … on conflict do update" ends up with); without it both
+ * are sent and the unique key (plan_id, feature_key) refuses the second, as the loop of plain inserts did.
+ */
+function featureArrays(features: any[], lastWins: boolean): { keys: string[]; values: string[] } {
+  const clean = features
+    .filter((f) => f && f.key && String(f.key).trim())
+    .map((f) => ({ key: String(f.key).trim(), value: f.value || '' }));
+  const used = lastWins ? [...new Map(clean.map((f) => [f.key, f])).values()] : clean;
+  return { keys: used.map((f) => f.key), values: used.map((f) => f.value) };
+}
 
 const Subscription = {
   /**
@@ -9,22 +24,22 @@ const Subscription = {
    * Returns each plan with a `.features` array: [{ feature_key, feature_value }]
    */
   async getPlans() {
-    const { rows: plans } = await pool.query(
-      `SELECT sp.*,
-              (SELECT COUNT(*)::int FROM user_subscriptions us
-               WHERE us.plan_id = sp.id AND us.status = 'active') AS active_subscribers
-       FROM subscription_plans sp
-       ORDER BY sp.sort_order ASC, sp.created_at ASC`
-    );
+    // Every plan is listed, so every plan_features row is wanted: the two reads do not depend on each other and run together.
+    const [{ rows: plans }, { rows: features }] = await Promise.all([
+      pool.query(
+        `SELECT sp.*,
+                (SELECT COUNT(*)::int FROM user_subscriptions us
+                 WHERE us.plan_id = sp.id AND us.status = 'active') AS active_subscribers
+         FROM subscription_plans sp
+         ORDER BY sp.sort_order ASC, sp.created_at ASC`
+      ),
+      pool.query(
+        `SELECT plan_id, feature_key, feature_value
+         FROM plan_features
+         ORDER BY feature_key ASC`
+      ),
+    ]);
     if (plans.length === 0) return [];
-
-    const { rows: features } = await pool.query(
-      `SELECT plan_id, feature_key, feature_value
-       FROM plan_features
-       WHERE plan_id = ANY($1::uuid[])
-       ORDER BY feature_key ASC`,
-      [plans.map((p: any) => p.id)]
-    );
 
     const featureMap: Record<string, any[]> = {};
     for (const f of features) {
@@ -95,26 +110,28 @@ const Subscription = {
       );
       const plan = rows[0];
 
-      for (const f of features) {
-        if (!f.key || !f.key.trim()) continue;
+      // One statement per kind of row instead of one per row (each was a round trip to the database).
+      const created = featureArrays(features, true);
+      if (created.keys.length > 0) {
         await client.query(
           `INSERT INTO plan_features (plan_id, feature_key, feature_value)
-           VALUES ($1, $2, $3)
+           SELECT $1, t.k, t.v FROM unnest($2::text[], $3::text[]) AS t(k, v)
            ON CONFLICT (plan_id, feature_key) DO UPDATE SET feature_value = EXCLUDED.feature_value`,
-          [plan.id, f.key.trim(), f.value || '']
+          [plan.id, created.keys, created.values]
         );
       }
 
-      for (const mid of methodIds) {
-        if (!mid) continue;
+      const methods = methodIds.filter(Boolean);
+      if (methods.length > 0) {
         await client.query(
           `INSERT INTO plan_payment_methods (plan_id, payment_method_id)
-           VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-          [plan.id, mid]
+           SELECT $1, m FROM unnest($2::uuid[]) AS m ON CONFLICT DO NOTHING`,
+          [plan.id, methods]
         );
       }
 
       await client.query('COMMIT');
+      invalidatePlanCache();
       return plan;
     } catch (err) {
       await client.query('ROLLBACK');
@@ -177,26 +194,28 @@ const Subscription = {
 
       // Replace features
       await client.query('DELETE FROM plan_features WHERE plan_id = $1', [id]);
-      for (const f of features) {
-        if (!f.key || !f.key.trim()) continue;
+      const replaced = featureArrays(features, false);
+      if (replaced.keys.length > 0) {
         await client.query(
-          `INSERT INTO plan_features (plan_id, feature_key, feature_value) VALUES ($1,$2,$3)`,
-          [id, f.key.trim(), f.value || '']
+          `INSERT INTO plan_features (plan_id, feature_key, feature_value)
+           SELECT $1, t.k, t.v FROM unnest($2::text[], $3::text[]) AS t(k, v)`,
+          [id, replaced.keys, replaced.values]
         );
       }
 
       // Replace payment method links
       await client.query('DELETE FROM plan_payment_methods WHERE plan_id = $1', [id]);
-      for (const mid of methodIds) {
-        if (!mid) continue;
+      const methods = methodIds.filter(Boolean);
+      if (methods.length > 0) {
         await client.query(
           `INSERT INTO plan_payment_methods (plan_id, payment_method_id)
-           VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-          [id, mid]
+           SELECT $1, m FROM unnest($2::uuid[]) AS m ON CONFLICT DO NOTHING`,
+          [id, methods]
         );
       }
 
       await client.query('COMMIT');
+      invalidatePlanCache();
       return rows[0];
     } catch (err) {
       await client.query('ROLLBACK');
@@ -220,6 +239,7 @@ const Subscription = {
       throw err;
     }
     await pool.query('DELETE FROM subscription_plans WHERE id = $1', [id]);
+    invalidatePlanCache();
   },
 
   /**
@@ -269,40 +289,35 @@ const Subscription = {
    * Returns { mrr, totalSubscribers, churnRate, pendingTransactions }
    */
   async getStats() {
-    const { rows: subRows } = await pool.query(`
-      SELECT billing_cycle, SUM(price_paid)::bigint AS total_paid
-        FROM user_subscriptions
-       WHERE status = 'active'
-       GROUP BY billing_cycle`);
+    // One statement for all four figures (they were four sequential round trips). The per-cycle rows also give the head count.
+    const { rows } = await pool.query(`
+      SELECT
+        COALESCE((SELECT json_agg(json_build_object('billing_cycle', c.billing_cycle, 'total_paid', c.total_paid, 'cnt', c.cnt))
+                    FROM (SELECT billing_cycle, SUM(price_paid)::bigint AS total_paid, COUNT(*)::int AS cnt
+                            FROM user_subscriptions
+                           WHERE status = 'active'
+                           GROUP BY billing_cycle) c), '[]'::json)                                    AS by_cycle,
+        (SELECT COUNT(*)::int FROM user_subscriptions
+          WHERE status = 'cancelled' AND cancelled_at >= NOW() - INTERVAL '30 days')                  AS cancelled_last_30,
+        (SELECT COUNT(*)::int FROM transactions WHERE status = 'pending')                             AS pending_transactions`);
+    const stats = rows[0];
 
     let mrr = 0;
-    for (const r of subRows) {
+    let totalSubscribers = 0;
+    for (const r of stats.by_cycle as Array<{ billing_cycle: string | null; total_paid: string | number | null; cnt: number }>) {
+      totalSubscribers += r.cnt;
       const paid = Number(r.total_paid) || 0;
       if (r.billing_cycle === 'monthly') mrr += paid;
       else if (r.billing_cycle === 'yearly') mrr += Math.round(paid / 12);
       else if (r.billing_cycle === 'weekly') mrr += Math.round(paid * 4.33);
     }
 
-    const { rows: totalRows } = await pool.query(
-      `SELECT COUNT(*)::int AS cnt FROM user_subscriptions WHERE status = 'active'`
-    );
-    const totalSubscribers = totalRows[0].cnt;
-
-    const { rows: churnRows } = await pool.query(
-      `SELECT COUNT(*)::int AS cnt FROM user_subscriptions
-        WHERE status = 'cancelled' AND cancelled_at >= NOW() - INTERVAL '30 days'`
-    );
-    const cancelledLast30 = churnRows[0].cnt;
+    const cancelledLast30: number = stats.cancelled_last_30;
     const churnRate = totalSubscribers > 0
       ? Math.round((cancelledLast30 / (totalSubscribers + cancelledLast30)) * 100)
       : 0;
 
-    const { rows: pendingRows } = await pool.query(
-      `SELECT COUNT(*)::int AS cnt FROM transactions WHERE status = 'pending'`
-    );
-    const pendingTransactions = pendingRows[0].cnt;
-
-    return { mrr, totalSubscribers, churnRate, pendingTransactions };
+    return { mrr, totalSubscribers, churnRate, pendingTransactions: stats.pending_transactions as number };
   },
 
   async getPendingTransactionsCount(): Promise<number> {
@@ -437,6 +452,8 @@ const Subscription = {
       );
 
       await client.query('COMMIT');
+      invalidateSubscriptionCache(tx.user_id); // the user is on the paid plan from the next request on
+      invalidatePendingCounts();
 
       // Notify user — fire-and-forget, post-commit so we never roll back the
       // approval just because notification insert fails.
@@ -494,6 +511,8 @@ const Subscription = {
       );
 
       await client.query('COMMIT');
+      invalidateSubscriptionCache(tx.user_id);
+      invalidatePendingCounts();
 
       // Notify user — include reason so they understand the rejection.
       if (tx.user_id) {
@@ -525,14 +544,16 @@ const Subscription = {
     try {
       await client.query('BEGIN');
       await client.query('DELETE FROM plan_features WHERE plan_id = $1', [planId]);
-      for (const f of features) {
-        if (!f.key || !f.key.trim()) continue;
+      const saved = featureArrays(features, false);
+      if (saved.keys.length > 0) {
         await client.query(
-          `INSERT INTO plan_features (plan_id, feature_key, feature_value) VALUES ($1,$2,$3)`,
-          [planId, f.key.trim(), f.value || '']
+          `INSERT INTO plan_features (plan_id, feature_key, feature_value)
+           SELECT $1, t.k, t.v FROM unnest($2::text[], $3::text[]) AS t(k, v)`,
+          [planId, saved.keys, saved.values]
         );
       }
       await client.query('COMMIT');
+      invalidatePlanCache();
     } catch (err) {
       await client.query('ROLLBACK');
       throw err;

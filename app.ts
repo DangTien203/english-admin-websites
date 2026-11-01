@@ -6,6 +6,7 @@ import session from 'express-session';
 import flash from 'connect-flash';
 import path from 'path';
 import expressLayouts from 'express-ejs-layouts';
+import compression from 'compression';
 
 import { injectAdmin } from './middlewares/auth';
 import { requireSameOrigin } from './middlewares/sameOrigin';
@@ -13,6 +14,7 @@ import { webOnly } from './middlewares/webOnly';
 import { errorHandler } from './middlewares/errorHandler';
 import pool from './config/db';
 import { sessionStore } from './config/sessionStore';
+import { warmPool } from './config/poolWarmup';
 import { drainLookupBackground } from './services/lookup';
 import { startEnrichmentRuntime } from './services/queue';
 import { errMessage, logEvent } from './services/queue/log';
@@ -35,6 +37,7 @@ import apiGamesRoutes from './routes/api/games';
 import apiRetrievalRoutes from './routes/api/retrieval';
 import apiHomeRoutes from './routes/api/home';
 import apiNotificationsRoutes from './routes/api/notifications';
+import apiHealthRoutes from './routes/api/health';
 
 import authRoutes from './routes/auth';
 import dashboardRoutes from './routes/dashboard';
@@ -56,6 +59,13 @@ const app = express();
 
 // Trust Railway's reverse proxy so req.ip reflects the real client (rate limiter depends on this).
 app.set('trust proxy', 1);
+app.disable('x-powered-by');
+
+// ── Compression ──
+// JSON of the mobile API and the HTML / CSS / JS of the admin site, gzip (and br / deflate for the clients that ask for them) from
+// 1 KB up: a deck's cards are ~120 KB of JSON, an ebook chapter ~60 KB, the admin dictionary page ~75 KB, and the app is used over
+// a phone's connection. Images and audio are not compressible and are skipped by the module itself.
+app.use(compression());
 
 // Resolve project root — works both in dev (tsx from root) and prod (node dist/app.js from root).
 const PROJECT_ROOT = process.cwd();
@@ -67,7 +77,12 @@ app.use(expressLayouts);
 app.set('layout', 'layouts/main');
 
 // ── Static Files ──
-app.use(express.static(path.join(PROJECT_ROOT, 'public')));
+// Uploaded files are named with a timestamp (see middlewares/upload.ts), so a name is never reused for other content: they can be
+// cached for a week without revalidation. The CSS / JS of the admin site keep their names when they change, so in production they are
+// reused for 10 minutes and then revalidated with their ETag (a 304 with no body); in development they are always revalidated.
+const PUBLIC_DIR = path.join(PROJECT_ROOT, 'public');
+app.use('/uploads', express.static(path.join(PUBLIC_DIR, 'uploads'), { maxAge: '7d', immutable: true }));
+app.use(express.static(PUBLIC_DIR, { maxAge: process.env.NODE_ENV === 'production' ? '10m' : 0 }));
 
 // ── Body Parser ──
 app.use(express.urlencoded({ extended: true }));
@@ -146,6 +161,7 @@ app.use('/ai-content', aiContentRoutes);
 app.use('/lookup', lookupRoutes);
 
 // API routes cho mobile app
+app.use('/api/v1/health', apiHealthRoutes);
 //Phase 1: auth
 app.use('/api/v1/auth', apiAuthRoutes);
 //Phase 2: profile
@@ -202,7 +218,22 @@ if (require.main === module) {
     console.log(`  English Admin Dashboard`);
     console.log(`  http://localhost:${PORT}`);
     console.log(`══════════════════════════════════════\n`);
+
+    // Open a few database connections now, in the background, so the first visitors after a start or deploy do not each wait for a
+    // handshake (~700 ms to the remote database). Never blocks or fails the start.
+    const warm = Number.parseInt(process.env.DB_POOL_WARM ?? '3', 10);
+    if (Number.isInteger(warm) && warm > 0) {
+      void warmPool(pool, Math.min(warm, 10)).then((r) =>
+        console.log(`[db] pool warm-up: ${r.opened}/${r.requested} connections in ${r.ms} ms${r.failed ? ` (${r.failed} failed)` : ''}`)
+      );
+    }
   });
+
+  // Node closes an idle keep-alive connection after 5 s by default; a reverse proxy (Railway, any load balancer) keeps its side open
+  // longer and then sends the next request down a connection that is already closed: a failed request, or a new connection (and TLS
+  // handshake) per request. Keeping ours open longer than the proxy's idle timeout (~60 s) avoids both.
+  server.keepAliveTimeout = 65_000;
+  server.headersTimeout = 66_000;
 
   // Background enrichment queue (pg-boss). Nothing happens unless ENRICHMENT_ENABLED=true.
   // ENRICHMENT_WORKER_ENABLED decides whether this process also works the queue or only sends jobs.

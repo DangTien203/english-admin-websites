@@ -6,13 +6,13 @@ import { asyncHandler } from '../../utils/asyncHandler';
 import { apiSuccess, apiError } from '../../utils/apiResponse';
 import { computeSubscriptionBadge } from '../../utils/subscriptionHelper';
 import { FULL_ENTRY_SQL } from '../../utils/entryQueries';
-import { calculateStreak } from '../../utils/streakCalculator';
+import { loadStreakSummary } from '../../utils/streakCalculator';
 
 const router = Router();
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Caches
-//  - dashboard: per-user 30s. Aggregating 9 sections is the hot path.
+//  - dashboard: per-user 30s. Aggregating the sections is the hot path.
 //  - wod:       global 24h, keyed by date (YYYY-MM-DD UTC).
 // ─────────────────────────────────────────────────────────────────────────────
 const dashboardCache = new NodeCache({ stdTTL: 30, checkperiod: 10 });
@@ -25,15 +25,41 @@ const todayUtcKey = (): { key: string; midnightMs: number } => {
   return { key: new Date(midnightMs).toISOString().slice(0, 10), midnightMs };
 };
 
+// Three counters and the last finished game with the player's weekly rank, in ONE statement (they were five, the rank one of them
+// only after the last game was known). `played_at` stays a timestamptz column so it reaches the client in the same format as before.
+const SUMMARY_SQL = `
+  WITH last_game AS (
+    SELECT game_type, score, created_at AS played_at
+      FROM game_runs
+     WHERE user_id = $1 AND completed = TRUE
+     ORDER BY created_at DESC
+     LIMIT 1
+  )
+  SELECT (SELECT COUNT(*)::int FROM leitner_cards WHERE user_id = $1 AND due_at <= NOW())          AS leitner_due,
+         (SELECT COUNT(*)::int FROM practice_sessions WHERE user_id = $1 AND completed_at IS NULL) AS practice_due,
+         (SELECT COUNT(*)::int FROM user_notifications WHERE user_id = $1 AND is_read = FALSE)     AS unread_count,
+         lg.game_type, lg.score, lg.played_at,
+         (SELECT r.rank
+            FROM (SELECT user_id, RANK() OVER (ORDER BY MAX(score) DESC)::int AS rank
+                    FROM game_runs
+                   WHERE game_type = lg.game_type AND completed = TRUE
+                     AND created_at >= NOW() - INTERVAL '7 days'
+                   GROUP BY user_id) r
+           WHERE r.user_id = $1
+           LIMIT 1) AS weekly_rank
+    FROM (SELECT 1) one
+    LEFT JOIN last_game lg ON TRUE`;
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  GET /api/v1/home/dashboard  (auth)
-//  Aggregates 9 sections in parallel + per-user 30s cache for sub-500ms p95.
+//  Aggregates the sections in parallel + per-user 30s cache for sub-500ms p95.
 // ─────────────────────────────────────────────────────────────────────────────
 router.get(
   '/dashboard',
   requireApiAuth,
   asyncHandler(async (req: ApiRequest, res: Response) => {
-    const userId = req.user!.id;
+    const user = req.user!;
+    const userId = user.id;
     const cacheKey = `dash:${userId}`;
     const cached = dashboardCache.get<object>(cacheKey);
     if (cached) {
@@ -43,55 +69,18 @@ router.get(
     const { key: todayKey, midnightMs } = todayUtcKey();
     const sevenStartKey = new Date(midnightMs - 6 * DAY_MS).toISOString().slice(0, 10);
 
-    // Fan out: 10 independent queries + the WOD lookup in parallel.
+    // Fan out: 5 independent statements + the (cached) badge and WOD, all at once. The user's own row is req.user (auth loaded it).
     //
     // Streak is computed live (not read from users.streak_current) because
     // that column only gets refreshed via trackActivity on study endpoints
     // (flashcard/review/game/lookup). A user who only opens the home tab
     // would otherwise see a value frozen at their last study session — even
     // if that was weeks ago — while last_7_days correctly shows the gaps.
-    const [
-      userR,
-      badge,
-      streakLive,
-      sevenR,
-      leitnerR,
-      practiceR,
-      decksR,
-      activityR,
-      readingR,
-      gameLastR,
-      unreadR,
-      wodEntry,
-    ] = await Promise.all([
-      pool.query(
-        `SELECT id, full_name, avatar_url, level, streak_longest
-           FROM users
-          WHERE id = $1`,
-        [userId],
-      ),
+    // The same statement returns the active days of the last 7 (it used to be a second query over the same rows).
+    const [badge, streakLive, summaryR, decksR, activityR, readingR, wodEntry] = await Promise.all([
       computeSubscriptionBadge(userId),
-      calculateStreak(userId),
-      pool.query<{ d: string }>(
-        `SELECT DISTINCT TO_CHAR(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS d
-           FROM user_activity_log
-          WHERE user_id = $1
-            AND created_at >= $2::date
-            AND created_at <  ($3::date + INTERVAL '1 day')`,
-        [userId, sevenStartKey, todayKey],
-      ),
-      pool.query<{ total: number }>(
-        `SELECT COUNT(*)::int AS total
-           FROM leitner_cards
-          WHERE user_id = $1 AND due_at <= NOW()`,
-        [userId],
-      ),
-      pool.query<{ total: number }>(
-        `SELECT COUNT(*)::int AS total
-           FROM practice_sessions
-          WHERE user_id = $1 AND completed_at IS NULL`,
-        [userId],
-      ),
+      loadStreakSummary(userId, { today: todayKey, recentFrom: sevenStartKey, recentTo: todayKey }),
+      pool.query(SUMMARY_SQL, [userId]),
       // Continue learning: top 5 decks favorited or owned by this user, with progress.
       pool.query(
         `SELECT
@@ -129,38 +118,20 @@ router.get(
           LIMIT 1`,
         [userId],
       ),
-      pool.query(
-        `SELECT game_type, score, created_at AS played_at
-           FROM game_runs
-          WHERE user_id = $1 AND completed = TRUE
-          ORDER BY created_at DESC
-          LIMIT 1`,
-        [userId],
-      ),
-      pool.query<{ count: number }>(
-        `SELECT COUNT(*)::int AS count
-           FROM user_notifications
-          WHERE user_id = $1 AND is_read = FALSE`,
-        [userId],
-      ),
       getWordOfTheDay(todayKey, /* fullDetail */ false),
     ]);
 
-    const userRow = userR.rows[0];
-    if (!userRow) {
-      return apiError(res, 404, 'USER_NOT_FOUND', 'User không tồn tại');
-    }
-
     // 7-day activity strip (ordered oldest → today).
-    const activeDays = new Set(sevenR.rows.map((r: any) => r.d));
+    const activeDays = new Set(streakLive.recentDays);
     const lastSevenDays: { date: string; had_activity: boolean }[] = [];
     for (let i = 6; i >= 0; i--) {
       const d = new Date(midnightMs - i * DAY_MS).toISOString().slice(0, 10);
       lastSevenDays.push({ date: d, had_activity: activeDays.has(d) });
     }
 
-    const leitnerDue = leitnerR.rows[0]?.total ?? 0;
-    const practiceDue = practiceR.rows[0]?.total ?? 0;
+    const summary = summaryR.rows[0] ?? {};
+    const leitnerDue = summary.leitner_due ?? 0;
+    const practiceDue = summary.practice_due ?? 0;
     const totalDueCards = leitnerDue + practiceDue;
     // Heuristic: ~20s per due card, floor at 1 minute when there's anything to review.
     const estimatedMinutes = totalDueCards === 0 ? 0 : Math.max(1, Math.ceil(totalDueCards / 3));
@@ -187,47 +158,33 @@ router.get(
         }
       : null;
 
-    const lastPlayedRow = gameLastR.rows[0];
-    const lastPlayed = lastPlayedRow
+    const lastPlayed = summary.game_type
       ? {
-          game_type: lastPlayedRow.game_type,
-          score: lastPlayedRow.score,
-          played_at: lastPlayedRow.played_at,
+          game_type: summary.game_type,
+          score: summary.score,
+          played_at: summary.played_at,
         }
       : null;
 
-    // Weekly rank only computed when we know which game to query for.
-    let weeklyRank: { game_type: string; rank: number } | null = null;
-    if (lastPlayed) {
-      const { rows: rankRows } = await pool.query<{ rank: number }>(
-        `WITH ranked AS (
-           SELECT user_id, RANK() OVER (ORDER BY MAX(score) DESC)::int AS rank
-             FROM game_runs
-            WHERE game_type = $1 AND completed = TRUE
-              AND created_at >= NOW() - INTERVAL '7 days'
-            GROUP BY user_id
-         )
-         SELECT rank FROM ranked WHERE user_id = $2 LIMIT 1`,
-        [lastPlayed.game_type, userId],
-      );
-      if (rankRows[0]?.rank) {
-        weeklyRank = { game_type: lastPlayed.game_type, rank: rankRows[0].rank };
-      }
-    }
+    // Weekly rank only exists when there is a last game to rank in.
+    const weeklyRank: { game_type: string; rank: number } | null =
+      lastPlayed && summary.weekly_rank
+        ? { game_type: lastPlayed.game_type, rank: summary.weekly_rank }
+        : null;
 
     const dashboard = {
       user: {
-        id: userRow.id,
-        full_name: userRow.full_name ?? null,
-        avatar_url: userRow.avatar_url ?? null,
-        level: userRow.level,
+        id: user.id,
+        full_name: user.full_name ?? null,
+        avatar_url: user.avatar_url ?? null,
+        level: user.level,
         subscription_badge: badge,
       },
       streak: {
         current: streakLive.current,
         // Stored longest is monotonic — keep whichever is greater so a
         // historical peak isn't lost if user_activity_log was ever pruned.
-        longest: Math.max(streakLive.longest, Number(userRow.streak_longest ?? 0)),
+        longest: Math.max(streakLive.longest, Number(user.streak_longest ?? 0)),
         last_7_days: lastSevenDays,
       },
       due_review: {
@@ -250,7 +207,7 @@ router.get(
         last_played: lastPlayed,
         weekly_rank: weeklyRank,
       },
-      notification_unread_count: unreadR.rows[0]?.count ?? 0,
+      notification_unread_count: summary.unread_count ?? 0,
     };
 
     dashboardCache.set(cacheKey, dashboard);

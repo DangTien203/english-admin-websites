@@ -4,6 +4,21 @@ import { paginate } from '../helpers/pagination';
 /** The "Published" checkbox of a form: ticked → true. An unticked box sends no field at all, so absent means false. */
 const isTicked = (value: unknown): boolean => value === true || value === 'true' || value === 'on';
 
+/** Rows per statement of the JSON import. */
+const IMPORT_BATCH = 200;
+
+/** $1 = a JSON array of ready rows, $2 = the admin. A row that already exists (same headword + lemma) is skipped. */
+const INSERT_MANY_SQL = `
+  INSERT INTO dictionary_entries
+    (headword, lemma, ipa_us, ipa_uk, pos, meaning_vi, meaning_en,
+     example_en, example_vi, cefr_level, frequency_rank, source, created_by)
+  SELECT r.headword, r.lemma, r.ipa_us, r.ipa_uk, r.pos, r.meaning_vi, r.meaning_en,
+         r.example_en, r.example_vi, r.cefr_level, r.frequency_rank, r.source, $2::uuid
+    FROM jsonb_to_recordset($1::jsonb) AS r(
+           headword text, lemma text, ipa_us text, ipa_uk text, pos text[], meaning_vi text, meaning_en text,
+           example_en text, example_vi text, cefr_level text, frequency_rank int, source text)
+  ON CONFLICT (headword, lemma) DO NOTHING`;
+
 const DictionaryEntry = {
   /** The "Published" checkbox of a form: ticked → true. Exposed so that a controller can tell what the form ASKED for. */
   isTicked,
@@ -121,10 +136,10 @@ const DictionaryEntry = {
         ]
       );
       const entry = rows[0];
-      for (const tid of tagIds) {
+      if (tagIds.length > 0) {
         await client.query(
-          'INSERT INTO entry_tags (entry_id, tag_id) VALUES ($1,$2) ON CONFLICT DO NOTHING',
-          [entry.id, tid]
+          'INSERT INTO entry_tags (entry_id, tag_id) SELECT $1, t FROM unnest($2::uuid[]) AS t ON CONFLICT DO NOTHING',
+          [entry.id, tagIds]
         );
       }
       await client.query('COMMIT');
@@ -203,10 +218,10 @@ const DictionaryEntry = {
         );
       }
       await client.query('DELETE FROM entry_tags WHERE entry_id = $1', [id]);
-      for (const tid of tagIds) {
+      if (tagIds.length > 0) {
         await client.query(
-          'INSERT INTO entry_tags (entry_id, tag_id) VALUES ($1,$2) ON CONFLICT DO NOTHING',
-          [id, tid]
+          'INSERT INTO entry_tags (entry_id, tag_id) SELECT $1, t FROM unnest($2::uuid[]) AS t ON CONFLICT DO NOTHING',
+          [id, tagIds]
         );
       }
       await client.query('COMMIT');
@@ -223,52 +238,77 @@ const DictionaryEntry = {
     await pool.query('DELETE FROM dictionary_entries WHERE id = $1', [id]);
   },
 
+  /**
+   * Bulk import. The rows are inserted in batches of IMPORT_BATCH with ONE statement each (a row per round trip made a 1,000-word
+   * file take a minute against the remote database). A batch that the database refuses — one bad value, e.g. a CEFR level that does not
+   * exist — is retried row by row, so the error is still reported against the row that caused it, and the good rows of that batch go in,
+   * exactly as the old row-by-row import behaved. `errors` stays in the order of the file.
+   */
   async importFromJson(jsonArray: any[], adminId: string) {
     let inserted = 0;
     let skipped = 0;
-    const errors: string[] = [];
+    const errors: Array<{ at: number; message: string }> = [];
 
-    for (const item of jsonArray) {
+    const toRow = (item: any) => ({
+      headword: String(item.headword).trim().toLowerCase(),
+      lemma: String(item.lemma).trim().toLowerCase(),
+      ipa_us: item.ipa_us || null,
+      ipa_uk: item.ipa_uk || null,
+      pos: Array.isArray(item.pos) ? item.pos : [],
+      meaning_vi: item.meaning_vi,
+      meaning_en: item.meaning_en || null,
+      example_en: item.example_en || null,
+      example_vi: item.example_vi || null,
+      cefr_level: item.cefr_level || null,
+      frequency_rank: item.frequency_rank ? parseInt(item.frequency_rank) : null,
+      source: item.source || 'manual',
+    });
+
+    const valid: Array<{ at: number; item: any }> = [];
+    jsonArray.forEach((item, at) => {
       if (!item.headword || !item.lemma || !item.meaning_vi) {
-        errors.push(`Thiếu trường bắt buộc: ${JSON.stringify(item)}`);
-        continue;
+        errors.push({ at, message: `Thiếu trường bắt buộc: ${JSON.stringify(item)}` });
+      } else {
+        valid.push({ at, item });
       }
+    });
+
+    for (let from = 0; from < valid.length; from += IMPORT_BATCH) {
+      const batch = valid.slice(from, from + IMPORT_BATCH);
       try {
-        const { rowCount } = await pool.query(`
-          INSERT INTO dictionary_entries
-            (headword, lemma, ipa_us, ipa_uk, pos, meaning_vi, meaning_en,
-             example_en, example_vi, cefr_level, frequency_rank, source, created_by)
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-          ON CONFLICT (headword, lemma) DO NOTHING`,
-          [
-            String(item.headword).trim().toLowerCase(),
-            String(item.lemma).trim().toLowerCase(),
-            item.ipa_us || null,
-            item.ipa_uk || null,
-            Array.isArray(item.pos) ? item.pos : [],
-            item.meaning_vi,
-            item.meaning_en || null,
-            item.example_en || null,
-            item.example_vi || null,
-            item.cefr_level || null,
-            item.frequency_rank ? parseInt(item.frequency_rank) : null,
-            item.source || 'manual',
-            adminId,
-          ]
-        );
-        if (rowCount > 0) inserted++;
-        else skipped++;
-      } catch (err) {
-        const error = err as Error;
-        errors.push(`${item.headword}/${item.lemma}: ${error.message}`);
+        const { rowCount } = await pool.query(INSERT_MANY_SQL, [JSON.stringify(batch.map(({ item }) => toRow(item))), adminId]);
+        inserted += rowCount ?? 0;
+        skipped += batch.length - (rowCount ?? 0);
+      } catch {
+        for (const { at, item } of batch) {
+          try {
+            const r = toRow(item);
+            const { rowCount } = await pool.query(INSERT_MANY_SQL, [JSON.stringify([r]), adminId]);
+            if ((rowCount ?? 0) > 0) inserted++;
+            else skipped++;
+          } catch (err) {
+            const error = err as Error;
+            errors.push({ at, message: `${item.headword}/${item.lemma}: ${error.message}` });
+          }
+        }
       }
     }
-    return { inserted, skipped, errors };
+    return { inserted, skipped, errors: errors.sort((a, b) => a.at - b.at).map((e) => e.message) };
   },
 
   async count() {
     const { rows } = await pool.query('SELECT COUNT(*)::int AS count FROM dictionary_entries');
     return rows[0].count;
+  },
+
+  /** The two totals of the list page (all entries, entries without an IPA) in one statement. */
+  async stats() {
+    const { rows } = await pool.query(
+      `SELECT COUNT(*)::int AS total,
+              COUNT(*) FILTER (WHERE ipa_us IS NULL OR ipa_uk IS NULL)::int AS missing_ipa
+         FROM dictionary_entries`
+    );
+    return { total: rows[0].total as number, missingIpa: rows[0].missing_ipa as number };
   },
 
   async countMissingIpa() {

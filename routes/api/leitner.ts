@@ -17,7 +17,8 @@ import {
 } from '../../utils/questionHelpers';
 import { buildAcceptedAnswerTexts } from '../../utils/answerMatcher';
 import {
-  gradeLeitnerAnswer,
+  loadLeitnerCardForGrading,
+  gradeLoadedLeitnerCard,
   requiresEnglishMeaning,
   PracticeAnswerGradeResult,
 } from '../../services/answerGradingService';
@@ -48,47 +49,35 @@ router.get(
   '/overview',
   asyncHandler(async (req: ApiRequest, res: Response) => {
     const userId = req.user!.id;
-    const intervals = await getIntervals();
 
-    const [{ rows: boxRows }, { rows: retRows }, { rows: masteredRows }, { rows: avgRows }] =
-      await Promise.all([
-        // Box distribution + due counts
-        pool.query(
-          `SELECT
-             box_number,
-             COUNT(*)::int                                        AS total_cards,
-             COUNT(*) FILTER (WHERE due_at <= NOW())::int        AS due_today
-           FROM leitner_cards
-           WHERE user_id = $1
-           GROUP BY box_number
-           ORDER BY box_number`,
-          [userId]
-        ),
-        // Retention rate last 30 days
-        pool.query(
-          `SELECT
-             COUNT(*) FILTER (WHERE correct = true)::float
-               / NULLIF(COUNT(*), 0) AS rate
-           FROM leitner_reviews
-           WHERE user_id = $1 AND created_at >= NOW() - INTERVAL '30 days'`,
-          [userId]
-        ),
-        // Mastered (box 5) all time
-        pool.query(
-          `SELECT COUNT(*)::int AS mastered
-           FROM leitner_cards WHERE user_id = $1 AND box_number = 5`,
-          [userId]
-        ),
-        // Avg days from card creation to reaching box 5
-        pool.query(
-          `SELECT AVG(
-             EXTRACT(EPOCH FROM (last_reviewed_at - created_at)) / 86400
-           )::numeric(10,1) AS avg_days
-           FROM leitner_cards
-           WHERE user_id = $1 AND box_number = 5 AND last_reviewed_at IS NOT NULL`,
-          [userId]
-        ),
-      ]);
+    // Two statements (they were four): the first reads the user's cards ONCE and answers the box distribution, the due counts, the
+    // number of mastered cards (= the cards of box 5) and the average days to box 5 (computed on box 5's rows only).
+    const [intervals, { rows: boxRows }, { rows: retRows }] = await Promise.all([
+      getIntervals(),
+      pool.query(
+        `SELECT
+           box_number,
+           COUNT(*)::int                                        AS total_cards,
+           COUNT(*) FILTER (WHERE due_at <= NOW())::int        AS due_today,
+           -- Avg days from card creation to reaching box 5
+           ROUND((AVG(EXTRACT(EPOCH FROM (last_reviewed_at - created_at)) / 86400)
+                    FILTER (WHERE box_number = 5 AND last_reviewed_at IS NOT NULL))::numeric, 1) AS avg_days
+         FROM leitner_cards
+         WHERE user_id = $1
+         GROUP BY box_number
+         ORDER BY box_number`,
+        [userId]
+      ),
+      // Retention rate last 30 days
+      pool.query(
+        `SELECT
+           COUNT(*) FILTER (WHERE correct = true)::float
+             / NULLIF(COUNT(*), 0) AS rate
+         FROM leitner_reviews
+         WHERE user_id = $1 AND created_at >= NOW() - INTERVAL '30 days'`,
+        [userId]
+      ),
+    ]);
 
     const boxMap = new Map<number, { total_cards: number; due_today: number }>(
       boxRows.map((r: any) => [r.box_number as number, r])
@@ -109,8 +98,8 @@ router.get(
       today_due_total: boxes.reduce((sum, b) => sum + b.due_today, 0),
       stats: {
         retention_30d: Math.round((retRows[0]?.rate ?? 0) * 100) / 100,
-        mastered_all_time: masteredRows[0]?.mastered ?? 0,
-        avg_days_to_box_5: parseFloat(avgRows[0]?.avg_days ?? '0') || 0,
+        mastered_all_time: boxMap.get(5)?.total_cards ?? 0,
+        avg_days_to_box_5: parseFloat((boxMap.get(5) as any)?.avg_days ?? '0') || 0,
       },
     });
   })
@@ -317,14 +306,34 @@ router.post(
       return apiError(res, 400, 'VALIDATION_ERROR', 'leitner_card_id là bắt buộc');
     }
 
-    const { rows: cardRows } = await pool.query(
-      `SELECT box_number FROM leitner_cards WHERE id = $1 AND user_id = $2`,
-      [leitner_card_id, userId]
-    );
-    if (cardRows.length === 0) {
-      return apiError(res, 404, 'CARD_NOT_FOUND', 'Leitner card không tồn tại');
+    const hasTypedAnswer = typeof user_answer === 'string';
+    const hasLegacyCorrect = typeof correct === 'boolean';
+
+    // A typed answer is graded, which needs the card with its reference answers: that one read also tells the box. Only the legacy
+    // client-graded answer needs the small box lookup. (Before, the box was read first and the card again for the grading.)
+    let gradable: Awaited<ReturnType<typeof loadLeitnerCardForGrading>> | null = null;
+    let boxNumber: number;
+    if (hasTypedAnswer) {
+      try {
+        gradable = await loadLeitnerCardForGrading(leitner_card_id, userId);
+      } catch (err: any) {
+        if (err.statusCode === 404) {
+          return apiError(res, 404, 'CARD_NOT_FOUND', 'Leitner card không tồn tại');
+        }
+        throw err;
+      }
+      boxNumber = gradable.leitner_box as number;
+    } else {
+      const { rows: cardRows } = await pool.query(
+        `SELECT box_number FROM leitner_cards WHERE id = $1 AND user_id = $2`,
+        [leitner_card_id, userId]
+      );
+      if (cardRows.length === 0) {
+        return apiError(res, 404, 'CARD_NOT_FOUND', 'Leitner card không tồn tại');
+      }
+      boxNumber = cardRows[0].box_number;
     }
-    if (requiresEnglishMeaning(cardRows[0].box_number)) {
+    if (requiresEnglishMeaning(boxNumber)) {
       return apiError(
         res,
         409,
@@ -333,8 +342,6 @@ router.post(
       );
     }
 
-    const hasTypedAnswer = typeof user_answer === 'string';
-    const hasLegacyCorrect = typeof correct === 'boolean';
     if (!hasTypedAnswer && !hasLegacyCorrect) {
       return apiError(
         res,
@@ -348,14 +355,7 @@ router.post(
     let grading: PracticeAnswerGradeResult | null = null;
 
     if (hasTypedAnswer) {
-      try {
-        grading = await gradeLeitnerAnswer(leitner_card_id, userId, user_answer ?? '');
-      } catch (err: any) {
-        if (err.statusCode === 404) {
-          return apiError(res, 404, 'CARD_NOT_FOUND', 'Leitner card không tồn tại');
-        }
-        throw err;
-      }
+      grading = await gradeLoadedLeitnerCard(gradable!, user_answer ?? '');
       finalCorrect = grading.correct;
     }
 

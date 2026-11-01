@@ -33,10 +33,9 @@ const dictionaryController = {
         return res.json({ entries: result.rows });
       }
 
-      const [result, total, missingIpa, tags] = await Promise.all([
+      const [result, { total, missingIpa }, tags] = await Promise.all([
         DictionaryEntry.getAll({ search, pos, cefrLevel, source, published, page, limit: 20 }),
-        DictionaryEntry.count(),
-        DictionaryEntry.countMissingIpa(),
+        DictionaryEntry.stats(),
         DictionaryEntry.getAllTags(),
       ]);
 

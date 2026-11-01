@@ -5,8 +5,9 @@ import { ApiRequest, requireApiAuth, optionalApiAuth } from '../../middlewares/a
 import { asyncHandler } from '../../utils/asyncHandler';
 import { apiSuccess, apiError } from '../../utils/apiResponse';
 import { addBatchToBox1 } from '../../utils/leitnerManager';
-import { updateStreak } from '../../utils/streakCalculator';
+import { recordActivity } from '../../utils/streakCalculator';
 import { createNotification } from '../../services/notificationService';
+import { gameCatalogCache } from '../../utils/gameCatalogCache';
 
 const router = Router();
 
@@ -110,15 +111,18 @@ router.get(
       where += ` AND game_type = $${params.length}`;
     }
 
-    const { rows } = await pool.query(
-      `SELECT id, game_type, level_number, config_json
-       FROM game_levels
-       ${where}
-       ORDER BY game_type ASC, level_number ASC`,
-      params
-    );
+    const items = await gameCatalogCache.getOrLoad(`levels:${type ?? ''}`, async () => {
+      const { rows } = await pool.query(
+        `SELECT id, game_type, level_number, config_json
+         FROM game_levels
+         ${where}
+         ORDER BY game_type ASC, level_number ASC`,
+        params
+      );
+      return rows;
+    });
 
-    return apiSuccess(res, { items: rows });
+    return apiSuccess(res, { items });
   })
 );
 
@@ -153,18 +157,21 @@ router.get(
 
     const where = `WHERE ${conds.join(' AND ')}`;
 
-    const { rows } = await pool.query(
-      `SELECT gwl.id, gwl.game_type, gwl.name, gwl.topic, gwl.level,
-              COUNT(gwli.entry_id)::int AS word_count
-         FROM game_word_lists gwl
-         LEFT JOIN game_word_list_items gwli ON gwli.list_id = gwl.id
-         ${where}
-         GROUP BY gwl.id
-         ORDER BY gwl.game_type ASC, gwl.name ASC`,
-      params
-    );
+    const items = await gameCatalogCache.getOrLoad(`lists:${JSON.stringify(params)}`, async () => {
+      const { rows } = await pool.query(
+        `SELECT gwl.id, gwl.game_type, gwl.name, gwl.topic, gwl.level,
+                COUNT(gwli.entry_id)::int AS word_count
+           FROM game_word_lists gwl
+           LEFT JOIN game_word_list_items gwli ON gwli.list_id = gwl.id
+           ${where}
+           GROUP BY gwl.id
+           ORDER BY gwl.game_type ASC, gwl.name ASC`,
+        params
+      );
+      return rows;
+    });
 
-    return apiSuccess(res, { items: rows });
+    return apiSuccess(res, { items });
   })
 );
 
@@ -224,19 +231,22 @@ router.get(
     const params: any[] = [];
     if (normalizedLevel) params.push(normalizedLevel);
 
-    const { rows } = await pool.query(
-      `SELECT ss.id, ss.name, ss.scale_description, ss.level,
-              COUNT(ssi.id)::int AS item_count
-         FROM semantic_sets ss
-         LEFT JOIN semantic_set_items ssi ON ssi.set_id = ss.id
-         WHERE ss.status = 'published'
-         ${normalizedLevel ? `AND ss.level = $1` : ''}
-         GROUP BY ss.id
-         ORDER BY ss.name ASC`,
-      params
-    );
+    const items = await gameCatalogCache.getOrLoad(`sets:${normalizedLevel ?? ''}`, async () => {
+      const { rows } = await pool.query(
+        `SELECT ss.id, ss.name, ss.scale_description, ss.level,
+                COUNT(ssi.id)::int AS item_count
+           FROM semantic_sets ss
+           LEFT JOIN semantic_set_items ssi ON ssi.set_id = ss.id
+           WHERE ss.status = 'published'
+           ${normalizedLevel ? `AND ss.level = $1` : ''}
+           GROUP BY ss.id
+           ORDER BY ss.name ASC`,
+        params
+      );
+      return rows;
+    });
 
-    return apiSuccess(res, { items: rows });
+    return apiSuccess(res, { items });
   })
 );
 
@@ -341,31 +351,33 @@ router.post(
       }
     }
 
-    // ── Load level config for anti-cheat ───────────────────────────────────
-    let levelConfig: any = null;
-    if (level_id) {
-      const { rows: lvRows } = await pool.query(
-        `SELECT config_json FROM game_levels WHERE id = $1`, [level_id]
-      );
-      levelConfig = lvRows[0]?.config_json ?? null;
-    }
-
-    // ── Ladder: server-side accuracy computation ────────────────────────────
+    // ── Load level config for anti-cheat, and (ladder) the set to score against: two independent reads, done together ──
     let finalAccuracy: number = typeof rawAccuracy === 'number'
       ? Math.max(0, Math.min(1, rawAccuracy))
       : 0;
     let setEntryIds: string[] = [];
 
+    const [levelRes, setRes] = await Promise.all([
+      level_id
+        ? pool.query(`SELECT config_json FROM game_levels WHERE id = $1`, [level_id])
+        : Promise.resolve(null),
+      game_type === 'ladder'
+        ? pool.query(
+            `SELECT entry_id, correct_order
+               FROM semantic_set_items
+              WHERE set_id = $1
+              ORDER BY correct_order ASC`,
+            [set_id]
+          )
+        : Promise.resolve(null),
+    ]);
+    const levelConfig: any = levelRes?.rows[0]?.config_json ?? null;
+
+    // ── Ladder: server-side accuracy computation ────────────────────────────
     if (game_type === 'ladder') {
       if (!set_id) return apiError(res, 400, 'VALIDATION_ERROR', 'ladder yêu cầu set_id');
 
-      const { rows: setItems } = await pool.query(
-        `SELECT entry_id, correct_order
-           FROM semantic_set_items
-          WHERE set_id = $1
-          ORDER BY correct_order ASC`,
-        [set_id]
-      );
+      const setItems = setRes!.rows;
       if (setItems.length === 0) {
         return apiError(res, 404, 'NOT_FOUND', 'Semantic set không tồn tại hoặc không có items');
       }
@@ -399,12 +411,9 @@ router.post(
     // ── XP & streak (fire-and-forget) ───────────────────────────────────────
     const xpEarned = calcXp(game_type, score, finalAccuracy, completed);
 
-    // Log activity (non-blocking)
-    pool.query(
-      `INSERT INTO user_activity_log (user_id, action, details)
-       VALUES ($1, 'game', $2)`,
-      [userId, JSON.stringify({ game_type, run_id: runId, score, accuracy: finalAccuracy, xp_earned: xpEarned })]
-    ).then(() => updateStreak(userId)).catch(() => {/* best-effort */});
+    // Log activity and refresh the streak (non-blocking; one statement, it used to be an insert and then updateStreak)
+    recordActivity(userId, 'game', { game_type, run_id: runId, score, accuracy: finalAccuracy, xp_earned: xpEarned })
+      .catch(() => {/* best-effort */});
 
     // ── Leitner integration — Ladder ONLY ──────────────────────────────────
     let leitnerAdded: { added: number; skipped: number } | null = null;

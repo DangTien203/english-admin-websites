@@ -90,16 +90,19 @@ const Lesson = {
       );
       const lesson = rows[0];
 
-      for (let i = 0; i < entryIds.length; i++) {
+      // One statement for all the entries (in the order given, position = index) and one for all the tags — not one per row.
+      if (entryIds.length > 0) {
         await client.query(
-          'INSERT INTO lesson_entries (lesson_id, entry_id, sort_order) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING',
-          [lesson.id, entryIds[i], i]
+          `INSERT INTO lesson_entries (lesson_id, entry_id, sort_order)
+         SELECT $1, t.entry_id, t.ord - 1 FROM unnest($2::uuid[]) WITH ORDINALITY AS t(entry_id, ord)
+         ON CONFLICT DO NOTHING`,
+          [lesson.id, entryIds]
         );
       }
-      for (const tid of tagIds) {
+      if (tagIds.length > 0) {
         await client.query(
-          'INSERT INTO lesson_tags (lesson_id, tag_id) VALUES ($1,$2) ON CONFLICT DO NOTHING',
-          [lesson.id, tid]
+          'INSERT INTO lesson_tags (lesson_id, tag_id) SELECT $1, t FROM unnest($2::uuid[]) AS t ON CONFLICT DO NOTHING',
+          [lesson.id, tagIds]
         );
       }
       await client.query('COMMIT');
@@ -142,18 +145,20 @@ const Lesson = {
       );
 
       await client.query('DELETE FROM lesson_entries WHERE lesson_id = $1', [id]);
-      for (let i = 0; i < entryIds.length; i++) {
+      if (entryIds.length > 0) {
         await client.query(
-          'INSERT INTO lesson_entries (lesson_id, entry_id, sort_order) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING',
-          [id, entryIds[i], i]
+          `INSERT INTO lesson_entries (lesson_id, entry_id, sort_order)
+         SELECT $1, t.entry_id, t.ord - 1 FROM unnest($2::uuid[]) WITH ORDINALITY AS t(entry_id, ord)
+         ON CONFLICT DO NOTHING`,
+          [id, entryIds]
         );
       }
 
       await client.query('DELETE FROM lesson_tags WHERE lesson_id = $1', [id]);
-      for (const tid of tagIds) {
+      if (tagIds.length > 0) {
         await client.query(
-          'INSERT INTO lesson_tags (lesson_id, tag_id) VALUES ($1,$2) ON CONFLICT DO NOTHING',
-          [id, tid]
+          'INSERT INTO lesson_tags (lesson_id, tag_id) SELECT $1, t FROM unnest($2::uuid[]) AS t ON CONFLICT DO NOTHING',
+          [id, tagIds]
         );
       }
       await client.query('COMMIT');

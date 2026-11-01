@@ -208,7 +208,16 @@ describe('queue on real PostgreSQL + pg-boss', () => {
     expect(calls.get(word)).toBe(3);
     expect(seen).toContain('queued:1:upstream_error'); // back to queued after the 1st failure, attempts kept
     expect(seen).toContain('queued:2:upstream_error');
-    const [job] = await boss.findJobs(ENRICH_QUEUE, { key: word });
+    // The worker writes the ledger row first and pg-boss marks the job completed a moment later: wait for it instead of racing it.
+    const job = await waitFor(
+      async () => {
+        const [j] = await boss.findJobs(ENRICH_QUEUE, { key: word });
+        return j?.state === 'completed' ? j : false;
+      },
+      'job completed',
+      15_000,
+      50
+    );
     expect(job).toMatchObject({ state: 'completed', retryCount: 2 });
   });
 

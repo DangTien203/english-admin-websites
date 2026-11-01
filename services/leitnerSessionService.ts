@@ -1,5 +1,5 @@
 import pool from '../config/db';
-import { Queryable, moveCard } from '../utils/leitnerManager';
+import { getIntervals, moveCardCtes } from '../utils/leitnerManager';
 import { shuffleArray } from '../utils/questionHelpers';
 import {
   QueueStep,
@@ -9,8 +9,9 @@ import {
 } from '../utils/leitnerReviewQueue';
 import {
   PracticeAnswerGradeResult,
-  gradeLeitnerAnswer,
-  gradeLeitnerEnglishAnswer,
+  gradeLoadedLeitnerCard,
+  gradeLoadedLeitnerEnglishCard,
+  loadLeitnerCardForStepGrading,
   requiresEnglishMeaning,
 } from './answerGradingService';
 
@@ -51,7 +52,8 @@ export interface WordOutcome {
   applied: boolean;
   old_box_number: number;
   new_box_number: number | null;
-  next_due_at: Date | null;
+  /** ISO 8601 (UTC, milliseconds): the text stored in word_outcome, which is also what the API serves. */
+  next_due_at: string | null;
   mastered_now: boolean;
 }
 
@@ -97,31 +99,46 @@ const sessionNotFound = () =>
 const sessionCompleted = () =>
   new LeitnerSessionError(400, 'SESSION_ALREADY_COMPLETED', 'Session đã hoàn thành');
 
-async function fetchOwnedSession(
-  db: Queryable,
-  sessionId: string,
-  userId: string,
-  lock = false
-): Promise<SessionRow | null> {
-  const { rows } = await db.query(
+async function fetchOwnedSession(sessionId: string, userId: string): Promise<SessionRow | null> {
+  const { rows } = await pool.query(
     `SELECT id, box_number, total_words, total_steps, started_at, completed_at
        FROM leitner_review_sessions
-      WHERE id = $1 AND user_id = $2${lock ? ' FOR UPDATE' : ''}`,
+      WHERE id = $1 AND user_id = $2`,
     [sessionId, userId]
   );
   return rows[0] ?? null;
 }
 
-async function loadSteps(db: Queryable, sessionId: string): Promise<StepRow[]> {
-  const { rows } = await db.query(
-    `SELECT id, step_index, leitner_card_id, check_lang, check_number, checks_total,
-            start_box, start_total_reviews, answered_at, correct, time_ms, word_outcome
-       FROM leitner_review_steps
-      WHERE session_id = $1
-      ORDER BY step_index`,
-    [sessionId]
+/** The session of this user with all its steps, in one round trip. null when there is no such session. */
+async function loadSessionWithSteps(
+  sessionId: string,
+  userId: string
+): Promise<{ session: SessionRow; steps: StepRow[] } | null> {
+  const { rows } = await pool.query(
+    `SELECT s.box_number AS session_box_number, s.total_words, s.total_steps, s.started_at, s.completed_at,
+            st.id, st.step_index, st.leitner_card_id, st.check_lang, st.check_number, st.checks_total,
+            st.start_box, st.start_total_reviews, st.answered_at, st.correct, st.time_ms, st.word_outcome
+       FROM leitner_review_sessions s
+       LEFT JOIN leitner_review_steps st ON st.session_id = s.id
+      WHERE s.id = $1 AND s.user_id = $2
+      ORDER BY st.step_index`,
+    [sessionId, userId]
   );
-  return rows;
+  if (rows.length === 0) return null;
+
+  const first = rows[0];
+  const session: SessionRow = {
+    id: sessionId,
+    box_number: first.session_box_number,
+    total_words: first.total_words,
+    total_steps: first.total_steps,
+    started_at: first.started_at,
+    completed_at: first.completed_at,
+  };
+  const steps: StepRow[] = rows
+    .filter((r: any) => r.id !== null)
+    .map(({ session_box_number, total_words, total_steps, started_at, completed_at, ...step }: any) => step as StepRow);
+  return { session, steps };
 }
 
 /** Steps are answered strictly in order — that is what keeps the two checks of a word apart. */
@@ -219,68 +236,73 @@ export async function startReviewSession(userId: string, limit: number, boxNumbe
   }));
   const sequence = buildReviewSequence(words);
 
-  const client = await pool.connect();
-  let sessionId: string;
-  try {
-    await client.query('BEGIN');
-
-    const { rows } = await client.query(
-      `INSERT INTO leitner_review_sessions (user_id, box_number, total_words, total_steps)
+  // The session row and all its steps in ONE statement. A statement is atomic on its own, so this replaces BEGIN, two INSERTs and
+  // COMMIT (four round trips, on a connection taken out of the pool for the purpose). The new steps come back joined with their
+  // words — exactly the rows getReviewSession() reads — so the session is not read a second time.
+  const { rows } = await pool.query(
+    `WITH s AS (
+       INSERT INTO leitner_review_sessions (user_id, box_number, total_words, total_steps)
        VALUES ($1, $2, $3, $4)
-       RETURNING id`,
-      [userId, boxNumber ?? null, picked.length, sequence.length]
-    );
-    sessionId = rows[0].id;
-
-    await client.query(
-      `INSERT INTO leitner_review_steps
+       RETURNING id, box_number, total_words, total_steps, started_at, completed_at
+     ), st AS (
+       INSERT INTO leitner_review_steps
          (session_id, step_index, leitner_card_id, check_lang, check_number, checks_total,
           start_box, start_total_reviews)
-       SELECT $1::uuid, v.step_index, v.card_id, v.check_lang, v.check_number, v.checks_total,
+       SELECT s.id, v.step_index, v.card_id, v.check_lang, v.check_number, v.checks_total,
               v.start_box, v.start_total_reviews
-         FROM unnest($2::int[], $3::uuid[], $4::text[], $5::int[], $6::int[], $7::int[], $8::int[])
-           AS v(step_index, card_id, check_lang, check_number, checks_total, start_box, start_total_reviews)`,
-      [
-        sessionId,
-        sequence.map((_, i) => i),
-        sequence.map((s) => s.wordId),
-        sequence.map((s) => s.check),
-        sequence.map((s) => s.checkNumber),
-        sequence.map((s) => s.checksTotal),
-        sequence.map((s) => cardById.get(s.wordId)!.box_number),
-        sequence.map((s) => cardById.get(s.wordId)!.total_reviews),
-      ]
-    );
-
-    await client.query('COMMIT');
-  } catch (err) {
-    await client.query('ROLLBACK').catch(() => undefined);
-    throw err;
-  } finally {
-    client.release();
-  }
-
-  return getReviewSession(userId, sessionId);
-}
-
-export async function getReviewSession(userId: string, sessionId: string) {
-  const session = await fetchOwnedSession(pool, sessionId, userId);
-  if (!session) throw sessionNotFound();
-
-  // The entry preview deliberately carries no meaning: the learner has to recall it.
-  const { rows } = await pool.query(
-    `SELECT s.step_index, s.leitner_card_id, s.check_lang, s.check_number, s.checks_total,
-            s.start_box, s.answered_at, s.correct, s.word_outcome,
-            lc.entry_id, de.headword, de.lemma, de.ipa_us, de.ipa_uk,
-            de.audio_us_url, de.audio_uk_url, de.pos, de.cefr_level
-       FROM leitner_review_steps s
-       JOIN leitner_cards lc ON lc.id = s.leitner_card_id
+         FROM s,
+              unnest($5::int[], $6::uuid[], $7::text[], $8::int[], $9::int[], $10::int[], $11::int[])
+                AS v(step_index, card_id, check_lang, check_number, checks_total, start_box, start_total_reviews)
+       RETURNING session_id, step_index, leitner_card_id, check_lang, check_number, checks_total, start_box,
+                 answered_at, correct, word_outcome
+     )
+     SELECT s.id AS session_id, s.box_number AS session_box_number, s.total_words, s.total_steps, s.started_at, s.completed_at,
+            st.step_index, st.leitner_card_id, st.check_lang, st.check_number, st.checks_total, st.start_box,
+            st.answered_at, st.correct, st.word_outcome,
+            ${STEP_ENTRY_COLUMNS}
+       FROM s
+       JOIN st ON st.session_id = s.id
+       JOIN leitner_cards lc ON lc.id = st.leitner_card_id
        JOIN dictionary_entries de ON de.id = lc.entry_id
-      WHERE s.session_id = $1
-      ORDER BY s.step_index`,
-    [sessionId]
+      ORDER BY st.step_index`,
+    [
+      userId,
+      boxNumber ?? null,
+      picked.length,
+      sequence.length,
+      sequence.map((_, i) => i),
+      sequence.map((s) => s.wordId),
+      sequence.map((s) => s.check),
+      sequence.map((s) => s.checkNumber),
+      sequence.map((s) => s.checksTotal),
+      sequence.map((s) => cardById.get(s.wordId)!.box_number),
+      sequence.map((s) => cardById.get(s.wordId)!.total_reviews),
+    ]
   );
 
+  const first = rows[0];
+  return reviewSessionPayload(
+    {
+      id: first.session_id,
+      box_number: first.session_box_number,
+      total_words: first.total_words,
+      total_steps: first.total_steps,
+      started_at: first.started_at,
+      completed_at: first.completed_at,
+    },
+    rows
+  );
+}
+
+/**
+ * The entry columns of a step as the session payload shows them (`lc` = the step's leitner_cards row, `de` = its dictionary entry).
+ * Deliberately no meaning: the learner has to recall it.
+ */
+const STEP_ENTRY_COLUMNS = `lc.entry_id, de.headword, de.lemma, de.ipa_us, de.ipa_uk,
+            de.audio_us_url, de.audio_uk_url, de.pos, de.cefr_level`;
+
+/** The answer of start / get: the session with its ordered steps (rows as read with STEP_ENTRY_COLUMNS). */
+function reviewSessionPayload(session: SessionRow, rows: any[]) {
   const queue: QueueStep[] = rows.map((r: any) => ({
     wordId: r.leitner_card_id,
     check: r.check_lang,
@@ -322,70 +344,114 @@ export async function getReviewSession(userId: string, sessionId: string) {
   };
 }
 
+export async function getReviewSession(userId: string, sessionId: string) {
+  // The session row and its steps are read together (steps of a session that is not the user's are simply not used).
+  const [session, { rows }] = await Promise.all([
+    fetchOwnedSession(sessionId, userId),
+    pool.query(
+      `SELECT s.step_index, s.leitner_card_id, s.check_lang, s.check_number, s.checks_total,
+              s.start_box, s.answered_at, s.correct, s.word_outcome,
+              ${STEP_ENTRY_COLUMNS}
+         FROM leitner_review_steps s
+         JOIN leitner_cards lc ON lc.id = s.leitner_card_id
+         JOIN dictionary_entries de ON de.id = lc.entry_id
+        WHERE s.session_id = $1
+        ORDER BY s.step_index`,
+      [sessionId]
+    ),
+  ]);
+  if (!session) throw sessionNotFound();
+
+  return reviewSessionPayload(session, rows);
+}
+
 // ── answer ───────────────────────────────────────────────────────────────────
 
 function resultOf(outcome: WordOutcome): WordResult {
   return outcome.result ?? (outcome.correct ? 'advance' : 'reset');
 }
 
-async function finalizeWord(
-  db: Queryable,
-  userId: string,
-  target: StepRow,
-  wordSteps: StepRow[]
-): Promise<WordOutcome> {
-  const rightChecks = wordSteps.filter((s) => s.correct === true).length;
-  const result: WordResult =
-    rightChecks === wordSteps.length ? 'advance' : rightChecks === 0 ? 'reset' : 'hold';
-  const correct = result === 'advance';
-  const totalMs = wordSteps.reduce((sum, s) => sum + (s.time_ms ?? 0), 0);
-
-  try {
-    const moved = await moveCard(
-      target.leitner_card_id,
-      userId,
-      result !== 'reset',
-      totalMs > 0 ? totalMs : undefined,
-      { db, expectedTotalReviews: target.start_total_reviews, hold: result === 'hold' }
-    );
-    return {
-      correct,
-      result,
-      applied: true,
-      old_box_number: target.start_box,
-      new_box_number: moved.newBoxNumber,
-      next_due_at: moved.nextDueAt,
-      mastered_now: moved.masteredNow,
-    };
-  } catch (err: any) {
-    // 409: the card was reviewed elsewhere since the session started (another session,
-    // a practice run…) → don't move the same card twice.
-    if (err.statusCode === 409 || err.statusCode === 404) {
-      return {
-        correct,
-        result,
-        applied: false,
-        old_box_number: target.start_box,
-        new_box_number: null,
-        next_due_at: null,
-        mastered_now: false,
-      };
-    }
-    throw err;
-  }
-}
+/**
+ * Writes one answer: the step AND, when it was the last open check of its word, the move of the word's card — in ONE statement, so the
+ * answer costs one round trip where it used to cost BEGIN, a locked read of the session, a read of the steps, the move, the update
+ * of the step and COMMIT.
+ *
+ * What the old transaction guaranteed, and what keeps it true here:
+ *   - answers of one session are applied one at a time, and a session being completed waits for the answer in flight (and the
+ *     answer finds a completed session): `sess` takes the row lock of the session, held until the statement commits;
+ *   - a step is answered once: `claim` locks the step and only matches while it is still unanswered. When a second request for
+ *     the same step waits for the first one, PostgreSQL re-checks that condition on the committed row, finds it false and the
+ *     whole chain below it (card lock, move, update) has no rows. Nothing is written, `claimed` is 0;
+ *   - steps are answered in order, and a word is finished by its last check: both are decided by the caller from the steps it read
+ *     before the write. An answered step never changes again, so those facts cannot go stale, and the only step that can change under
+ *     it — the one being answered — is the one claimed;
+ *   - the card moves at most once per word: moveCardCtes() locks it and refuses ($8) when its total_reviews moved since the session
+ *     started (reviewed elsewhere → `applied: false`, the step is still recorded).
+ * $10 switches the card move on (the answer finishes its word); only then is `word_outcome` filled in, with the shape (and the ISO
+ * date) that JSON.stringify(WordOutcome) used to produce.
+ */
+const ANSWER_STEP_SQL = `
+  WITH sess AS (
+    SELECT id FROM leitner_review_sessions
+     WHERE id = $1::uuid AND user_id = $2::uuid AND completed_at IS NULL
+       FOR UPDATE
+  ), claim AS (
+    SELECT st.id FROM leitner_review_steps st
+     WHERE st.id = $3::uuid AND st.session_id = $1::uuid AND st.answered_at IS NULL
+       AND EXISTS (SELECT 1 FROM sess)
+       FOR UPDATE OF st
+  ), ${moveCardCtes({
+    card: '$4::uuid',
+    user: '$2::uuid',
+    correct: '$5::bool',
+    timeMs: '$6::int',
+    hold: '$7::bool',
+    expectedTotalReviews: '$8::int',
+    intervals: '$9::float8[]',
+    gate: '$10::bool AND EXISTS (SELECT 1 FROM claim)',
+  })}, stp AS (
+    UPDATE leitner_review_steps st
+       SET answered_at  = NOW(),
+           correct      = $11::bool,
+           user_answer  = $12::text,
+           time_ms      = $13::int,
+           grading      = $14::jsonb,
+           word_outcome = CASE WHEN $10::bool THEN jsonb_build_object(
+                            'correct',        $15::bool,
+                            'result',         $16::text,
+                            'applied',        EXISTS (SELECT 1 FROM upd),
+                            'old_box_number', $17::int,
+                            'new_box_number', (SELECT new_box FROM upd),
+                            'next_due_at',    (SELECT to_char(due_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') FROM upd),
+                            'mastered_now',   COALESCE((SELECT new_box = 5 AND old_box < 5 FROM upd), FALSE)
+                          ) END
+      FROM claim
+     WHERE st.id = claim.id
+ RETURNING st.word_outcome
+  )
+  SELECT (SELECT COUNT(*) FROM sess)::int  AS session_rows,
+         (SELECT COUNT(*) FROM claim)::int AS claimed,
+         (SELECT word_outcome FROM stp)    AS word_outcome`;
 
 export async function answerReviewStep(userId: string, input: AnswerStepInput) {
   const { sessionId, stepIndex, userAnswer, correct, timeMs } = input;
 
-  const session = await fetchOwnedSession(pool, sessionId, userId);
-  if (!session) throw sessionNotFound();
+  // One round trip asks everything the answer needs first: the session with its steps; for a typed answer the card of the step with
+  // what the grader compares it with (found through the step index — the card id is only known once the steps are read); and the
+  // box intervals (cached in the process). What turns out not to be needed, like that card when the step cannot be answered, is dropped.
+  const [loaded, card, intervals] = await Promise.all([
+    loadSessionWithSteps(sessionId, userId),
+    userAnswer !== undefined ? loadLeitnerCardForStepGrading(sessionId, stepIndex, userId) : Promise.resolve(null),
+    getIntervals(),
+  ]);
+  if (!loaded) throw sessionNotFound();
+  const { session, steps } = loaded;
   if (session.completed_at) throw sessionCompleted();
 
   // Cheap checks first, so a bad request never costs an OpenAI call.
-  const step = assertAnswerable(await loadSteps(pool, sessionId), stepIndex);
+  const target = assertAnswerable(steps, stepIndex);
 
-  if (userAnswer === undefined && step.checks_total === 2) {
+  if (userAnswer === undefined && target.checks_total === 2) {
     throw new LeitnerSessionError(
       400,
       'TYPED_ANSWER_REQUIRED',
@@ -393,90 +459,88 @@ export async function answerReviewStep(userId: string, input: AnswerStepInput) {
     );
   }
 
-  // Grade outside the transaction — it may call OpenAI.
+  // Grade before the write: the write holds row locks, and grading may call OpenAI.
   let grading: PracticeAnswerGradeResult | null = null;
   let stepCorrect: boolean;
   if (userAnswer !== undefined) {
-    try {
-      grading =
-        step.check_lang === 'en'
-          ? await gradeLeitnerEnglishAnswer(step.leitner_card_id, userId, userAnswer)
-          : await gradeLeitnerAnswer(step.leitner_card_id, userId, userAnswer);
-    } catch (err: any) {
-      if (err.statusCode === 404) {
-        throw new LeitnerSessionError(404, 'CARD_NOT_FOUND', 'Leitner card không tồn tại');
-      }
-      throw err;
-    }
+    if (!card) throw new LeitnerSessionError(404, 'CARD_NOT_FOUND', 'Leitner card không tồn tại');
+    grading =
+      target.check_lang === 'en'
+        ? await gradeLoadedLeitnerEnglishCard(card, userAnswer)
+        : await gradeLoadedLeitnerCard(card, userAnswer);
     stepCorrect = grading.correct;
   } else {
     stepCorrect = correct!;
   }
 
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-
-    // Locking the session row applies the answers of one session one at a time.
-    const locked = await fetchOwnedSession(client, sessionId, userId, true);
-    if (!locked) throw sessionNotFound();
-    if (locked.completed_at) throw sessionCompleted();
-
-    const steps = await loadSteps(client, sessionId);
-    const target = assertAnswerable(steps, stepIndex);
-
-    target.answered_at = new Date();
-    target.correct = stepCorrect;
-    target.time_ms = timeMs ?? null;
-
-    const wordSteps = steps.filter((s) => s.leitner_card_id === target.leitner_card_id);
-    const outcome = wordSteps.every((s) => s.answered_at)
-      ? await finalizeWord(client, userId, target, wordSteps)
-      : null;
-    target.word_outcome = outcome;
-
-    await client.query(
-      `UPDATE leitner_review_steps
-          SET answered_at = NOW(), correct = $2, user_answer = $3, time_ms = $4,
-              grading = $5, word_outcome = $6
-        WHERE id = $1`,
-      [
-        target.id,
-        stepCorrect,
-        userAnswer ?? null,
-        timeMs ?? null,
-        grading ? JSON.stringify(grading) : null,
-        outcome ? JSON.stringify(outcome) : null,
-      ]
-    );
-
-    await client.query('COMMIT');
-
-    return {
-      step_index: stepIndex,
-      check: target.check_lang,
-      grading: toGradingPayload(grading, stepCorrect),
-      word: {
-        leitner_card_id: target.leitner_card_id,
-        checks_total: target.checks_total,
-        checks_done: wordSteps.filter((s) => s.answered_at).length,
-        checks_correct: wordSteps.filter((s) => s.correct).length,
-        resolved: outcome !== null,
-        correct: outcome ? outcome.correct : null,
-        result: outcome ? resultOf(outcome) : null,
-        applied: outcome ? outcome.applied : null,
-        new_box_number: outcome ? outcome.new_box_number : null,
-        next_due_at: outcome ? outcome.next_due_at : null,
-        mastered_now: outcome ? outcome.mastered_now : false,
-      },
-      progress: computeProgress(steps, locked.total_words),
-    };
-  } catch (err) {
-    await client.query('ROLLBACK').catch(() => undefined);
-    throw err;
-  } finally {
-    client.release();
+  // The word is finished when this was its last open check. Its box then moves once, by the checks it had:
+  //   every check right → up ("advance"), none right → back to box 1 ("reset"), otherwise it stays ("hold").
+  const wordSteps = steps.filter((s) => s.leitner_card_id === target.leitner_card_id);
+  const finishesWord = wordSteps.every((s) => s === target || s.answered_at);
+  let result: WordResult | null = null;
+  let totalMs = 0;
+  if (finishesWord) {
+    const rightChecks = wordSteps.filter((s) => (s === target ? stepCorrect : s.correct === true)).length;
+    result = rightChecks === wordSteps.length ? 'advance' : rightChecks === 0 ? 'reset' : 'hold';
+    totalMs = wordSteps.reduce((sum, s) => sum + ((s === target ? timeMs : s.time_ms) ?? 0), 0);
   }
+
+  const {
+    rows: [written],
+  } = await pool.query(ANSWER_STEP_SQL, [
+    sessionId, //                                                 $1
+    userId, //                                                    $2
+    target.id, //                                                 $3
+    target.leitner_card_id, //                                    $4
+    result !== null && result !== 'reset', //                     $5  the word's box goes up or stays
+    totalMs > 0 ? totalMs : null, //                              $6
+    result === 'hold', //                                         $7
+    target.start_total_reviews ?? null, //                        $8  null: a session from before migration 32 has no guard
+    intervals, //                                                 $9
+    finishesWord, //                                              $10
+    stepCorrect, //                                               $11
+    userAnswer ?? null, //                                        $12
+    timeMs ?? null, //                                            $13
+    grading ? JSON.stringify(grading) : null, //                  $14
+    result === 'advance', //                                      $15
+    result, //                                                    $16
+    target.start_box, //                                          $17
+  ]);
+
+  if (written.claimed === 0) {
+    // Nothing was written: since the first read the session was completed (or removed), or another request answered this step.
+    if (written.session_rows === 0) {
+      const existing = await fetchOwnedSession(sessionId, userId);
+      throw existing ? sessionCompleted() : sessionNotFound();
+    }
+    throw new LeitnerSessionError(409, 'STEP_ALREADY_ANSWERED', 'Bước này đã được trả lời');
+  }
+
+  const outcome: WordOutcome | null = written.word_outcome ?? null;
+  target.answered_at = new Date();
+  target.correct = stepCorrect;
+  target.time_ms = timeMs ?? null;
+  target.word_outcome = outcome;
+
+  return {
+    step_index: stepIndex,
+    check: target.check_lang,
+    grading: toGradingPayload(grading, stepCorrect),
+    word: {
+      leitner_card_id: target.leitner_card_id,
+      checks_total: target.checks_total,
+      checks_done: wordSteps.filter((s) => s.answered_at).length,
+      checks_correct: wordSteps.filter((s) => s.correct).length,
+      resolved: outcome !== null,
+      correct: outcome ? outcome.correct : null,
+      result: outcome ? resultOf(outcome) : null,
+      applied: outcome ? outcome.applied : null,
+      new_box_number: outcome ? outcome.new_box_number : null,
+      next_due_at: outcome ? outcome.next_due_at : null,
+      mastered_now: outcome ? outcome.mastered_now : false,
+    },
+    progress: computeProgress(steps, session.total_words),
+  };
 }
 
 // ── complete ─────────────────────────────────────────────────────────────────
@@ -492,7 +556,7 @@ export async function completeReviewSession(userId: string, sessionId: string) {
     [sessionId, userId]
   );
   if (claimed.length === 0) {
-    const existing = await fetchOwnedSession(pool, sessionId, userId);
+    const existing = await fetchOwnedSession(sessionId, userId);
     throw existing ? sessionCompleted() : sessionNotFound();
   }
   const session = claimed[0];

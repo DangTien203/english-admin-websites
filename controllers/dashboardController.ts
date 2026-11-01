@@ -5,23 +5,23 @@ import Admin from '../models/Admin';
 const dashboardController = {
   async getDashboard(req: Request, res: Response) {
     try {
-      // Thống kê nhanh
-      const [usersCount, adminsCount, entriesCount, lessonsCount] = await Promise.all([
-        pool.query('SELECT COUNT(*)::int as count FROM users'),
-        pool.query('SELECT COUNT(*)::int as count FROM admin_accounts'),
-        pool.query('SELECT COUNT(*)::int as count FROM dictionary_entries'),
-        pool.query('SELECT COUNT(*)::int as count FROM lessons'),
+      // Thống kê nhanh — the four totals are one statement, read together with the admin list (it was four queries, then the list).
+      const [{ rows: totals }, admins] = await Promise.all([
+        pool.query(
+          `SELECT (SELECT COUNT(*)::int FROM users)              AS users,
+                  (SELECT COUNT(*)::int FROM admin_accounts)     AS admins,
+                  (SELECT COUNT(*)::int FROM dictionary_entries) AS entries,
+                  (SELECT COUNT(*)::int FROM lessons)            AS lessons`
+        ),
+        Admin.getAll(),
       ]);
 
       const stats = {
-        users: usersCount.rows[0].count,
-        admins: adminsCount.rows[0].count,
-        entries: entriesCount.rows[0].count,
-        lessons: lessonsCount.rows[0].count,
+        users: totals[0].users,
+        admins: totals[0].admins,
+        entries: totals[0].entries,
+        lessons: totals[0].lessons,
       };
-
-      // Admin list
-      const admins = await Admin.getAll();
 
       res.render('dashboard', {
         title: 'Dashboard',

@@ -1,4 +1,5 @@
 import pool from '../config/db';
+import { invalidatePendingCounts } from '../utils/pendingCounts';
 
 const Approval = {
   async create({ requesterId, action, module, targetType = null, targetId = null, payload }: { requesterId: string; action: string; module: string; targetType?: string | null; targetId?: string | null; payload: any }) {
@@ -9,6 +10,7 @@ const Approval = {
        RETURNING *`,
       [requesterId, action, module, targetType, targetId, JSON.stringify(payload)]
     );
+    invalidatePendingCounts(); // the sidebar badge of the super admins
     return rows[0];
   },
 
@@ -54,6 +56,7 @@ const Approval = {
        RETURNING *`,
       [id, reviewerId, reviewerNote]
     );
+    invalidatePendingCounts();
     return rows[0] || null;
   },
 
@@ -65,6 +68,7 @@ const Approval = {
        RETURNING *`,
       [id, reviewerId, reviewerNote]
     );
+    invalidatePendingCounts();
     return rows[0] || null;
   },
 

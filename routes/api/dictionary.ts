@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import rateLimit, { Options } from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator, Options } from 'express-rate-limit';
 import { z } from 'zod';
 import pool from '../../config/db';
 import {
@@ -13,6 +13,7 @@ import { parsePagination } from '../../utils/pagination';
 import { validateBody } from '../../middlewares/validateBody';
 import { generateAudio } from '../../services/ttsService';
 import { FULL_ENTRY_SQL } from '../../utils/entryQueries';
+import { TtlCache } from '../../utils/ttlCache';
 
 const router = Router();
 
@@ -67,8 +68,12 @@ router.get(
     }
     params.push(limit, offset);
 
+    // COUNT(*) OVER () is the number of matching entries before LIMIT/OFFSET: the page and the total come from ONE scan and one round
+    // trip (they were two statements scanning the same rows, side by side). A page with no rows has no total to read: that is either
+    // "nothing matches" (offset 0) or a page past the end, which the separate count below settles.
     const dataQuery = `
-      SELECT id, headword, lemma, ipa_us, pos, meaning_vi, cefr_level, frequency_rank
+      SELECT id, headword, lemma, ipa_us, pos, meaning_vi, cefr_level, frequency_rank,
+             COUNT(*) OVER ()::int AS total_count
       FROM dictionary_entries
       WHERE published = TRUE
         AND (headword ILIKE '%' || $1 || '%' OR lemma ILIKE '%' || $1 || '%')
@@ -94,10 +99,11 @@ router.get(
     `;
     const countParams = params.slice(0, params.length - 2);
 
-    const [data, count] = await Promise.all([
-      pool.query(dataQuery, params),
-      pool.query(countQuery, countParams),
-    ]);
+    const data = await pool.query(dataQuery, params);
+    let total: number = data.rows[0]?.total_count ?? 0;
+    if (data.rows.length === 0 && offset > 0) {
+      total = (await pool.query(countQuery, countParams)).rows[0].count;
+    }
 
     logSlow('search', t0, 100);
 
@@ -114,7 +120,7 @@ router.get(
         frequency_rank: r.frequency_rank,
       })),
       meta: {
-        total: count.rows[0].count,
+        total,
         page,
         limit,
       },
@@ -172,16 +178,23 @@ router.get(
 // ─────────────────────────────────────────────────────────────────────────────
 //  GET /api/v1/dictionary/categories  — list tags + entry count
 // ─────────────────────────────────────────────────────────────────────────────
+// Every client that opens the category screen reads the same list; five minutes of staleness is nothing next to the max-age=3600
+// the response already carries.
+const categoriesCache = new TtlCache<unknown[]>({ ttlMs: 5 * 60 * 1000, max: 1 });
+
 router.get(
   '/categories',
   asyncHandler(async (_req: Request, res: Response) => {
-    const { rows } = await pool.query(
-      `SELECT t.id AS tag_id, t.name, COUNT(et.entry_id)::int AS entry_count
-       FROM tags t
-       LEFT JOIN entry_tags et ON et.tag_id = t.id
-       GROUP BY t.id, t.name
-       ORDER BY t.name ASC`
-    );
+    const rows = await categoriesCache.getOrLoad('all', async () => {
+      const { rows } = await pool.query(
+        `SELECT t.id AS tag_id, t.name, COUNT(et.entry_id)::int AS entry_count
+         FROM tags t
+         LEFT JOIN entry_tags et ON et.tag_id = t.id
+         GROUP BY t.id, t.name
+         ORDER BY t.name ASC`
+      );
+      return rows;
+    });
     res.set('Cache-Control', 'public, max-age=3600');
     return apiSuccess(res, rows);
   })
@@ -319,7 +332,8 @@ const ttsLimiter = rateLimit({
   limit: 30,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req: Request) => (req as ApiRequest).user?.id ?? req.ip ?? 'anon',
+  // Signed-in users are limited per account; the address fallback goes through ipKeyGenerator (IPv6 clients share a /56).
+  keyGenerator: (req: Request) => (req as ApiRequest).user?.id ?? (req.ip ? ipKeyGenerator(req.ip) : 'anon'),
   handler: (_req: Request, res: Response, _next: NextFunction, options: Options) => {
     apiError(
       res,
