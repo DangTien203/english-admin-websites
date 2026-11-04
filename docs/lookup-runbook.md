@@ -148,6 +148,8 @@ Chỉ một worker dùng **đúng schema pg-boss mà job được gửi vào** (
 | `npm run seed:lookup-test -- --staging` | dữ liệu thử cho nghiệm thu (mục 12) |
 | `npm run acceptance:lookup -- --staging` | nghiệm thu 30 từ, ghi `docs/lookup-acceptance-report.md` (mục 12) |
 | `npx tsx scripts/dev/cleanup-auto-entries.ts` | **chạy thử**: liệt kê các mục từ `[auto]` (đúng tiêu chí màn `/lookup/review`), số hàng sẽ xóa ở từng bảng liên quan, số mục đang published, mục bị bỏ qua vì còn bài học / từ đồng nghĩa của mục khác / từ đã lưu… trỏ tới. Chỉ thêm `--confirm` mới xóa (một giao dịch, in số hàng đã xóa); không bao giờ đụng mục không phải `[auto]`. Chi tiết: `docs/lookup-admin-notes.md` mục 12 |
+| `npx tsx scripts/dev/audit-definitions.ts [--sample N] [--list <tệp>]` | **chỉ đọc** (chạy trong `BEGIN READ ONLY`): kiểm toán độ phủ định nghĩa của cả từ điển (mục 14). Mã thoát 0 = mọi mục từ đủ, 1 = còn thiếu |
+| `npx tsx scripts/dev/fill-definitions.ts [--confirm]` | **chạy thử là mặc định** (làm trọn việc trong một giao dịch rồi ROLLBACK, nên bảng in ra đúng là cái `--confirm` sẽ lưu): điền `meaning_en` còn trống và thêm sense cho loại từ chưa có định nghĩa (mục 14). Chỉ điền chỗ trống, chạy lại không đổi gì, không gọi API, không tốn token |
 | `npm run enrich:seed-oxford -- --file <tệp> [--sample N] [--limit N] [--confirm]` | nạp từ Oxford 5000 chưa có qua đường ống làm giàu; chạy thử là mặc định (mục 13.3) |
 | `npm run enrich:publish -- [--cefr A1,A2] [--limit 500] [--confirm]` | xuất bản mục từ `[auto]` đủ điều kiện bằng dòng lệnh; chạy thử là mặc định (mục 13.7) |
 | `npm run oxford:apply-cefr -- --file <tệp> [--dry-run]` | đặt `cefr_level` của mục từ `[auto]` theo mức thấp nhất của Oxford (mục 13.6); **áp dụng ngay nếu không có `--dry-run`** |
@@ -527,3 +529,47 @@ Dùng đúng tiêu chí của nút xuất bản hàng loạt ở `/lookup/review
 * Từ `invalid_output` được giải thích bằng `issues` / `first_issues` (mã validator và đường dẫn trường, không có nội dung bản nháp) trong dòng log `enrich` của worker; `--report --worker-log` tổng hợp theo luật và theo loại từ. Worker cũ (trước P10) không ghi trường này.
 * Ước tính chi phí giả định 7.859 token system prompt được đọc từ cache và dùng bảng giá nhập tay; hàng sổ chỉ lưu token của lần chạy cuối của mỗi job. Số tiền đúng là hóa đơn của Anthropic.
 * Mỗi từ gửi qua enqueuer thật mất khoảng 0,6 giây với DB ở xa (50 từ trong 29 giây); một lệnh 1000 từ cỡ 10 phút.
+
+## 14. Kiểm toán và bổ sung định nghĩa (4/11/2026)
+
+Mục tiêu: mọi mục từ có định nghĩa tiếng Anh VÀ tiếng Việt. Một mục từ chỉ **đủ** khi:
+
+1. `meaning_en` và `meaning_vi` của mục từ không rỗng;
+2. có ít nhất một dòng `entry_senses`, và **mọi** sense có cả `definition_en` lẫn `definition_vi`;
+3. mọi loại từ trong `pos[]` có ít nhất một sense (không thì loại từ đó không có định nghĩa nào, cả Anh lẫn Việt).
+
+```bash
+npx tsx scripts/dev/audit-definitions.ts            # chỉ đọc; mã thoát 1 nếu còn thiếu
+npx tsx scripts/dev/fill-definitions.ts             # chạy thử: làm trọn việc rồi ROLLBACK
+npx tsx scripts/dev/fill-definitions.ts --confirm   # lưu đúng những gì bản chạy thử đã in
+```
+
+`audit-definitions.ts` còn cờ các giá trị có nhưng đáng ngờ, kiểm trên từng sense: tiếng Việt trùng tiếng Anh, văn xuôi tiếng Anh nằm trong ô tiếng Việt, chữ riêng của tiếng Việt nằm trong ô tiếng Anh, chữ giữ chỗ (`-`, `N/A`, `TODO`). Chữ `é`, `è`, `ê`… không bị tính là tiếng Việt vì từ mượn như `café` dùng chúng.
+
+**Lần kiểm toán 4/11/2026** (DB dev duy nhất, 4.754 mục từ, tất cả `published`): 3.914 mục `[auto]` đều đủ. Thiếu ở các mục từ cũ (nguồn `wiktionary`, không có `admin_note`, 840 mục):
+
+| Thiếu | Số lượng | Cách xử lý |
+|---|---|---|
+| `meaning_en` trống | 840 | điền từ `definition_en` của sense mang nghĩa tiếng Việt chủ đạo (nghĩa đầu của `meaning_vi`), ưu tiên loại từ đầu của `pos[]` rồi `sense_order` thấp nhất; không sense nào mang nghĩa đó (29 mục) thì lấy sense đầu của loại từ đầu. Đây là luật của đường ống (spec mục 10.6: `meaning_en` = `definition_en` của sense đầu; 3.914/3.914 mục `[auto]` khớp), chỉnh cho mục từ cũ nơi `sense_order` đánh lại từ 0 ở mỗi loại từ |
+| loại từ trong `pos[]` không có sense | 33 cặp (mục từ, loại từ) ở 32 mục từ, `all right` đến `club` | thêm 36 sense: định nghĩa Anh, định nghĩa Việt và một ví dụ mỗi sense, `grammar_note` theo kiểu các sense cũ; ví dụ mang `source = 'ai_enrichment'` |
+
+Những chỗ kiểm không thấy vấn đề: định nghĩa trống hoặc chỉ có khoảng trắng ở bất kỳ sense nào, tiếng Việt trùng tiếng Anh, tiếng Anh nằm trong ô tiếng Việt (và ngược lại), thành ngữ và cụm động từ thiếu định nghĩa (0 trên 610 và 403 dòng).
+
+Mọi thay đổi để lại `entry_edit_history` với `admin_id` NULL: `field_name = 'meaning_en'` (`old_value` NULL) và `'sense_added'` (`new_value` là JSON gồm loại từ, `sense_order`, hai định nghĩa). 36 sense và ví dụ mới do AI soạn tay, **chưa qua người duyệt**: nên đọc lại (lọc `field_name = 'sense_added'`).
+
+Hoàn tác (đã diễn tập trong một giao dịch rồi ROLLBACK; xóa sense kéo theo ví dụ của nó nhờ `ON DELETE CASCADE`):
+
+```sql
+BEGIN;
+WITH h AS MATERIALIZED (
+  SELECT entry_id, new_value::json AS j FROM entry_edit_history WHERE field_name = 'sense_added' AND admin_id IS NULL)
+DELETE FROM entry_senses s USING h
+ WHERE s.entry_id = h.entry_id AND s.pos = h.j->>'pos' AND s.sense_order = (h.j->>'sense_order')::int
+   AND s.definition_en = h.j->>'definition_en';
+UPDATE dictionary_entries e SET meaning_en = NULL
+  FROM entry_edit_history h
+ WHERE h.field_name = 'meaning_en' AND h.admin_id IS NULL AND h.old_value IS NULL AND h.entry_id = e.id AND e.meaning_en = h.new_value;
+COMMIT;
+```
+
+**Chặn khoảng trống mới.** Từ 4/11/2026 cả ba đường nhập tay đều bắt buộc `meaning_en` cùng với `meaning_vi`: trình tạo (`/dictionary/create`), trình sửa (`/dictionary/:id/edit`, kể cả khi đi từ nút "Sửa" của `/lookup/review`) và `/dictionary/import`. Chuỗi toàn khoảng trắng không tính là có nghĩa. Ở `/dictionary/import`, dòng thiếu được liệt kê kèm tên trường thiếu (`Thiếu trường bắt buộc: meaning_en · {...}`) và các dòng còn lại vẫn được nhập; một tệp cũ không có `meaning_en` sẽ bị từ chối từng dòng, nên thêm trường đó vào tệp. Ràng buộc nằm ở tầng ứng dụng (`controllers/dictionaryController.ts`, `DictionaryEntry.importFromJson`), **không** phải ràng buộc cơ sở dữ liệu: SQL trực tiếp và các script vẫn ghi được `meaning_en` trống, còn đường ống làm giàu gán nó bằng định nghĩa của sense đầu và bộ kiểm tra đầu ra (`services/enrichment/haiku/validators.ts`) không cho qua sense có `definition_en` trống. Nên chạy lại `audit-definitions.ts` sau các đợt nhập lớn.

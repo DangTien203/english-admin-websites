@@ -55,7 +55,7 @@ const api = (p: Player) => ({
 });
 
 const cardRow = async (id: string) =>
-  (await pool.query('SELECT box_number, due_at, total_reviews, correct_streak FROM leitner_cards WHERE id = $1', [id])).rows[0];
+  (await pool.query('SELECT box_number, due_at, last_reviewed_at, total_reviews, correct_streak FROM leitner_cards WHERE id = $1', [id])).rows[0];
 
 const wordIds = (steps: any[]): string[] => [...new Set<string>(steps.map((s) => s.leitner_card_id))];
 
@@ -220,7 +220,7 @@ describe('box 4/5 words: both meanings, counted once', () => {
     expect(Math.abs((await days(advance1)) - intervals[4])).toBeLessThan(0.01);
     for (const id of [holdEn, holdVi]) {
       expect((await cardRow(id)).box_number).toBe(4);
-      expect(Math.abs((await days(id)) - intervals[3])).toBeLessThan(0.01); // rescheduled with box 4's interval
+      expect(Math.abs((await days(id)) - 1)).toBeLessThan(0.01); // a held box 4 word is due again in 1 day, not after box 4's interval
     }
     expect((await cardRow(holdEn)).total_reviews).toBe(1);
     expect((await cardRow(reset)).box_number).toBe(1);
@@ -252,6 +252,60 @@ describe('box 4/5 words: both meanings, counted once', () => {
     const again = (await api(p).get(`/session/${start.session_id}`)).body.data;
     expect(again).toMatchObject({ completed: true, total_words: 5, total_steps: 10 });
     expect(again.progress.resolved_words).toBe(5);
+  });
+
+  it('a held word comes back sooner than a passed one: 1 day in box 4, 2 days in box 5, counted from its last answer', async () => {
+    const p = await newPlayer();
+    const intervals = await getIntervals();
+    const [hold4, hold5, pass4, pass5] = await addCards(p, [
+      [0, 4, -10],
+      [1, 5, -20],
+      [2, 4, -30],
+      [3, 5, -40],
+    ]);
+    // [English answer, Vietnamese answer] per card; '' is a deliberate "don't know"
+    const answers = new Map<string, [string, string]>([
+      [hold4, [EN_OK, '']], // only English right
+      [hold5, ['', VI_OK]], // only Vietnamese right
+      [pass4, [EN_OK, VI_OK]],
+      [pass5, [EN_OK, VI_OK]],
+    ]);
+
+    const start = (await api(p).post('/session/start', { limit: 10 })).body.data; // "review due now": boxes 4 and 5 together
+    expect(start).toMatchObject({ total_words: 4, total_steps: 8 });
+    const served = new Map<string, string>(); // the next_due_at the API gave when the word was resolved
+    for (const step of start.steps) {
+      const [en, vi] = answers.get(step.leitner_card_id)!;
+      const res = await api(p).post('/session/answer', {
+        session_id: start.session_id,
+        step_index: step.step_index,
+        user_answer: step.check === 'en' ? en : vi,
+      });
+      expect(res.status).toBe(200);
+      if (res.body.data.word.resolved) served.set(step.leitner_card_id, res.body.data.word.next_due_at);
+    }
+
+    // the gap between the answer (last_reviewed_at) and the due date, to the millisecond
+    const gapMs = async (id: string) => {
+      const row = await cardRow(id);
+      return row.due_at.getTime() - row.last_reviewed_at.getTime();
+    };
+    expect(await cardRow(hold4)).toMatchObject({ box_number: 4, total_reviews: 1 });
+    expect(await gapMs(hold4)).toBe(DAY); //     24 h
+    expect(await cardRow(hold5)).toMatchObject({ box_number: 5, total_reviews: 1 });
+    expect(await gapMs(hold5)).toBe(2 * DAY); // 48 h
+    // a pass is not shortened: box 4 → 5 and box 5 → 5 wait for box 5's interval
+    expect((await cardRow(pass4)).box_number).toBe(5);
+    expect(await gapMs(pass4)).toBe(intervals[4] * DAY);
+    expect(await gapMs(pass5)).toBe(intervals[4] * DAY);
+
+    // the date the API served is the date stored, and the summary repeats it
+    const done = (await api(p).post('/session/complete', { session_id: start.session_id })).body.data;
+    for (const id of [hold4, hold5, pass4, pass5]) {
+      expect(Math.abs(Date.parse(served.get(id)!) - (await cardRow(id)).due_at.getTime())).toBeLessThanOrEqual(1);
+      expect(done.words.find((w: any) => w.leitner_card_id === id).next_due_at).toBe(served.get(id));
+    }
+    expect(done.words.find((w: any) => w.leitner_card_id === hold5)).toMatchObject({ status: 'partial', result: 'hold', old_box_number: 5, new_box_number: 5 });
   });
 
   it('does not accept the Vietnamese meaning as the answer to the English check', async () => {

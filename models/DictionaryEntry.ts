@@ -7,6 +7,9 @@ const isTicked = (value: unknown): boolean => value === true || value === 'true'
 /** Rows per statement of the JSON import. */
 const IMPORT_BATCH = 200;
 
+/** A definition counts only when it is a string with something other than spaces in it ("   " and 5 are not definitions). */
+const hasText = (value: unknown): boolean => typeof value === 'string' && value.trim() !== '';
+
 /** $1 = a JSON array of ready rows, $2 = the admin. A row that already exists (same headword + lemma) is skipped. */
 const INSERT_MANY_SQL = `
   INSERT INTO dictionary_entries
@@ -266,8 +269,15 @@ const DictionaryEntry = {
 
     const valid: Array<{ at: number; item: any }> = [];
     jsonArray.forEach((item, at) => {
-      if (!item.headword || !item.lemma || !item.meaning_vi) {
-        errors.push({ at, message: `Thiếu trường bắt buộc: ${JSON.stringify(item)}` });
+      // Both definitions are required: every entry carries one in each language (docs/lookup-runbook.md §14). The message names
+      // what is missing, because a file that used to import without meaning_en now fails on every row.
+      const missing: string[] = [];
+      if (!item.headword) missing.push('headword');
+      if (!item.lemma) missing.push('lemma');
+      if (!hasText(item.meaning_vi)) missing.push('meaning_vi');
+      if (!hasText(item.meaning_en)) missing.push('meaning_en');
+      if (missing.length > 0) {
+        errors.push({ at, message: `Thiếu trường bắt buộc: ${missing.join(', ')} · ${JSON.stringify(item)}` });
       } else {
         valid.push({ at, item });
       }

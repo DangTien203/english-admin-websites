@@ -126,8 +126,8 @@ describe('DictionaryEntry', () => {
 
   it('imports a clean file in batches, skips rows that already exist, and reads the numbers like the old loop did', async () => {
     const rows = [
-      { headword: ` ${fixtureWord('imp1').toUpperCase()} `, lemma: fixtureWord('imp1'), meaning_vi: 'một', pos: ['noun', 'verb'], frequency_rank: '120', cefr_level: 'A2' },
-      { headword: fixtureWord('imp2'), lemma: fixtureWord('imp2'), meaning_vi: 'hai' },
+      { headword: ` ${fixtureWord('imp1').toUpperCase()} `, lemma: fixtureWord('imp1'), meaning_vi: 'một', meaning_en: 'one', pos: ['noun', 'verb'], frequency_rank: '120', cefr_level: 'A2' },
+      { headword: fixtureWord('imp2'), lemma: fixtureWord('imp2'), meaning_vi: 'hai', meaning_en: 'two' },
     ];
     expect(await DictionaryEntry.importFromJson(rows, adminId)).toEqual({ inserted: 2, skipped: 0, errors: [] });
     expect(await DictionaryEntry.importFromJson(rows, adminId)).toEqual({ inserted: 0, skipped: 2, errors: [] }); // same headword + lemma
@@ -141,11 +141,11 @@ describe('DictionaryEntry', () => {
 
   it('a row the database refuses is reported with its own message, in file order, and the good rows around it still go in', async () => {
     const file = [
-      { headword: fixtureWord('mix1'), lemma: fixtureWord('mix1'), meaning_vi: 'a' },
-      { headword: fixtureWord('mixmissing'), lemma: fixtureWord('mixmissing') }, // no meaning_vi
-      { headword: fixtureWord('mix1'), lemma: fixtureWord('mix1'), meaning_vi: 'a again' }, // repeats the first row
-      { headword: fixtureWord('mixbad'), lemma: fixtureWord('mixbad'), meaning_vi: 'b', cefr_level: 'Z9' }, // CHECK constraint
-      { headword: fixtureWord('mix2'), lemma: fixtureWord('mix2'), meaning_vi: 'c' },
+      { headword: fixtureWord('mix1'), lemma: fixtureWord('mix1'), meaning_vi: 'a', meaning_en: 'the letter a' },
+      { headword: fixtureWord('mixmissing'), lemma: fixtureWord('mixmissing') }, // no meaning_vi, no meaning_en
+      { headword: fixtureWord('mix1'), lemma: fixtureWord('mix1'), meaning_vi: 'a again', meaning_en: 'the letter a again' }, // repeats the first row
+      { headword: fixtureWord('mixbad'), lemma: fixtureWord('mixbad'), meaning_vi: 'b', meaning_en: 'the letter b', cefr_level: 'Z9' }, // CHECK constraint
+      { headword: fixtureWord('mix2'), lemma: fixtureWord('mix2'), meaning_vi: 'c', meaning_en: 'the letter c' },
     ];
     const r = await DictionaryEntry.importFromJson(file, adminId);
     expect(r.inserted).toBe(2);
@@ -154,6 +154,27 @@ describe('DictionaryEntry', () => {
     expect(r.errors[0]).toMatch(/^Thiếu trường bắt buộc: /);
     expect(r.errors[1]).toContain(`${fixtureWord('mixbad')}/${fixtureWord('mixbad')}:`);
     expect((await headwords(fixtureWord('mix'))).map((h) => h.headword)).toEqual([fixtureWord('mix1'), fixtureWord('mix2')]);
+  });
+
+  it('requires a definition in BOTH languages: a row without text for either is reported with the missing field named, and not imported', async () => {
+    const file = [
+      { headword: fixtureWord('reqok'), lemma: fixtureWord('reqok'), meaning_vi: 'một', meaning_en: 'one' },
+      { headword: fixtureWord('reqnone'), lemma: fixtureWord('reqnone'), meaning_vi: 'hai' }, // meaning_en missing
+      { headword: fixtureWord('reqempty'), lemma: fixtureWord('reqempty'), meaning_vi: 'ba', meaning_en: '' },
+      { headword: fixtureWord('reqspaces'), lemma: fixtureWord('reqspaces'), meaning_vi: 'bốn', meaning_en: '   ' },
+      { headword: fixtureWord('reqnumber'), lemma: fixtureWord('reqnumber'), meaning_vi: 'năm', meaning_en: 5 }, // not text
+      { headword: fixtureWord('reqvispaces'), lemma: fixtureWord('reqvispaces'), meaning_vi: '   ', meaning_en: 'six' }, // meaning_vi is held to the same rule
+      { lemma: fixtureWord('reqnohead'), meaning_en: 'seven' }, // several fields missing at once
+    ];
+    const r = await DictionaryEntry.importFromJson(file, adminId);
+    expect(r.inserted).toBe(1);
+    expect(r.skipped).toBe(0);
+    expect(r.errors).toHaveLength(6);
+    expect(r.errors.slice(0, 4).every((m) => m.startsWith('Thiếu trường bắt buộc: meaning_en · '))).toBe(true);
+    expect(r.errors[4]).toMatch(/^Thiếu trường bắt buộc: meaning_vi · /);
+    expect(r.errors[5]).toMatch(/^Thiếu trường bắt buộc: headword, meaning_vi · /);
+    expect((await headwords(fixtureWord('req'))).map((h) => h.headword)).toEqual([fixtureWord('reqok')]);
+    expect((await pool.query('SELECT meaning_en FROM dictionary_entries WHERE headword = $1', [fixtureWord('reqok')])).rows[0].meaning_en).toBe('one');
   });
 
   it('stats gives both totals of the list page in one statement', async () => {

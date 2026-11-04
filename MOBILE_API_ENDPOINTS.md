@@ -532,7 +532,7 @@ If a session has fewer than 3 words and contains a box 4/5 word, the gap cannot 
 - Steps must be answered **in order** (`step_index` = `progress.next_step_index`).
 - Behavior: a word's Leitner box moves **once**, when its last step is answered (`word.result`):
   - `advance`: every check right (box 4/5: English **and** Vietnamese) -> up one box (box 5 stays 5).
-  - `hold`: box 4/5 word with **exactly one** of its two meanings right (either one) -> stays in its current box; the due date is rescheduled with that box's interval.
+  - `hold`: box 4/5 word with **exactly one** of its two meanings right (either one) -> stays in its current box and comes back sooner than after a pass: `next_due_at` = **1 day (24 h) after the answer in box 4, 2 days (48 h) in box 5** (not the box's own interval).
   - `reset`: no check right (box 4/5: both wrong; box 1-3: the single check wrong) -> back to box 1.
   If the card was already reviewed elsewhere in the meantime, its box is left alone (`word.applied: false`).
 - Returns: `{ step_index, check, grading, word: { checks_total, checks_done, checks_correct, resolved, correct, result, applied, new_box_number, next_due_at, mastered_now }, progress: { answered_steps, total_steps, resolved_words, total_words, next_step_index } }`

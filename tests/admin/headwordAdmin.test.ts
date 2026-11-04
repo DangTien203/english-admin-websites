@@ -39,7 +39,7 @@ describe('the entry form (POST /dictionary/create) and the pages around it', () 
     const res = await admins.super_admin.agent
       .post('/dictionary/create')
       .type('form')
-      .send({ headword: typed, lemma: typed, meaning_vi: 'nghĩa thử', source: 'manual', pos: ['noun'] });
+      .send({ headword: typed, lemma: typed, meaning_vi: 'nghĩa thử', meaning_en: 'a test definition', source: 'manual', pos: ['noun'] });
     const row = await rowOf(stored);
     expect(row).toBeDefined();
     expect([res.status, res.headers.location]).toEqual([302, `/dictionary/${row.id}`]);
@@ -62,13 +62,13 @@ describe('the entry form (POST /dictionary/create) and the pages around it', () 
     const created = await admins.super_admin.agent
       .post('/dictionary/create')
       .type('form')
-      .send({ headword: stored, lemma: stored, meaning_vi: 'nghĩa thử', source: 'manual', pos: ['noun'] });
+      .send({ headword: stored, lemma: stored, meaning_vi: 'nghĩa thử', meaning_en: 'a test definition', source: 'manual', pos: ['noun'] });
     expect(created.status).toBe(302);
     const row = await rowOf(stored);
     const res = await admins.content_editor.agent
       .post(`/dictionary/${row.id}/edit`)
       .type('form')
-      .send({ headword: stored, lemma: stored, meaning_vi: 'nghĩa đã sửa', source: 'manual', pos: ['noun'] });
+      .send({ headword: stored, lemma: stored, meaning_vi: 'nghĩa đã sửa', meaning_en: 'an edited definition', source: 'manual', pos: ['noun'] });
     expect([res.status, res.headers.location]).toEqual([302, `/dictionary/${row.id}`]);
     expect((await rowOf(stored)).headword).toBe(stored);
   });

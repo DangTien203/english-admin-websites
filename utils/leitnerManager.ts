@@ -177,6 +177,17 @@ export interface Queryable {
   query(text: string, values?: any[]): Promise<{ rows: any[] }>;
 }
 
+/**
+ * Days until a HELD card is due again, by box. A hold is a box 4/5 word with exactly one of its two meanings right: it keeps its box
+ * but is not learned yet, so it must not wait as long as a word that passed both checks (that is the box's own interval). Box 4 →
+ * 1 day (24 h), box 5 → 2 days (48 h), counted from the moment the answer is recorded. A box that is not listed keeps its own
+ * interval. Fixed on purpose: `leitner_intervals_days` is the schedule of passes.
+ */
+const HOLD_INTERVAL_DAYS: Readonly<Record<number, number>> = { 4: 1, 5: 2 };
+
+/** HOLD_INTERVAL_DAYS as a SQL array by box 1…5 (NULL = the box has none). Built from the constant above, never from input. */
+const HOLD_INTERVAL_DAYS_SQL = `(ARRAY[${[1, 2, 3, 4, 5].map((box) => HOLD_INTERVAL_DAYS[box] ?? 'NULL').join(', ')}]::float8[])`;
+
 export interface MoveCardOptions {
   /** Run inside the caller's transaction instead of the shared pool. */
   db?: Queryable;
@@ -188,8 +199,8 @@ export interface MoveCardOptions {
   /**
    * Only with `correct = true`: the answer was good enough not to lose the box but not
    * good enough to leave it (box 4/5 word with exactly one of its two meanings right).
-   * The card stays in its box, the due date is rescheduled with that box's interval and
-   * the correct streak is left untouched.
+   * The card stays in its box and comes back sooner than after a pass (HOLD_INTERVAL_DAYS:
+   * 1 day in box 4, 2 days in box 5, from now); the correct streak is left untouched.
    */
   hold?: boolean;
 }
@@ -215,7 +226,7 @@ export interface MoveCardPlaceholders {
  * final SELECT; the review-session answer puts them in the same statement as the update of its step, so the two cannot disagree.
  *   cur   the card, locked
  *   calc  its new box — only when the caller's expected total_reviews still matches (else no row, and no change)
- *   upd   the card moved; due date = now + the interval of the new box
+ *   upd   the card moved; due date = now + the interval of the new box — for a hold, the shorter HOLD_INTERVAL_DAYS of that box
  *   rev   the leitner_reviews line
  * "No such card" is told from "the card changed since the caller looked" by cur (has the card or not) and upd (moved or not).
  */
@@ -234,7 +245,8 @@ export function moveCardCtes(p: MoveCardPlaceholders): string {
      ), upd AS (
        UPDATE leitner_cards lc
           SET box_number       = calc.new_box,
-              due_at           = NOW() + make_interval(secs => (${p.intervals})[calc.new_box] * 86400),
+              due_at           = NOW() + make_interval(secs => COALESCE(CASE WHEN ${p.hold} THEN ${HOLD_INTERVAL_DAYS_SQL}[calc.new_box] END,
+                                                                        (${p.intervals})[calc.new_box]) * 86400),
               last_reviewed_at = now(),
               correct_streak   = CASE WHEN ${p.hold} THEN lc.correct_streak
                                       WHEN ${p.correct} THEN lc.correct_streak + 1

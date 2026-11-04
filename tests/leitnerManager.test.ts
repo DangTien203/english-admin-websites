@@ -81,14 +81,40 @@ describe('moveCard', () => {
     expect(await moveCard(id, userId, true)).toMatchObject({ newBoxNumber: 5, masteredNow: false });
   });
 
-  it('hold keeps the box, reschedules by the box\'s interval and leaves the streak alone', async () => {
+  it('hold keeps the box, leaves the streak alone and brings a box 4 card back after 1 day', async () => {
     const userId = await newUser();
     const id = await newCard(userId, 0, 4);
     const r = await moveCard(id, userId, true, undefined, { hold: true });
     expect(r).toMatchObject({ newBoxNumber: 4, masteredNow: false });
-    expect(Math.abs(r.nextDueAt.getTime() - (Date.now() + intervals[3] * DAY_MS))).toBeLessThan(10_000);
-    expect(await card(id)).toMatchObject({ box_number: 4, correct_streak: 2, total_reviews: 1 });
+    expect(Math.abs(r.nextDueAt.getTime() - (Date.now() + DAY_MS))).toBeLessThan(10_000);
+    const row = await card(id);
+    expect(row).toMatchObject({ box_number: 4, correct_streak: 2, total_reviews: 1 });
+    expect(row.due_at.getTime() - row.last_reviewed_at.getTime()).toBe(DAY_MS); // exactly 24 h after the answer was recorded
     expect(await reviews(id)).toEqual([{ correct: true, old_box: 4, new_box: 4, time_ms: null }]);
+  });
+
+  it('hold brings a box 5 card back after 2 days (48 h from the answer), and it stays in box 5', async () => {
+    const userId = await newUser();
+    const id = await newCard(userId, 0, 5);
+    const r = await moveCard(id, userId, true, undefined, { hold: true });
+    expect(r).toMatchObject({ newBoxNumber: 5, masteredNow: false });
+    expect(Math.abs(r.nextDueAt.getTime() - (Date.now() + 2 * DAY_MS))).toBeLessThan(10_000);
+    const row = await card(id);
+    expect(row).toMatchObject({ box_number: 5, correct_streak: 2, total_reviews: 1 });
+    expect(row.due_at.getTime() - row.last_reviewed_at.getTime()).toBe(2 * DAY_MS);
+    expect(await reviews(id)).toEqual([{ correct: true, old_box: 5, new_box: 5, time_ms: null }]);
+  });
+
+  it('only a hold is shortened: a full pass in box 4 or 5 keeps the box\'s own interval, and a box without a hold interval keeps it too', async () => {
+    const userId = await newUser();
+    const box4 = await newCard(userId, 0, 4);
+    const box5 = await newCard(userId, 1, 5);
+    const box2 = await newCard(userId, 2, 2);
+    const near = (due: Date, days: number) => Math.abs(due.getTime() - (Date.now() + days * DAY_MS)) < 10_000;
+
+    expect(near((await moveCard(box4, userId, true)).nextDueAt, intervals[4])).toBe(true); // 4 → 5: the interval of box 5
+    expect(near((await moveCard(box5, userId, true)).nextDueAt, intervals[4])).toBe(true); // 5 → 5: the same
+    expect(near((await moveCard(box2, userId, true, undefined, { hold: true })).nextDueAt, intervals[1])).toBe(true); // no hold interval for box 2
   });
 
   it('404 for a card that does not exist and for somebody else\'s card; nothing is written', async () => {

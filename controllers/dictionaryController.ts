@@ -78,12 +78,14 @@ const dictionaryController = {
   // POST /dictionary/create
   async postCreate(req: Request, res: Response) {
     try {
-      const { headword, lemma, meaning_vi } = req.body;
+      const { headword, lemma, meaning_vi, meaning_en } = req.body;
       const errors: string[] = [];
 
       if (!headword || !headword.trim()) errors.push('Headword is required');
       if (!lemma || !lemma.trim()) errors.push('Lemma is required');
       if (!meaning_vi || !meaning_vi.trim()) errors.push('Vietnamese meaning is required');
+      // Every entry carries a definition in BOTH languages (docs/lookup-runbook.md §14), so the English one is required too.
+      if (!meaning_en || !meaning_en.trim()) errors.push('English meaning is required');
 
       if (errors.length > 0) {
         req.flash('error', errors.join('. '));
@@ -217,12 +219,14 @@ const dictionaryController = {
   async postEdit(req: Request, res: Response) {
     try {
       const { id } = req.params as { id: string };
-      const { headword, lemma, meaning_vi } = req.body;
+      const { headword, lemma, meaning_vi, meaning_en } = req.body;
       const errors: string[] = [];
 
       if (!headword || !headword.trim()) errors.push('Headword không được để trống');
       if (!lemma || !lemma.trim()) errors.push('Lemma không được để trống');
       if (!meaning_vi || !meaning_vi.trim()) errors.push('Nghĩa tiếng Việt không được để trống');
+      // Same rule as the create form: a definition in both languages (docs/lookup-runbook.md §14).
+      if (!meaning_en || !meaning_en.trim()) errors.push('Nghĩa tiếng Anh không được để trống');
 
       if (errors.length > 0) {
         req.flash('error', errors.join('. '));

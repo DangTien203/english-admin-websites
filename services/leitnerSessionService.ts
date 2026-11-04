@@ -24,7 +24,7 @@ import {
  * Steps must be answered in order. A word's Leitner box moves exactly once, when
  * its last step is answered:
  *   every check right          → up one box ("advance")
- *   box 4/5, exactly one right → stays in its box ("hold")
+ *   box 4/5, exactly one right → stays in its box ("hold"), due again in 1 day (box 4) / 2 days (box 5), not after the box's interval
  *   no check right             → back to box 1 ("reset")
  * Summaries count words, never steps.
  */

@@ -73,8 +73,8 @@
             <textarea name="meaning_vi" rows="3" required><%= entry.meaning_vi %></textarea>
           </div>
           <div class="form-group" style="margin:0">
-            <label>English Meaning</label>
-            <textarea name="meaning_en" rows="2"><%= entry.meaning_en || '' %></textarea>
+            <label>English Meaning <span style="color:var(--danger)">*</span></label>
+            <textarea name="meaning_en" rows="2" required><%= entry.meaning_en || '' %></textarea>
           </div>
         </div>
       </div>

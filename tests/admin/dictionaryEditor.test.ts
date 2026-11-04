@@ -28,7 +28,7 @@ const history = async (id: string) =>
 
 /** What the form posts: every field of the page; `published` only when the box is ticked. */
 function form(id: string, tag: string, extra: Record<string, unknown> = {}) {
-  return { headword: fixtureWord(tag), lemma: fixtureWord(tag), meaning_vi: 'nghĩa đã sửa', source: 'wiktionary', admin_note: '[auto] ghi chú', pos: ['noun'], ...extra };
+  return { headword: fixtureWord(tag), lemma: fixtureWord(tag), meaning_vi: 'nghĩa đã sửa', meaning_en: 'a definition in English', source: 'wiktionary', admin_note: '[auto] ghi chú', pos: ['noun'], ...extra };
 }
 
 describe('saving the editor', () => {
@@ -150,7 +150,7 @@ describe('a moderator saving the editor (the old route to the "Published" box)',
 // ── P9: the "Published" box of the form that CREATES an entry ────────────────────────────────────────────────────────────────
 describe('creating an entry', () => {
   const create = (role: Role, tag: string, extra: Record<string, unknown> = {}) =>
-    admins[role].agent.post('/dictionary/create').type('form').send({ headword: fixtureWord(tag), lemma: fixtureWord(tag), meaning_vi: 'nghĩa thử', source: 'manual', pos: ['noun'], ...extra });
+    admins[role].agent.post('/dictionary/create').type('form').send({ headword: fixtureWord(tag), lemma: fixtureWord(tag), meaning_vi: 'nghĩa thử', meaning_en: 'a test definition', source: 'manual', pos: ['noun'], ...extra });
   const created = async (tag: string) => (await pool.query(`SELECT id, published FROM dictionary_entries WHERE headword = $1`, [fixtureWord(tag)])).rows[0];
 
   it('with the box ticked the entry is public', async () => {
@@ -201,7 +201,7 @@ describe('a moderator creating an entry (POST /dictionary/create follows the sam
   });
 
   const create = (role: Role, tag: string, extra: Record<string, unknown> = {}) =>
-    admins[role].agent.post('/dictionary/create').type('form').send({ headword: fixtureWord(tag), lemma: fixtureWord(tag), meaning_vi: 'nghĩa thử', source: 'manual', pos: ['noun'], ...extra });
+    admins[role].agent.post('/dictionary/create').type('form').send({ headword: fixtureWord(tag), lemma: fixtureWord(tag), meaning_vi: 'nghĩa thử', meaning_en: 'a test definition', source: 'manual', pos: ['noun'], ...extra });
   const created = async (tag: string) => (await pool.query(`SELECT id, published, created_by, meaning_vi FROM dictionary_entries WHERE headword = $1`, [fixtureWord(tag)])).rows[0];
 
   it.each([
@@ -281,5 +281,92 @@ describe('parts of speech', () => {
     const id = await createEntry({ tag: 'edposkeep', pos: ['noun', 'exclamation'] });
     await admins.content_editor.agent.post(`/dictionary/${id}/edit`).type('form').send(form(id, 'edposkeep', { pos: ['noun', 'exclamation'] }));
     expect((await entryRow(id)).pos).toEqual(['noun', 'exclamation']);
+  });
+});
+
+// ── every entry carries a definition in BOTH languages: the English meaning is required, like the Vietnamese one ─────────────
+// (docs/lookup-runbook.md §14). The three ways in are the create form, the editor and the JSON import.
+describe('the English meaning is required, like the Vietnamese one', () => {
+  // no meaning_en here on purpose: each test says what it sends
+  const create = (role: Role, tag: string, extra: Record<string, unknown> = {}) =>
+    admins[role].agent.post('/dictionary/create').type('form').send({ headword: fixtureWord(tag), lemma: fixtureWord(tag), meaning_vi: 'nghĩa thử', source: 'manual', pos: ['noun'], ...extra });
+  const stored = async (tag: string) => (await pool.query(`SELECT id, meaning_en FROM dictionary_entries WHERE headword = $1`, [fixtureWord(tag)])).rows[0];
+
+  it.each([
+    ['absent', {}],
+    ['empty', { meaning_en: '' }],
+    ['only spaces', { meaning_en: '   ' }],
+  ])('the create form refuses it when it is %s, creates nothing and says why', async (label, extra) => {
+    const tag = `crnoen${label.replace(/[^a-z]/g, '')}`;
+    const res = await create('super_admin', tag, extra);
+    expect([res.status, res.headers.location]).toEqual([302, '/dictionary/create']);
+    expect(await stored(tag)).toBeUndefined();
+    expect((await admins.super_admin.agent.get('/dictionary/create')).text).toContain('English meaning is required');
+  });
+
+  it('the create form saves it when it is given', async () => {
+    const res = await create('super_admin', 'crwithen', { meaning_en: 'a test definition' });
+    const row = await stored('crwithen');
+    expect([res.status, res.headers.location]).toEqual([302, `/dictionary/${row.id}`]);
+    expect(row.meaning_en).toBe('a test definition');
+  });
+
+  it('a moderator is held to it as well', async () => {
+    const res = await create('moderator', 'crmodnoen');
+    expect([res.status, res.headers.location]).toEqual([302, '/dictionary/create']);
+    expect(await stored('crmodnoen')).toBeUndefined();
+  });
+
+  it.each([
+    ['absent', undefined],
+    ['empty', ''],
+    ['only spaces', '   '],
+  ])('the editor refuses it when it is %s, changes nothing and says why', async (label, value) => {
+    const tag = `ednoen${label.replace(/[^a-z]/g, '')}`;
+    const id = await createEntry({ tag });
+    const body: Record<string, unknown> = form(id, tag, { meaning_vi: 'nghĩa mới không được lưu' });
+    if (value === undefined) delete body.meaning_en;
+    else body.meaning_en = value;
+    // content_editor: the role that reaches the editor from the review page
+    const res = await admins.content_editor.agent.post(`/dictionary/${id}/edit`).type('form').send(body);
+    expect([res.status, res.headers.location]).toEqual([302, `/dictionary/${id}/edit`]);
+    const row = (await pool.query(`SELECT meaning_en, meaning_vi FROM dictionary_entries WHERE id = $1`, [id])).rows[0];
+    expect(row).toEqual({ meaning_en: 'a thing', meaning_vi: 'cái dùng để thử; vật mẫu' }); // the values createEntry wrote
+    expect((await admins.content_editor.agent.get(`/dictionary/${id}/edit`)).text).toContain('Nghĩa tiếng Anh không được để trống');
+  });
+
+  it('the editor saves a new English meaning', async () => {
+    const id = await createEntry({ tag: 'edwithen' });
+    const res = await admins.content_editor.agent.post(`/dictionary/${id}/edit`).type('form').send(form(id, 'edwithen', { meaning_en: 'an updated definition' }));
+    expect([res.status, res.headers.location]).toEqual([302, `/dictionary/${id}`]);
+    expect((await pool.query(`SELECT meaning_en FROM dictionary_entries WHERE id = $1`, [id])).rows[0].meaning_en).toBe('an updated definition');
+  });
+
+  it('both forms mark the field as required, and the editor is drawn with the stored text in it', async () => {
+    const id = await createEntry({ tag: 'enpage' });
+    const createPage = await admins.super_admin.agent.get('/dictionary/create');
+    expect(createPage.text).toMatch(/<textarea name="meaning_en"[^>]*\brequired\b/);
+    const editPage = await admins.content_editor.agent.get(`/dictionary/${id}/edit`);
+    expect(editPage.text).toMatch(/<textarea name="meaning_en"[^>]*\brequired\b[^>]*>a thing</);
+  });
+
+  it('the JSON import reports each row without it, names the field, and imports the rest', async () => {
+    const rows = [
+      { headword: fixtureWord('enimpok'), lemma: fixtureWord('enimpok'), meaning_vi: 'một', meaning_en: 'one' },
+      { headword: fixtureWord('enimpnone'), lemma: fixtureWord('enimpnone'), meaning_vi: 'hai' },
+      { headword: fixtureWord('enimpblank'), lemma: fixtureWord('enimpblank'), meaning_vi: 'ba', meaning_en: '   ' },
+    ];
+    const res = await admins.super_admin.agent
+      .post('/dictionary/import')
+      .attach('jsonFile', Buffer.from(JSON.stringify(rows)), { filename: 'words.json', contentType: 'application/json' });
+    expect(res.status).toBe(200);
+    expect(res.text.match(/Thiếu trường bắt buộc: meaning_en/g)).toHaveLength(2);
+    const got = (await pool.query(`SELECT headword, meaning_en FROM dictionary_entries WHERE headword LIKE $1 ORDER BY headword`, [`${fixtureWord('enimp')}%`])).rows;
+    expect(got).toEqual([{ headword: fixtureWord('enimpok'), meaning_en: 'one' }]);
+  });
+
+  it('the import page lists meaning_en among the required fields', async () => {
+    const page = await admins.super_admin.agent.get('/dictionary/import');
+    expect(page.text).toMatch(/"meaning_en": "to move fast",\s*<span[^>]*>\*<\/span>/);
   });
 });
