@@ -102,6 +102,12 @@ export interface VietnameseAnswerGradeResult {
   cost_usd: number;
 }
 
+// reason_vi is shown to the person who just answered, so it talks to them directly ("Bạn đang bị nhầm…"), not about them
+// ("Người học đang bị nhầm…"). Shared by both built-in grader prompts; an admin-edited template in prompt_templates replaces them.
+const REASON_VI_ADDRESS_RULE =
+  '- Write reason_vi directly to the person who answered, in the second person, calling them "bạn" ' +
+  '(e.g. "Bạn đang bị nhầm giữa A và B."). Never refer to them as "người học", "người dùng" or "học viên".';
+
 const DEFAULT_VI_ANSWER_GRADER_PROMPT = `
 You are a strict but fair grader for English-to-Vietnamese flashcard answers.
 
@@ -118,6 +124,7 @@ Rules:
 - Do not accept antonyms.
 - Do not accept example sentences unless the answer phrase itself is clearly correct.
 - Keep reason_vi short and user-friendly.
+${REASON_VI_ADDRESS_RULE}
 `.trim();
 
 const DEFAULT_EN_MEANING_GRADER_PROMPT = `
@@ -141,6 +148,7 @@ Rules:
 - Repeating the headword itself (or a trivial inflection of it) is wrong.
 - Do not accept antonyms.
 - Keep reason_vi short, user-friendly, and written in Vietnamese.
+${REASON_VI_ADDRESS_RULE}
 `.trim();
 
 // ── moderateInput ─────────────────────────────────────────────────────────────
