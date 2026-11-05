@@ -10,6 +10,10 @@ import { LIMITS, type Draft, type Sense } from './schema';
  * repair request can quote them, plus a CLEANED copy of the draft (trimmed text, lowercase synonyms, unknown topics
  * dropped, over-long lists cut). What cannot be repaired by cleaning is an `issue`; what was cleaned or dropped is
  * written to notes_for_review as "[kiểm tra] …" so an editor can see it.
+ *
+ * Cleaned, never failed (the model lists most common first, so the first ones are kept): more than LIMITS.senses senses,
+ * more than LIMITS.meaningsPerSense meanings in a sense, and a meaning that only differs from an earlier one by a leading
+ * classifier or determiner. Everything else in §9.7 stays an `issue`.
  */
 
 export interface ValidationIssue {
@@ -160,7 +164,14 @@ export function validateDraft(input: Draft, ctx: ValidationContext): ValidationR
 
   // ── senses ──
   const wordForms = new Set([lowerWord, lemma].filter(Boolean));
-  const senses: Sense[] = input.senses.map((sense, i) => {
+  // The model lists senses most common first (system prompt). A highly polysemous word (out, right, give) can still come back
+  // with more than LIMITS.senses: keep the first ones and say so, instead of failing the whole draft.
+  let inputSenses = input.senses;
+  if (isReal && inputSenses.length > LIMITS.senses) {
+    note(`Haiku viết ${inputSenses.length} sense, chỉ giữ ${LIMITS.senses} sense đầu tiên (đã xếp theo mức phổ biến)`);
+    inputSenses = inputSenses.slice(0, LIMITS.senses);
+  }
+  const senses: Sense[] = inputSenses.map((sense, i) => {
     const at = `senses[${i}]`;
     if (!isReal) return sense;
 
@@ -175,26 +186,52 @@ export function validateDraft(input: Draft, ctx: ValidationContext): ValidationR
     }
 
     // meanings_vi — the quality centre of the draft
-    const meanings = sense.meanings_vi.map(tidyMeaning);
+    const tidied = sense.meanings_vi.map(tidyMeaning);
+
+    // Two cleanings that never fail the draft (indexes below are the model's own, so a later issue path matches the JSON it sent):
+    // 1. "con mèo" next to "mèo" differ only by a classifier: one meaning, not two. The earlier one (the more common) stays and
+    //    the later one is dropped, so at least one meaning always survives. Vietnamese pronouns (`you`: bạn / các bạn) collide this way.
+    //    An exact repeat is NOT cleaned: it stays and the loop below reports it as `duplicate`.
+    const coreKey = new Map<string, string>(); // stripped meaning → the normalized meaning that first had it
+    const surviving: number[] = [];
+    tidied.forEach((m, j) => {
+      if (m) {
+        const key = normalizeMeaning(m);
+        const core = stripClassifier(key);
+        const first = coreKey.get(core);
+        if (first === undefined) coreKey.set(core, key);
+        else if (first !== key) {
+          note(`${at}.meanings_vi[${j}] "${m}" chỉ khác "${first}" ở loại từ hoặc hạn định từ đứng đầu, đã bỏ`);
+          return;
+        }
+      }
+      surviving.push(j);
+    });
+    // 2. More than LIMITS.meaningsPerSense: keep the first ones (most common first, system prompt). Cut AFTER step 1, so a dropped
+    //    duplicate does not use up a place.
+    if (surviving.length > LIMITS.meaningsPerSense) {
+      note(`${at}.meanings_vi: Haiku viết ${surviving.length} nghĩa, chỉ giữ ${LIMITS.meaningsPerSense} nghĩa đầu tiên`);
+      surviving.length = LIMITS.meaningsPerSense;
+    }
+
     const seen = new Map<string, number>();
-    const seenCore = new Map<string, number>();
-    meanings.forEach((m, j) => {
+    const meanings: string[] = [];
+    for (const j of surviving) {
+      const m = tidied[j];
+      meanings.push(m);
       const p = `${at}.meanings_vi[${j}]`;
-      if (!m) return issue(p, 'empty', 'meaning is empty');
+      if (!m) {
+        issue(p, 'empty', 'meaning is empty');
+        continue;
+      }
       if (m.length > MEANING_MAX_CHARS) issue(p, 'too_long', `"${m}" has ${m.length} characters, the limit is ${MEANING_MAX_CHARS}`);
       if (countWords(m) > MEANING_MAX_SYLLABLES) issue(p, 'too_many_syllables', `"${m}" has ${countWords(m)} syllables, the limit is ${MEANING_MAX_SYLLABLES}`);
       if (hasParenthesis(m)) issue(p, 'parenthesis', `"${m}" contains parentheses; put nuance into register, domain, region or usage_note`);
       if (hasCjk(m)) issue(p, 'cjk', `"${m}" contains Chinese, Korean or Japanese characters`);
       const key = normalizeMeaning(m);
       if (seen.has(key)) issue(p, 'duplicate', `"${m}" repeats meanings_vi[${seen.get(key)}]`);
-      else {
-        seen.set(key, j);
-        // "con mèo" and "mèo" differ only by a classifier: one meaning, not two.
-        const core = stripClassifier(key);
-        if (seenCore.has(core)) issue(p, 'classifier_duplicate', `"${m}" is meanings_vi[${seenCore.get(core)}] with a classifier or determiner (${[...CLASSIFIERS, ...DETERMINERS].join(', ')}) added or removed; keep one`);
-        else seenCore.set(core, j);
-      }
-    });
+      else seen.set(key, j);
+    }
     const filled = meanings.filter(Boolean);
     if (filled.length > 0 && filled.every((m) => wordForms.has(normalizeMeaning(m)))) {
       issue(`${at}.meanings_vi`, 'same_as_english', `every meaning equals the English word "${ctx.word}"; a loanword may keep one identical meaning only next to a different one`);

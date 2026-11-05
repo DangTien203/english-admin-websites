@@ -1,6 +1,6 @@
 # WordyGo · Làm giàu từ điển: thu thập nguồn, Claude Haiku, kiểm tra, gộp và ghi database (P6a + P6b)
 
-Cập nhật: 15/10/2026 · Đặc tả gốc: `docs/lookup-spec.md` §8, §8.1, §9, §10, §11, §12 · Hàng đợi và worker: `docs/lookup-queue.md` · Dữ liệu `ref_*`: `docs/lookup-refdata.md`.
+Cập nhật: 15/10/2026 (mục 19: 05/11/2026) · Đặc tả gốc: `docs/lookup-spec.md` §8, §8.1, §9, §10, §11, §12 · Hàng đợi và worker: `docs/lookup-queue.md` · Dữ liệu `ref_*`: `docs/lookup-refdata.md`.
 Mẫu đã chạy thật và đánh giá: `docs/lookup-enrichment-samples.md` (P6a), mục 17 dưới đây (P6b).
 
 **Phạm vi:** đường ống đầy đủ S0 đến S7. Một job đi từ một từ tra cứu đến mục từ hoàn chỉnh trong `dictionary_entries` và các bảng con, trong MỘT transaction, idempotent, theo chính sách xuất bản `ENRICHMENT_PUBLISH_POLICY`.
@@ -103,10 +103,10 @@ Hai bản mô tả cùng một hình dạng: **zod** (`DraftSchema`) và **JSON 
 | `cefr_level` | A1..C2 \| null | null cho từ không lập mục |
 | `is_countable`, `is_transitive` | bool \| null | validator đặt null nếu không có nghĩa danh từ / động từ |
 | `topics` | string[] | tối đa 3 trong 30 tên (zod nhận chuỗi; **validator** bỏ tên lạ) |
-| `senses` | object[] | tối đa 6 (zod) |
+| `senses` | object[] | tối đa 6, nhưng **validator cắt**, không phải zod từ chối: quá 6 thì giữ 6 sense đầu và ghi `[kiểm tra]` (mục 19) |
 | `senses[].pos` | enum | |
 | `senses[].definition_en` | string | tối đa 25 từ (validator) |
-| `senses[].meanings_vi` | string[] | **1 đến 4** (zod; schema JSON `minItems: 1`); mục tiêu 2 đến 4 nằm ở system prompt |
+| `senses[].meanings_vi` | string[] | **ít nhất 1** (zod; schema JSON `minItems: 1`), tối đa 4 do **validator cắt** (giữ 4 nghĩa đầu, sau khi đã bỏ nghĩa chỉ khác loại từ; mục 19); mục tiêu 2 đến 4 nằm ở system prompt |
 | `senses[].register` | 7 giá trị CHECK \| null | |
 | `senses[].domain`, `region`, `grammar_note`, `usage_note` | string \| null | `domain` thường viết thường, cắt 100 ký tự; `region` cắt 30 |
 | `senses[].examples` | `{ example_en, example_vi }[]` | 1 đến 2 |
@@ -179,14 +179,16 @@ Dựa trên dữ liệu thật (`docs/lookup-refdata.md` §5). `ref_wiktionary_e
 | Luật | Mã | Hành động |
 |---|---|---|
 | JSON không parse được | `json` | lỗi → thử lại |
-| Sai schema (khóa lạ, sai enum, quá 6 sense, quá 4 nghĩa, thiếu ví dụ...) | `schema_*` | lỗi → thử lại |
+| Sai schema (khóa lạ, sai enum, thiếu nghĩa, thiếu ví dụ, quá 2 ví dụ...) | `schema_*` | lỗi → thử lại |
+| quá 6 sense trong bản nháp (trước 05/11/2026: `schema_too_big` @ `senses`) | (ghi chú) | **giữ 6 sense đầu**, ghi `[kiểm tra] Haiku viết N sense, chỉ giữ 6 sense đầu tiên…`; không thử lại (mục 19) |
+| quá 4 nghĩa trong một sense (trước 05/11/2026: `schema_too_big` @ `meanings_vi`) | (ghi chú) | **giữ 4 nghĩa đầu**, ghi `[kiểm tra]`; cắt SAU khi bỏ nghĩa trùng loại từ, nên nghĩa bị bỏ không chiếm chỗ (mục 19) |
 | `refusal` | `refusal` | `invalid_output` ngay |
 | `max_tokens` | `max_tokens` | thử lại, yêu cầu gọn hơn |
 | nghĩa rỗng / quá 40 ký tự / quá 6 âm tiết | `empty`, `too_long`, `too_many_syllables` | lỗi |
 | nghĩa có ngoặc đơn (cả toàn chiều rộng) | `parenthesis` | lỗi |
 | chữ Hán, Hàn, Nhật (kể cả trong ví dụ, ghi chú) | `cjk` | lỗi |
 | hai nghĩa trùng nhau sau khi chuẩn hóa hoa/thường và khoảng trắng | `duplicate` | lỗi |
-| hai nghĩa chỉ khác loại từ / hạn định từ đứng đầu (con mèo / mèo; một tập podcast / tập podcast) | `classifier_duplicate` | lỗi |
+| hai nghĩa chỉ khác loại từ / hạn định từ đứng đầu (con mèo / mèo; một tập podcast / tập podcast) (trước 05/11/2026: `classifier_duplicate`, là lỗi) | (ghi chú) | **bỏ nghĩa đứng sau**, giữ nghĩa đứng trước (phổ biến hơn), ghi `[kiểm tra] senses[i].meanings_vi[j] "…" chỉ khác "…" ở loại từ hoặc hạn định từ đứng đầu, đã bỏ`. Luôn còn ít nhất một nghĩa. Mã `classifier_duplicate` không còn được phát ra (mục 19) |
 | mọi nghĩa của sense đều giống hệt từ tiếng Anh | `same_as_english` | lỗi (từ vay mượn như karaoke được một nghĩa trùng nếu có nghĩa khác) |
 | `definition_en` rỗng hoặc quá 25 từ | `empty`, `too_long` | lỗi |
 | `example_vi` rỗng, giống `example_en`, hoặc có chữ Hán/Hàn/Nhật | `empty`, `same_as_english`, `cjk` | lỗi |
@@ -686,3 +688,39 @@ Hai lưu ý, đều là hệ quả của quy tắc được yêu cầu chứ kh�
 ### 18.5 Test
 
 `tests/enrichment/ipaAndRelated.test.ts` (thứ tự IPA, dấu `[ipa-untagged]`, không điền `ipa_uk`, bộ lọc đồng / trái nghĩa), `relatedRanks.test.ts` (tra tần suất khi thu thập nguồn), `backfillIpa.test.ts` (kế hoạch, dry-run không ghi, transaction, lịch sử, lỗi), `backfillIpa.integration.test.ts` (Postgres thật, fixture `qzq<mã>…` tự xóa), `pricing.test.ts` (từng lần gọi, ví dụ `podcast` 2 lần gọi, ngưỡng 100K, bảng giá).
+
+
+---
+
+## 19. Bản vá 05/11/2026: từ nhiều nghĩa (`out`, `you`) không còn `failed / invalid_output`
+
+**Triệu chứng.** `you` và `out` kết thúc MỌI job bằng `failed / invalid_output` (mỗi từ 4 lần trước đó, thêm một lần ngày 05/11/2026). Hàng `failed` không phải job đang chạy, nên mỗi lần bấm từ trong ebook lại xếp một job Haiku mới chắc chắn hỏng (mỗi job tốn hai lần gọi: lần đầu và lần sửa). Log `enrich` của worker:
+
+| Từ | `issues` của lần cuối | Nguyên nhân |
+|---|---|---|
+| `out` | `senses` · `schema_too_big` | Haiku viết hơn 6 sense (trạng từ và giới từ rất nhiều nghĩa). `DraftSchema` có `.max(6)` nên cả bản nháp bị từ chối ở bước zod, trước khi validator chạy |
+| `you` | `senses[0].meanings_vi[1]` · `classifier_duplicate` (lần đầu: `meanings_vi` · `schema_too_big`) | Lần đầu Haiku viết hơn 4 cách dịch đại từ; lần sửa còn "bạn" và "các bạn", mà "các" là hạn định từ nên sau khi bỏ "các" hai nghĩa trùng nhau |
+
+Cả hai là luật chất lượng đúng ý nghĩa nhưng áp sai chỗ: Haiku đã xếp sense và nghĩa theo mức phổ biến (system prompt, mục 5), nên phần đầu danh sách dùng được và phần thừa chỉ cần bỏ. Từ thông dụng càng nhiều nghĩa thì càng chắc chắn thất bại, và lần sửa duy nhất không đủ vì Haiku không tất định.
+
+**Thay đổi** (`services/enrichment/haiku/schema.ts`, `validators.ts`):
+
+1. `DraftSchema` không còn `.max()` cho `senses` (6) và `senses[].meanings_vi` (4). Cận dưới (`meanings_vi` ít nhất 1, `examples` 1 đến 2) và mọi luật `schema_*` khác giữ nguyên. Schema JSON gửi cho API vốn không có `maxItems`, nên không đổi.
+2. `validateDraft` **giữ `LIMITS.senses` sense đầu**; nếu cắt thì ghi `[kiểm tra] Haiku viết N sense, chỉ giữ 6 sense đầu tiên (đã xếp theo mức phổ biến)`. Việc cắt làm TRƯỚC khi kiểm tra từng sense, nên lỗi nằm ở sense bị cắt không làm hỏng bản nháp (nội dung đó không bao giờ được dùng). `pos` của mục từ suy ra từ các sense CÒN LẠI.
+3. Trong mỗi sense, bước làm sạch nghĩa theo thứ tự:
+   1. **Nghĩa chỉ khác nghĩa trước ở một loại từ hoặc hạn định từ đứng đầu** (`con`, `cái`, `chiếc`, `sự`, `việc`, `cuộc`, `nỗi`, `niềm`, `một`, `những`, `các`; so sánh sau khi chuẩn hóa hoa / thường và khoảng trắng): **bỏ nghĩa đứng sau**, giữ nghĩa đứng trước vì Haiku đã xếp phổ biến trước. Ghi `[kiểm tra] senses[i].meanings_vi[j] "…" chỉ khác "…" ở loại từ hoặc hạn định từ đứng đầu, đã bỏ`. Nghĩa đầu tiên luôn được giữ nên không bao giờ hết nghĩa. Mã `classifier_duplicate` không còn được phát ra.
+   2. **Cắt còn `LIMITS.meaningsPerSense` (4) nghĩa đầu**, ghi `[kiểm tra] senses[i].meanings_vi: Haiku viết N nghĩa, chỉ giữ 4 nghĩa đầu tiên`. Cắt SAU bước 1 để nghĩa trùng loại từ không chiếm chỗ.
+   3. Kiểm tra từng nghĩa còn lại như cũ. Đường dẫn trong lỗi dùng **chỉ số trong JSON của Haiku** (không phải sau khi bỏ), để tin nhắn sửa lỗi trỏ đúng chỗ Haiku nhìn thấy trong bản trả lời trước của nó.
+
+**Vẫn nghiêm (spec §9.7 giữ nguyên):** nghĩa rỗng, quá 40 ký tự, quá 6 âm tiết, ngoặc đơn, chữ Hán / Hàn / Nhật, hai nghĩa GIỐNG HỆT nhau (`duplicate`), mọi nghĩa bằng từ tiếng Anh (`same_as_english`), thiếu nghĩa hoặc thiếu ví dụ, quá 2 ví dụ, `lemma`, `cefr_level`, `definition_en`, `example_vi`. Một bản nháp bị cắt nhưng vi phạm một luật trong số này (ở phần được giữ) vẫn được thử lại một lần rồi mới `failed / invalid_output`.
+
+**Hệ quả cần biết:**
+
+* Bản nháp cắt KHÔNG tốn lần sửa: một lần gọi Haiku thay vì hai.
+* Việc cắt theo thứ tự của Haiku có thể làm mất nghĩa một loại từ: `out` với 5 sense trạng từ đứng trước 3 sense giới từ chỉ còn 1 giới từ; nếu Haiku xếp cả 8 sense là trạng từ thì không còn giới từ nào. `pos` suy lại từ sense còn lại nên vẫn nhất quán, nhưng dòng `[kiểm tra]` trong `admin_note` là chỗ người duyệt ở `/lookup/review` thấy việc đó. Đây là đánh đổi chấp nhận để từ không bị bỏ hẳn; nếu muốn chắc có đủ loại từ thì cần đổi thành cắt có cân bằng theo loại từ (chưa làm).
+* "bạn" / "các bạn" chỉ còn "bạn": nghĩa số nhiều không còn là một nghĩa riêng của `you`. Đúng theo luật đã có (hai nghĩa này vốn bị coi là một); ghi chú `[kiểm tra]` cho người duyệt thấy.
+* `meaning_vi` của mục từ (mục 12) và `entry_answer_aliases` chỉ thấy các nghĩa còn lại.
+* Hàng `failed` cũ của `you` và `out` trong `word_enrichment_jobs` được giữ làm lịch sử. Từ chỉ được làm lại khi gửi lại (bấm từ trong ebook hoặc `enrich:enqueue`). Chưa chạy lại hai từ thật (tốn token Anthropic và ghi DB dùng chung): chờ người dùng xác nhận.
+* Chưa đổi: quá 2 ví dụ trong một sense vẫn là `schema_too_big`; chưa thấy từ nào vi phạm nên không cắt.
+
+**Test.** `tests/enrichment/polysemous.test.ts`: hai bản nháp mẫu viết tay theo hình dạng Haiku đã trả (`out` 8 sense, `you` 6 nghĩa có "các bạn"), kiểm tra qua `validateDraft` và qua `generateDraft` với `HaikuCaller` giả (một lần gọi, không sửa, không gọi Anthropic); cắt đúng 6 / 4 và giữ thứ tự; `pos` suy từ sense còn lại; đúng 6 sense thì không ghi chú; lỗi ở sense bị cắt không tính; chỉ số lỗi theo JSON gốc; không bao giờ hết nghĩa; `duplicate`, ngoặc đơn, quá âm tiết, thiếu nghĩa / ví dụ, quá 2 ví dụ vẫn là lỗi; bản nháp bị cắt nhưng sai luật khác vẫn thử lại một lần rồi `invalid_output`. Cập nhật: `schema.test.ts` (7 sense và 5 nghĩa nay qua zod), `validators.test.ts` (hai nghĩa chỉ khác loại từ nay bị bỏ kèm ghi chú, không báo lỗi).

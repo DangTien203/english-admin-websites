@@ -36,9 +36,15 @@ export const REGISTER_VALUES = ['formal', 'informal', 'slang', 'literary', 'tech
 export const CEFR_LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'] as const;
 
 export const LIMITS = {
-  /** senses per entry */
+  /**
+   * senses per entry. NOT a zod rule: the model writes them most common first, so validateDraft() keeps the first 6 and
+   * notes the cut, instead of failing a polysemous word (`out`, `right`, `give`) as a whole (spec §9.7).
+   */
   senses: 6,
-  /** Vietnamese meanings per sense: the hard limit. The TARGET (2 to 4) is in the system prompt. */
+  /**
+   * Vietnamese meanings per sense, most common first. Like `senses`, enforced by validateDraft() (it keeps the first 4),
+   * not by zod. The TARGET (2 to 4) is in the system prompt; the lower bound (1) stays a zod rule.
+   */
   meaningsPerSense: 4,
   examplesPerSense: 2,
   topics: 3,
@@ -66,7 +72,8 @@ export const ExampleSchema = z.strictObject({
 export const SenseSchema = z.strictObject({
   pos: z.enum(POS_VALUES),
   definition_en: text,
-  meanings_vi: z.array(text).min(1).max(LIMITS.meaningsPerSense),
+  // No .max(): more than LIMITS.meaningsPerSense is cut by validateDraft() (kept in step with the JSON Schema, which has no maxItems either).
+  meanings_vi: z.array(text).min(1),
   register: z.enum(REGISTER_VALUES).nullable(),
   domain: nullableText,
   region: nullableText,
@@ -117,7 +124,8 @@ export const DraftSchema = z.strictObject({
   is_transitive: z.boolean().nullable(),
   // Plain strings here: the API enforces the enum, and validators.ts DROPS an unknown name (never replaced by academic_formal).
   topics: z.array(text),
-  senses: z.array(SenseSchema).max(LIMITS.senses),
+  // No .max(): more than LIMITS.senses is cut by validateDraft().
+  senses: z.array(SenseSchema),
   idioms: z.array(IdiomSchema),
   phrasal_verbs: z.array(PhrasalVerbSchema),
   collocations: z.array(CollocationSchema),

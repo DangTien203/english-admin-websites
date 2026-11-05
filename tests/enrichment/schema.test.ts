@@ -121,14 +121,19 @@ describe('DraftSchema (zod)', () => {
     ['a missing key', (() => { const d: any = makeDraft(); delete d.lemma; return d; })()],
     ['a pos outside the enum', makeDraft({ pos: ['interjection' as any] })],
     ['a cefr level outside the enum', makeDraft({ cefr_level: 'D1' as any })],
-    ['more than 6 senses', makeDraft({ senses: Array(7).fill(makeDraft().senses[0]) })],
-    ['more than 4 meanings', makeDraft({ senses: [{ ...makeDraft().senses[0], meanings_vi: ['a', 'b', 'c', 'd', 'e'] }] })],
     ['zero meanings', makeDraft({ senses: [{ ...makeDraft().senses[0], meanings_vi: [] }] })],
     ['zero examples', makeDraft({ senses: [{ ...makeDraft().senses[0], examples: [] }] })],
     ['more than 2 examples', makeDraft({ senses: [{ ...makeDraft().senses[0], examples: Array(3).fill(makeDraft().senses[0].examples[0]) }] })],
     ['a register outside the DB check', makeDraft({ senses: [{ ...makeDraft().senses[0], register: 'vulgar' as any }] })],
   ])('rejects %s', (_label, draft) => {
     expect(DraftSchema.safeParse(draft).success).toBe(false);
+  });
+
+  // The upper bounds of senses (6) and meanings_vi (4) are NOT zod rules: validateDraft() keeps the first ones and notes the cut
+  // (tests/enrichment/validators.test.ts, tests/enrichment/polysemous.test.ts).
+  it('accepts more than 6 senses and more than 4 meanings (cut later by validateDraft, not rejected)', () => {
+    expect(DraftSchema.safeParse(makeDraft({ senses: Array(7).fill(makeDraft().senses[0]) })).success).toBe(true);
+    expect(DraftSchema.safeParse(makeDraft({ senses: [{ ...makeDraft().senses[0], meanings_vi: ['a', 'b', 'c', 'd', 'e'] }] })).success).toBe(true);
   });
 
   it('allows null for the nullable fields', () => {

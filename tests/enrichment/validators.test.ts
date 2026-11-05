@@ -47,8 +47,11 @@ describe('meanings_vi (spec §9.7)', () => {
     ['cuộc họp', 'họp'],
     ['một tập podcast', 'tập podcast'],
     ['các vị khách', 'vị khách'],
-  ])('rejects two meanings that differ only by a classifier: %j and %j', (a, b) => {
-    expect(codes(validateDraft(withSense({ meanings_vi: [a, b] }), ctx()))).toContain('senses[0].meanings_vi[1]:classifier_duplicate');
+  ])('drops the later of two meanings that differ only by a classifier, with a note, not an issue: %j and %j', (a, b) => {
+    const r = validateDraft(withSense({ meanings_vi: [a, b] }), ctx());
+    expect(r.issues).toEqual([]);
+    expect(r.draft.senses[0].meanings_vi).toEqual([a]);
+    expect(r.draft.notes_for_review).toEqual([expect.stringContaining(`senses[0].meanings_vi[1] "${b}"`)]);
   });
 
   it('keeps meanings that merely share a word (not classifier-only differences)', () => {
@@ -266,7 +269,7 @@ describe('idioms, phrasal verbs, collocations (optional extras are dropped, not 
 describe('zodIssuesToValidation', () => {
   it('turns schema errors into issues with readable paths', () => {
     const bad = JSON.parse(JSON.stringify(makeDraft()));
-    bad.senses[0].meanings_vi = ['a', 'b', 'c', 'd', 'e'];
+    bad.senses[0].meanings_vi = [];
     bad.senses[0].register = 'vulgar';
     const parsed = DraftSchema.safeParse(bad);
     expect(parsed.success).toBe(false);
