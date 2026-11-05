@@ -4,6 +4,8 @@ Cập nhật 16/10/2026; bổ sung P9 (xuất bản hàng loạt theo nhóm ghi 
 
 Trong thanh bên trái có mục **Tra từ & làm giàu** (biểu tượng kính lúp) với ba màn hình: **Hàng đợi làm giàu**, **Duyệt mục từ tự tạo**, **Sức khỏe tra từ**. Địa chỉ: `/lookup/jobs`, `/lookup/review`, `/lookup/health`.
 
+> **Từ 05/11/2026: mục "Duyệt mục từ tự tạo" bị ẩn khỏi menu.** Khi `ENRICHMENT_PUBLISH_POLICY=auto`, mục từ do job tạo ra được xuất bản ngay khi đủ tầng A nên không cần ai duyệt. Trang và mọi API của nó **vẫn hoạt động**: gõ thẳng `/lookup/review`, hoặc bấm liên kết mục từ ở trang Hàng đợi / Sức khỏe. Chỉ liên kết ở thanh bên và thanh tab bị ẩn, bằng một công tắc `lk.showReviewNav` trong `utils/lookupAdminView.ts` (đặt `true` để hiện lại; làm cùng lúc với việc đặt lại `ENRICHMENT_PUBLISH_POLICY=review` nếu muốn duyệt thủ công trở lại). Mục từ **thiếu tầng A** vẫn được tạo với `published=false` và chỉ thấy ở trang này (lọc "Chờ duyệt").
+
 ## 1. Ai làm được gì
 
 | | `super_admin` | `content_editor` | `moderator` |

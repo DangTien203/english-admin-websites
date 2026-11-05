@@ -29,10 +29,13 @@
         <span class="nav-icon" style="font-size:13px">⏳</span>
         <span class="nav-label">Hàng đợi làm giàu</span>
       </a>
+      <%# Review page hidden while entries publish themselves (lk.showReviewNav in utils/lookupAdminView.ts); /lookup/review still works by URL %>
+      <% if (typeof lk !== 'undefined' && lk.showReviewNav) { %>
       <a href="/lookup/review" class="nav-item" style="padding-left:40px;font-size:13px">
         <span class="nav-icon" style="font-size:13px">✅</span>
         <span class="nav-label">Duyệt mục từ tự tạo</span>
       </a>
+      <% } %>
       <a href="/lookup/health" class="nav-item" style="padding-left:40px;font-size:13px">
         <span class="nav-icon" style="font-size:13px">🩺</span>
         <span class="nav-label">Sức khỏe tra từ</span>

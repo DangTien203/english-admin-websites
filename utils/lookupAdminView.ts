@@ -105,6 +105,12 @@ const limits = {
 };
 
 export const lk = {
+  /**
+   * Whether the sidebar and the tab bar link to the review page (/lookup/review). false while ENRICHMENT_PUBLISH_POLICY=auto: entries
+   * the job makes go live by themselves, so nobody approves them. The page and its routes still work (type the address, or follow
+   * the "xem mục từ" links of the queue page); set true to show the link again, e.g. after going back to ENRICHMENT_PUBLISH_POLICY=review.
+   */
+  showReviewNav: false,
   /** every code the job can write, for the filter */
   reasonCodes: Object.keys(REASON_LABELS),
   statusLabel: (s: string) => STATUS_LABELS[s] ?? s,

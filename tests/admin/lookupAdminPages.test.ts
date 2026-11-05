@@ -5,6 +5,7 @@
 import request from 'supertest';
 import app from '../../app';
 import pool from '../../config/db';
+import { lk } from '../../utils/lookupAdminView';
 import {
   NOTE_WITH_REVIEW,
   RUN,
@@ -85,13 +86,30 @@ describe('access', () => {
     }
   });
 
-  it('the sidebar has the entry, with the three sub-pages once inside', async () => {
+  it('the sidebar has the entry, with the queue and health sub-pages once inside (the review link is hidden)', async () => {
     const res = await get('content_editor', '/lookup/jobs');
     expect(res.text).toContain('href="/lookup"');
     expect(res.text).toContain('Tra từ &amp; làm giàu');
-    for (const href of ['/lookup/jobs', '/lookup/review', '/lookup/health']) expect(res.text).toContain(`href="${href}"`);
+    for (const href of ['/lookup/jobs', '/lookup/health']) expect(res.text).toContain(`href="${href}"`);
     const elsewhere = await get('content_editor', '/dashboard');
     expect(elsewhere.text).toContain('href="/lookup"');
+  });
+
+  // Entries publish themselves (ENRICHMENT_PUBLISH_POLICY=auto), so the review page is out of the menus. It stays reachable by URL
+  // (the "opens all three pages" test above) and flipping lk.showReviewNav brings the links back.
+  it('does not link to the review page from the sidebar or the tab bar, on any page but its own', async () => {
+    expect(lk.showReviewNav).toBe(false);
+    for (const url of ['/lookup/jobs', '/lookup/health', '/dashboard']) {
+      const res = await get('super_admin', url);
+      expect([url, res.text.includes('href="/lookup/review"')]).toEqual([url, false]);
+      expect([url, res.text.includes('Duyệt mục từ tự tạo')]).toEqual([url, false]);
+    }
+  });
+
+  it('keeps the tab on the review page itself, so the page is not a dead end', async () => {
+    const res = await get('super_admin', '/lookup/review');
+    expect(res.status).toBe(200);
+    expect(res.text).toContain('class="lk-tab active"');
   });
 
   it('serves the script of the pages', async () => {
