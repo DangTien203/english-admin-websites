@@ -27,7 +27,7 @@ const todayUtcKey = (): { key: string; midnightMs: number } => {
 
 // Three counters and the last finished game with the player's weekly rank, in ONE statement (they were five, the rank one of them
 // only after the last game was known). `played_at` stays a timestamptz column so it reaches the client in the same format as before.
-const SUMMARY_SQL = `
+export const SUMMARY_SQL = `
   WITH last_game AS (
     SELECT game_type, score, created_at AS played_at
       FROM game_runs
@@ -36,7 +36,12 @@ const SUMMARY_SQL = `
      LIMIT 1
   )
   SELECT (SELECT COUNT(*)::int FROM leitner_cards WHERE user_id = $1 AND due_at <= NOW())          AS leitner_due,
-         (SELECT COUNT(*)::int FROM practice_sessions WHERE user_id = $1 AND completed_at IS NULL) AS practice_due,
+         -- Sessions the user can pick up: started, not finished, answered in part, and not older than a week. A session that was
+         -- opened and abandoned (nothing answered) or left for longer is not "due".
+         (SELECT COUNT(*)::int FROM practice_sessions
+           WHERE user_id = $1 AND completed_at IS NULL
+             AND answered_count > 0 AND answered_count < total_count
+             AND started_at > now() - interval '7 days')                                        AS practice_due,
          (SELECT COUNT(*)::int FROM user_notifications WHERE user_id = $1 AND is_read = FALSE)     AS unread_count,
          lg.game_type, lg.score, lg.played_at,
          (SELECT r.rank

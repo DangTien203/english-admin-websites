@@ -179,6 +179,91 @@ router.post(
   })
 );
 
+/** The counters of a session as the answer endpoint reports them. */
+interface SessionCounters {
+  answered_count: number;
+  total_count: number;
+  correct_count: number;
+  wrong_count: number;
+}
+
+/** What an answer was graded as: everything the answer response (first answer or repeat) is built from. */
+interface AnswerOutcome {
+  correct: boolean;
+  grading: PracticeAnswerGradeResult;
+  requiresEnglish: boolean;
+  englishGrading: PracticeAnswerGradeResult | null;
+}
+
+/**
+ * The stored answer to a card of a session ($1 = session, $2 = card) with the counters of the session, read in ONE statement so the
+ * two come from the same snapshot (a repeat is answered with "n/total" that includes this answer, never the count from before it).
+ */
+const STORED_ANSWER_SQL = `
+  SELECT pa.correct, pa.grading_source, pa.verdict, pa.confidence, pa.matched_answer, pa.accepted_answers, pa.grading_details,
+         s.answered_count, s.total_count, s.correct_count, s.wrong_count
+    FROM practice_answers pa
+    JOIN practice_sessions s ON s.id = pa.session_id
+   WHERE pa.session_id = $1 AND pa.card_id = $2`;
+
+/**
+ * The outcome of an answer from the row that was stored for it, in the shape the first response had. Rows written before the grading
+ * columns existed (migration 29) have NULL there: they were client-graded. `confidence` is NUMERIC, which pg returns as text. The
+ * English accepted answers were not stored before this endpoint became idempotent: [] for those.
+ */
+function answerOutcomeFromRow(row: any): AnswerOutcome {
+  const details = row.grading_details ?? {};
+  const toGrade = (g: any, correct: boolean): PracticeAnswerGradeResult => ({
+    correct,
+    verdict: g.verdict ?? (correct ? 'correct' : 'wrong'),
+    confidence: g.confidence == null ? 1 : Number(g.confidence),
+    grading_source: g.grading_source ?? 'client_legacy',
+    matched_answer: g.matched_answer ?? null,
+    accepted_answers: Array.isArray(g.accepted_answers) ? g.accepted_answers : [],
+    reason_vi: g.reason_vi ?? null,
+    details: {},
+  });
+  const english = details.english ?? null;
+  return {
+    correct: row.correct,
+    grading: toGrade({ ...row, reason_vi: details.reason_vi }, row.correct),
+    requiresEnglish: details.requires_english_meaning === true,
+    englishGrading: english ? toGrade(english, english.correct === true) : null,
+  };
+}
+
+/** The body of a successful answer response (a first answer, or a repeat with `already_answered`). */
+function answerResponseBody(counters: SessionCounters, outcome: AnswerOutcome, alreadyAnswered: boolean) {
+  const { grading, englishGrading } = outcome;
+  return {
+    progress: `${counters.answered_count}/${counters.total_count}`,
+    correct_so_far: counters.correct_count,
+    wrong_so_far: counters.wrong_count,
+    grading: {
+      correct: outcome.correct,
+      verdict: grading.verdict,
+      confidence: grading.confidence,
+      grading_source: grading.grading_source,
+      matched_answer: grading.matched_answer,
+      accepted_answers: grading.accepted_answers,
+      reason_vi: grading.reason_vi,
+    },
+    requires_english_meaning: outcome.requiresEnglish,
+    english_grading: englishGrading
+      ? {
+          correct: englishGrading.correct,
+          verdict: englishGrading.verdict,
+          confidence: englishGrading.confidence,
+          grading_source: englishGrading.grading_source,
+          matched_answer: englishGrading.matched_answer,
+          accepted_answers: englishGrading.accepted_answers,
+          reason_vi: englishGrading.reason_vi,
+        }
+      : null,
+    ...(alreadyAnswered ? { already_answered: true } : {}),
+  };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  POST /api/v1/practice/session/answer
 //  body:
@@ -188,6 +273,11 @@ router.post(
 //  Cards already in Leitner box 4/5 (`requires_english_meaning` in session/start)
 //  are only `correct` when BOTH `user_answer` (Vietnamese) and `user_answer_en`
 //  (English meaning) are right.
+//
+//  Idempotent per (session_id, card_id): a session answers a card ONCE. The mobile app re-sends an answer after a timeout or a crash,
+//  and resumes sessions hours later. A repeat is answered with the STORED result plus `already_answered: true`, without grading
+//  again (no model call) and without touching the counters or the card progress. The UNIQUE index of migration 35 is the arbiter
+//  when two copies of the same answer arrive at once.
 // ─────────────────────────────────────────────────────────────────────────────
 router.post(
   '/session/answer',
@@ -214,14 +304,16 @@ router.post(
       );
     }
 
-    // Fetch and validate the session, and find the card: independent reads, asked together. A typed answer needs the card anyway,
-    // with what the grader compares it with, so that one read also tells whether the card exists; a client-graded answer only checks.
-    const [{ rows: sessionRows }, cardToGrade, cardExists] = await Promise.all([
+    // Fetch and validate the session, find the card and look for an answer to it already: independent reads, asked together. A typed
+    // answer needs the card anyway, with what the grader compares it with, so that one read also tells whether the card exists; a
+    // client-graded answer only checks. The stored answer is only used when the session turns out to be the user's and still open.
+    const [{ rows: sessionRows }, { rows: storedRows }, cardToGrade, cardExists] = await Promise.all([
       pool.query(
         `SELECT id, user_id, total_count, answered_count, correct_count, wrong_count, completed_at
          FROM practice_sessions WHERE id = $1`,
         [session_id]
       ),
+      pool.query(STORED_ANSWER_SQL, [session_id, card_id]),
       hasLegacyCorrect
         ? Promise.resolve(null)
         : loadPracticeCardForGrading(card_id, userId).catch((err) => {
@@ -235,6 +327,10 @@ router.post(
     }
     if (sessionRows[0].completed_at !== null) {
       return apiError(res, 400, 'SESSION_ALREADY_COMPLETED', 'Session đã hoàn thành');
+    }
+    // Answered already (a retry, or a resumed session): the stored result, nothing is graded or counted again.
+    if (storedRows.length > 0) {
+      return apiSuccess(res, answerResponseBody(storedRows[0], answerOutcomeFromRow(storedRows[0]), true));
     }
     if (!cardExists || (!hasLegacyCorrect && !cardToGrade)) {
       return apiError(res, 404, 'CARD_NOT_FOUND', 'Card không tồn tại');
@@ -268,24 +364,29 @@ router.post(
     }
 
     // Record the answer, bump the session counters and the card progress in ONE statement: the three used to be three round trips,
-    // one after the other, and could half-apply. The counters come back from the UPDATE.
-    const { rows: updated } = await pool.query(
+    // one after the other, and could half-apply. The INSERT is the claim: ON CONFLICT (session_id, card_id) DO NOTHING, and the
+    // counters and the progress move only when it really inserted a row (they read `ans`, not a snapshot), so two copies of the same
+    // answer sent at once count once. The counters come back from the UPDATE.
+    const { rows: written } = await pool.query(
       `WITH ans AS (
          INSERT INTO practice_answers
            (session_id, card_id, correct, time_ms, user_answer,
             grading_source, verdict, confidence, matched_answer, accepted_answers, grading_details)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+         ON CONFLICT (session_id, card_id) DO NOTHING
+         RETURNING id
        ), upd AS (
          UPDATE practice_sessions
             SET answered_count = answered_count + 1,
                 correct_count  = correct_count  + $13::int,
                 wrong_count    = wrong_count    + (1 - $13::int)
-          WHERE id = $1 AND user_id = $12
+          WHERE id = $1 AND user_id = $12 AND EXISTS (SELECT 1 FROM ans)
       RETURNING answered_count, correct_count, wrong_count, total_count
        ), prog AS (
          -- Track card progress (idempotent — creates row if missing)
          INSERT INTO user_card_progress (user_id, card_id, times_seen, times_correct, first_seen_at)
-         VALUES ($12, $2, 1, $13::int, NOW())
+         SELECT $12::uuid, $2::uuid, 1, $13::int, NOW()
+          WHERE EXISTS (SELECT 1 FROM ans)
          ON CONFLICT (user_id, card_id) DO UPDATE SET
            times_seen    = user_card_progress.times_seen + 1,
            times_correct = user_card_progress.times_correct + $13::int,
@@ -316,6 +417,7 @@ router.post(
                 confidence: englishGrading.confidence,
                 grading_source: englishGrading.grading_source,
                 matched_answer: englishGrading.matched_answer,
+                accepted_answers: englishGrading.accepted_answers,
                 reason_vi: englishGrading.reason_vi,
               }
             : null,
@@ -324,34 +426,21 @@ router.post(
         finalCorrect ? 1 : 0,
       ]
     );
-    const s = updated[0];
 
-    return apiSuccess(res, {
-      progress: `${s.answered_count}/${s.total_count}`,
-      correct_so_far: s.correct_count,
-      wrong_so_far: s.wrong_count,
-      grading: {
-        correct: finalCorrect,
-        verdict: grading.verdict,
-        confidence: grading.confidence,
-        grading_source: grading.grading_source,
-        matched_answer: grading.matched_answer,
-        accepted_answers: grading.accepted_answers,
-        reason_vi: grading.reason_vi,
-      },
-      requires_english_meaning: needsEnglish,
-      english_grading: englishGrading
-        ? {
-            correct: englishGrading.correct,
-            verdict: englishGrading.verdict,
-            confidence: englishGrading.confidence,
-            grading_source: englishGrading.grading_source,
-            matched_answer: englishGrading.matched_answer,
-            accepted_answers: englishGrading.accepted_answers,
-            reason_vi: englishGrading.reason_vi,
-          }
-        : null,
-    });
+    if (written.length === 0) {
+      // Nothing was inserted: another copy of this answer won the INSERT between our read and our write (it is committed by now, or
+      // the INSERT would have waited for it). Answer like any repeat: with the stored result of the winner.
+      const { rows: raced } = await pool.query(STORED_ANSWER_SQL, [session_id, card_id]);
+      if (raced.length === 0) {
+        return apiError(res, 404, 'CARD_NOT_FOUND', 'Card không tồn tại');
+      }
+      return apiSuccess(res, answerResponseBody(raced[0], answerOutcomeFromRow(raced[0]), true));
+    }
+
+    return apiSuccess(
+      res,
+      answerResponseBody(written[0], { correct: finalCorrect, grading, requiresEnglish: needsEnglish, englishGrading }, false)
+    );
   })
 );
 
@@ -373,7 +462,7 @@ router.post(
     // together. (The cards of a session that turns out not to be the user's are simply not used.)
     const [{ rows: sessionRows }, { rows: correctRows }, intervals] = await Promise.all([
       pool.query(
-        `SELECT id, user_id, deck_id, mode, correct_count, wrong_count, total_count,
+        `SELECT id, user_id, deck_id, mode, answered_count, correct_count, wrong_count, total_count,
                 started_at, completed_at
          FROM practice_sessions WHERE id = $1`,
         [session_id]
@@ -398,7 +487,10 @@ router.post(
     const timeTotalMs = Date.now() - new Date(session.started_at).getTime();
     const correctCount: number = session.correct_count;
     const wrongCount: number = session.wrong_count;
-    const xpEarned = correctCount * 10 + 20; // +20 completion bonus
+    // +20 completion bonus, only for a session in which something was answered: a session that is left and "completed" empty earns
+    // nothing and is not an activity (no streak, no activity log).
+    const answeredCount: number = session.answered_count ?? 0;
+    const xpEarned = answeredCount > 0 ? correctCount * 10 + 20 : 0;
 
     const correctCardIds = [...new Set(correctRows.map((r: any) => r.card_id as string))];
     const correctEntryIds = [...new Set(correctRows.map((r: any) => r.entry_id as string))];
@@ -426,16 +518,18 @@ router.post(
          SELECT (SELECT COUNT(*) FROM claim)::int AS claimed, ${PRACTICE_ADVANCE_COUNTS}`,
         [session_id, timeTotalMs, xpEarned, userId, correctEntryIds, intervals, session.mode]
       ),
-      recordActivity(userId, 'practice_session', {
-        mode: session.mode,
-        deck_id: session.deck_id,
-        session_id,
-        correct_count: correctCount,
-        xp_earned: xpEarned,
-      }).then(
-        () => true,
-        () => false
-      ),
+      answeredCount > 0
+        ? recordActivity(userId, 'practice_session', {
+            mode: session.mode,
+            deck_id: session.deck_id,
+            session_id,
+            correct_count: correctCount,
+            xp_earned: xpEarned,
+          }).then(
+            () => true,
+            () => false
+          )
+        : Promise.resolve(false),
     ]);
     if (done.claimed === 0) {
       // Another request completed this session between our read and our claim.

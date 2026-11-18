@@ -630,7 +630,9 @@ All practice endpoints are mounted behind `requireApiAuth`.
   - `user_answer_en?`: string (English meaning/definition; required when the card has `requires_english_meaning: true`)
 - Behavior:
   - Cards in Leitner box 4/5 are `correct` only when BOTH the Vietnamese and the English meaning are right. A missing `user_answer_en` counts as wrong.
-- Returns: progress counters, `grading` (`grading.correct` is the overall result), `requires_english_meaning`, and `english_grading` (null unless the English check applied).
+  - **Idempotent per `(session_id, card_id)`.** A session answers a card once, however long after the session started the answer arrives. Safe to re-send after a timeout or a crash, and when a resumed session replays an answer: the first answer wins. A repeat (same card, even with a different `correct` / `user_answer`) is not graded again (no model call), changes no counter and no card progress, and returns HTTP 200 with the STORED result (`progress`, `correct_so_far`, `wrong_so_far`, `grading`, `requires_english_meaning`, `english_grading`, as the session stands now) plus `already_answered: true`. Several copies sent at once count once; every copy gets 200.
+  - A repeat to a session that was completed in the meantime is `400 SESSION_ALREADY_COMPLETED`, like any answer to a completed session.
+- Returns: progress counters, `grading` (`grading.correct` is the overall result), `requires_english_meaning`, and `english_grading` (null unless the English check applied). `already_answered: true` is present only on a repeat (absent, not `false`, on the first answer): read it as `data['already_answered'] == true`.
 - Errors:
   - `404 SESSION_NOT_FOUND`
   - `400 SESSION_ALREADY_COMPLETED`
@@ -641,6 +643,7 @@ All practice endpoints are mounted behind `requireApiAuth`.
 - Auth: Auth
 - Body: `{ session_id: string }`
 - Behavior: correctly answered words that are not in Leitner go to box 1; words already in a box move up one box (box 5 stays in box 5).
+  - XP: 10 per correct answer + a 20 completion bonus, but the bonus is awarded only when at least one card was answered (`answered_count > 0`). A session completed without any answer returns `xp_earned: 0`, is still marked completed, and is not logged as an activity (no streak update, `streak_updated: false`).
 - Returns: summary, `xp_earned`, `leitner_added` (`{ added, skipped }`), `leitner_advanced`, `leitner_mastered_now`, streak update flag, correct card ids.
 - Errors:
   - `404 SESSION_NOT_FOUND`
@@ -991,7 +994,7 @@ All ebook endpoints are mounted behind `requireApiAuth`.
 - Returns: aggregated mobile home dashboard:
   - user profile summary
   - streak
-  - due review counts
+  - due review counts: `due_review: { total_cards, practice_due_cards, estimated_minutes }`. `practice_due_cards` is the number of practice sessions the user can resume: not completed, `0 < answered_count < total_count`, started within the last 7 days. A session that was opened and left without an answer, one that is fully answered but never completed, one older than 7 days and a completed one are not counted. `total_cards` = Leitner cards due now + `practice_due_cards`.
   - continue decks
   - word of the day
   - recent activity

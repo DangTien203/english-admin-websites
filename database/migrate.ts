@@ -64,6 +64,7 @@ const migrations: MigrationDef[] = [
   { key: '32_leitner_session_box',    name: 'Leitner review sessions can target one box',              file: './migrations/32_leitner_session_box' },
   { key: '33_lookup_foundation',      name: 'Word lookup foundation: ref_* tables, enrichment jobs, usage counters', file: './migrations/33_lookup_foundation' },
   { key: '34_performance_indexes',    name: 'Performance indexes: dictionary trigram search, cards.entry_id, leaderboard, pending counts', file: './migrations/34_performance_indexes' },
+  { key: '35_practice_answer_idempotency', name: 'practice_answers unique (session_id, card_id): one answer per card per session', file: './migrations/35_practice_answer_idempotency' },
 ];
 
 /**
