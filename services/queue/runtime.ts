@@ -6,6 +6,7 @@ import { loadTopicIds } from '../enrichment/topics';
 import { getBoss, stopBoss, type BossRole } from './boss';
 import { SHUTDOWN_GRACE_MS } from './constants';
 import { EnrichmentWorker, registerEnrichmentWorkers } from './enrichmentWorker';
+import { registerPracticeExpirySchedule } from './practiceExpirySchedule';
 import { registerReconcileSchedule } from './reconcileSchedule';
 import { errMessage, logEvent } from './log';
 
@@ -54,6 +55,8 @@ export async function startEnrichmentRuntime(mode: 'api' | 'worker'): Promise<En
     await registerEnrichmentWorkers(boss, worker, { concurrency: lookupConfig.queue.workerConcurrency });
     // Every 10 minutes: rows stuck in queued / running with no pg-boss job behind them become failed / stale.
     await registerReconcileSchedule(boss, { pool: pool as any });
+    // Every hour: practice sessions nobody came back to for 7 days are abandoned (their correct answers still reach Leitner).
+    await registerPracticeExpirySchedule(boss);
   }
   logEvent('info', 'enrichment_runtime_started', {
     mode,

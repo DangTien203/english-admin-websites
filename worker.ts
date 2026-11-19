@@ -9,6 +9,9 @@ import { installShutdownHandlers } from './services/queue/shutdown';
 /**
  * Dedicated enrichment worker process (`npm run worker`; production: `node dist/worker.js`).
  * Same code as the worker that can run inside the API process (services/queue/runtime.ts).
+ * Besides the enrichment jobs it runs two cron passes (pg-boss schedule): the 10-minute reconcile of stale enrichment rows and the
+ * hourly expiry of practice sessions nobody came back to (services/queue/practiceExpirySchedule.ts). Both live and die with the
+ * worker: ENRICHMENT_WORKER_ENABLED=false switches them off too.
  *
  * SIGTERM / SIGINT: stop fetching jobs, give running ones up to 30 s, put what is still running back to
  * `queued`, close the pools, exit.
@@ -33,7 +36,7 @@ async function main(): Promise<void> {
   ]);
 
   console.log(
-    `Enrichment worker running (schema "${lookupConfig.queue.schema}", concurrency ${lookupConfig.queue.workerConcurrency}). Ctrl+C / SIGTERM to stop.`
+    `Enrichment worker running (schema "${lookupConfig.queue.schema}", concurrency ${lookupConfig.queue.workerConcurrency}); also runs the 10-minute reconcile pass and the hourly practice-session expiry. Ctrl+C / SIGTERM to stop.`
   );
 }
 

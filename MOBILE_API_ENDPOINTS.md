@@ -610,11 +610,17 @@ All practice endpoints are mounted behind `requireApiAuth`.
   - `mode`: `flashcard | swift_choice | cloze_craft | pair_link`
   - `limit?`: integer 1-100
   - `card_ids?`: uuid array, min 1, max 200
+  - `options?`: object, what the client chose for this session; stored with it and returned again when the session is resumed. Absent = `{}`.
+    - `cloze_level?`: `1 | 2 | 3`, only for `mode: "cloze_craft"`
+    - `direction?`: `"english" | "vietnamese"`, only for `mode: "flashcard"`
+    - Any other key, a wrong type or value, or an option that does not belong to the mode is `400 VALIDATION_ERROR` (`details` points at `options.<key>`) and no session is created.
 - Behavior:
   - If `card_ids` is present, manual selection wins and `limit` is ignored.
   - Random selection picks words NOT yet in the user's Leitner boxes first (random). Only if the deck has fewer unlearned words than `limit` is the remainder filled with random words already in Leitner (boxes 1-5, mastered included). The returned list is shuffled.
-- Returns: `{ session_id, mode, cards, total_count }`; each card also has `leitner_box_number` (null = new word), `is_new_word`, and `requires_english_meaning` (true for box 4/5).
+  - The ORDER of `cards` is stored with the session (it is random, so it cannot be rebuilt): `GET /session/active` and `GET /session/:id` return the cards in this order. The session starts `status: "open"` with `last_activity_at` = now.
+- Returns: `{ session_id, mode, options, cards, total_count }` (`options` echoes what was stored, `{}` when none); each card also has `leitner_box_number` (null = new word), `is_new_word`, and `requires_english_meaning` (true for box 4/5).
 - Errors:
+  - `400 VALIDATION_ERROR`
   - `404 DECK_NOT_FOUND`
   - `400 INVALID_CARDS`
 
@@ -631,7 +637,7 @@ All practice endpoints are mounted behind `requireApiAuth`.
 - Behavior:
   - Cards in Leitner box 4/5 are `correct` only when BOTH the Vietnamese and the English meaning are right. A missing `user_answer_en` counts as wrong.
   - **Idempotent per `(session_id, card_id)`.** A session answers a card once, however long after the session started the answer arrives. Safe to re-send after a timeout or a crash, and when a resumed session replays an answer: the first answer wins. A repeat (same card, even with a different `correct` / `user_answer`) is not graded again (no model call), changes no counter and no card progress, and returns HTTP 200 with the STORED result (`progress`, `correct_so_far`, `wrong_so_far`, `grading`, `requires_english_meaning`, `english_grading`, as the session stands now) plus `already_answered: true`. Several copies sent at once count once; every copy gets 200.
-  - A repeat to a session that was completed in the meantime is `400 SESSION_ALREADY_COMPLETED`, like any answer to a completed session.
+  - Every accepted answer (not a repeat) sets the session's `last_activity_at` to now. A session that is no longer open (completed, abandoned or expired) takes no answer, not even a repeat of one it has: `400 SESSION_ALREADY_COMPLETED`.
 - Returns: progress counters, `grading` (`grading.correct` is the overall result), `requires_english_meaning`, and `english_grading` (null unless the English check applied). `already_answered: true` is present only on a repeat (absent, not `false`, on the first answer): read it as `data['already_answered'] == true`.
 - Errors:
   - `404 SESSION_NOT_FOUND`
@@ -642,12 +648,51 @@ All practice endpoints are mounted behind `requireApiAuth`.
 
 - Auth: Auth
 - Body: `{ session_id: string }`
-- Behavior: correctly answered words that are not in Leitner go to box 1; words already in a box move up one box (box 5 stays in box 5).
+- Behavior: correctly answered words that are not in Leitner go to box 1; words already in a box move up one box (box 5 stays in box 5). The session becomes `status: "completed"` (`completed_at` set).
   - XP: 10 per correct answer + a 20 completion bonus, but the bonus is awarded only when at least one card was answered (`answered_count > 0`). A session completed without any answer returns `xp_earned: 0`, is still marked completed, and is not logged as an activity (no streak update, `streak_updated: false`).
+  - The session is claimed atomically together with the Leitner update: complete, abandon and the expiry job racing each other apply the cards once; the others get `400 SESSION_ALREADY_COMPLETED`.
 - Returns: summary, `xp_earned`, `leitner_added` (`{ added, skipped }`), `leitner_advanced`, `leitner_mastered_now`, streak update flag, correct card ids.
 - Errors:
   - `404 SESSION_NOT_FOUND`
-  - `400 SESSION_ALREADY_COMPLETED`
+  - `400 SESSION_ALREADY_COMPLETED` (completed, abandoned or expired already)
+
+### `POST /api/v1/practice/session/abandon`
+
+"Bắt đầu mới": gives an open session up WITHOUT the completion bonus.
+
+- Auth: Auth
+- Body: `{ session_id: uuid }` (missing or not a UUID: `400 VALIDATION_ERROR`)
+- Behavior: the same atomic claim and the same Leitner application as `/session/complete` (the correct answers still count, once): correctly answered words not in Leitner go to box 1, words already in a box move up one box. Then `status: "abandoned"`, `abandoned_at` = now (`completed_at` stays null). No XP (`xp_earned: 0`), no activity log, no streak update.
+  - A session with no answers is simply closed: `200` with zeros, nothing applied.
+  - Closed sessions are not offered by `/session/active`, take no more answers and cannot be completed.
+- Returns: the shape of `/session/complete`: `{ summary, xp_earned: 0, leitner_added, leitner_advanced, leitner_mastered_now, streak_updated: false, correct_card_ids }`.
+- Errors:
+  - `404 SESSION_NOT_FOUND` (also another user's session)
+  - `400 SESSION_ALREADY_COMPLETED` (already completed, abandoned or expired)
+
+### `GET /api/v1/practice/session/active`
+
+Resume an unfinished session from the server (new device, reinstall, cleared storage). The app calls it when there is no local snapshot.
+
+- Auth: Auth
+- Returns: `{ "session": null }` or `{ "session": <payload> }` (see below): the user's most recently active (`last_activity_at`) resumable session. Resumable = `status` open, `last_activity_at` within the last 7 days, `answered_count > 0` and at least one card of its queue still unanswered. A session that was started before this feature has no stored queue and is never offered.
+- The same sessions count as "due" in `GET /home/dashboard` → `due_review.practice_due_cards` (open, partly answered, active within 7 days).
+
+### `GET /api/v1/practice/session/:id`
+
+- Auth: Auth
+- Returns: `<payload>` (not wrapped) of one of the user's sessions, whatever its status (completed and abandoned ones too).
+- Errors: `404 SESSION_NOT_FOUND` for another user's session, a session that does not exist and an id that is not a UUID.
+- Payload, the same for both endpoints (snake_case):
+  - `session_id`, `deck_id`, `deck_title`, `mode`
+  - `options`: as sent to `/session/start` (`{}` when none)
+  - `status`: `open | completed | abandoned`
+  - `total_count`, `answered_count`, `correct_count`, `wrong_count`
+  - `started_at`, `last_activity_at`, `completed_at` (null unless completed): ISO timestamps
+  - `cards`: ALL the cards of the session, in the order `/session/start` returned them, as the card objects of `/session/start` (`times_seen`, `times_correct`, `leitner_box_number`, `is_new_word`, `requires_english_meaning` are read now, so an already answered card shows its updated progress)
+  - `answers`: `[{ card_id, correct, time_ms, user_answer }]` in the order they were given (`time_ms` / `user_answer` null when not sent)
+  - `next_card_id`: the first card in `cards` order without an answer, or `null` when every card is answered (or the session has no stored queue)
+- Expiry: a worker job (hourly) abandons open sessions whose `last_activity_at` is older than 7 days, through the same path as `/session/abandon`, so their correct answers still reach Leitner (once). It runs in the process started by `npm run worker` (`ENRICHMENT_WORKER_ENABLED=true`). Sessions that were open before this feature and older than 7 days at deploy time were marked abandoned by the migration WITHOUT touching Leitner (they were never completed, so their answers never reached it).
 
 ### `POST /api/v1/practice/questions`
 

@@ -16,12 +16,14 @@ jest.mock('../../services/queue/enrichmentWorker', () => ({
   registerEnrichmentWorkers: jest.fn(),
 }));
 jest.mock('../../services/queue/reconcileSchedule', () => ({ registerReconcileSchedule: jest.fn() }));
+jest.mock('../../services/queue/practiceExpirySchedule', () => ({ registerPracticeExpirySchedule: jest.fn() }));
 jest.mock('../../services/enrichment/topics', () => ({ loadTopicIds: jest.fn() }));
 jest.mock('../../services/enrichment/pipeline', () => ({ runEnrichment: jest.fn() }));
 
 import { loadTopicIds } from '../../services/enrichment/topics';
 import { getBoss } from '../../services/queue/boss';
 import { registerEnrichmentWorkers } from '../../services/queue/enrichmentWorker';
+import { registerPracticeExpirySchedule } from '../../services/queue/practiceExpirySchedule';
 import { registerReconcileSchedule } from '../../services/queue/reconcileSchedule';
 import { startEnrichmentRuntime } from '../../services/queue/runtime';
 
@@ -29,6 +31,7 @@ const topics = loadTopicIds as jest.Mock;
 const boss = getBoss as jest.Mock;
 const register = registerEnrichmentWorkers as jest.Mock;
 const reconcile = registerReconcileSchedule as jest.Mock;
+const practiceExpiry = registerPracticeExpirySchedule as jest.Mock;
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -56,12 +59,19 @@ describe('startEnrichmentRuntime', () => {
     expect(reconcile.mock.calls[0][1]).toHaveProperty('pool');
   });
 
+  it('a worker also schedules the hourly practice-session expiry (once per start)', async () => {
+    await startEnrichmentRuntime('worker');
+    expect(practiceExpiry).toHaveBeenCalledTimes(1);
+    expect(practiceExpiry.mock.calls[0][0]).toBe(await boss.mock.results[0].value);
+  });
+
   it('topics NOT seeded: fails loudly, starts neither pg-boss nor a worker, so the jobs stay queued', async () => {
     topics.mockRejectedValue(new EnrichmentConfigError('topics_not_seeded', 'topics_not_seeded: 30 of 30 topic tags are missing'));
     await expect(startEnrichmentRuntime('worker')).rejects.toBeInstanceOf(EnrichmentConfigError);
     expect(boss).not.toHaveBeenCalled();
     expect(register).not.toHaveBeenCalled();
     expect(reconcile).not.toHaveBeenCalled();
+    expect(practiceExpiry).not.toHaveBeenCalled();
     const logged = (console.error as jest.Mock).mock.calls.map((c) => JSON.parse(c[0]));
     expect(logged).toContainEqual(expect.objectContaining({ evt: 'topics_not_seeded', code: 'topics_not_seeded' }));
   });
@@ -82,6 +92,7 @@ describe('startEnrichmentRuntime', () => {
     expect(topics).not.toHaveBeenCalled();
     expect(boss).toHaveBeenCalledWith('sender');
     expect(reconcile).not.toHaveBeenCalled(); // only a worker runs the cron pass
+    expect(practiceExpiry).not.toHaveBeenCalled();
   });
 
   it('nothing happens when the queue is switched off', async () => {

@@ -36,12 +36,13 @@ export const SUMMARY_SQL = `
      LIMIT 1
   )
   SELECT (SELECT COUNT(*)::int FROM leitner_cards WHERE user_id = $1 AND due_at <= NOW())          AS leitner_due,
-         -- Sessions the user can pick up: started, not finished, answered in part, and not older than a week. A session that was
-         -- opened and abandoned (nothing answered) or left for longer is not "due".
+         -- Sessions the user can pick up (what GET /practice/session/active offers): still open, answered in part, and touched within
+         -- the last week. A session that was opened and left without an answer, one that was abandoned or expired, and one left
+         -- for longer is not "due".
          (SELECT COUNT(*)::int FROM practice_sessions
-           WHERE user_id = $1 AND completed_at IS NULL
+           WHERE user_id = $1 AND status = 'open' AND completed_at IS NULL
              AND answered_count > 0 AND answered_count < total_count
-             AND started_at > now() - interval '7 days')                                        AS practice_due,
+             AND last_activity_at > now() - interval '7 days')                                  AS practice_due,
          (SELECT COUNT(*)::int FROM user_notifications WHERE user_id = $1 AND is_read = FALSE)     AS unread_count,
          lg.game_type, lg.score, lg.played_at,
          (SELECT r.rank

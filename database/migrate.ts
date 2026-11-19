@@ -65,6 +65,7 @@ const migrations: MigrationDef[] = [
   { key: '33_lookup_foundation',      name: 'Word lookup foundation: ref_* tables, enrichment jobs, usage counters', file: './migrations/33_lookup_foundation' },
   { key: '34_performance_indexes',    name: 'Performance indexes: dictionary trigram search, cards.entry_id, leaderboard, pending counts', file: './migrations/34_performance_indexes' },
   { key: '35_practice_answer_idempotency', name: 'practice_answers unique (session_id, card_id): one answer per card per session', file: './migrations/35_practice_answer_idempotency' },
+  { key: '36_practice_session_resume', name: 'Practice sessions resumable from the server: options, last_activity_at, status, stored card queue', file: './migrations/36_practice_session_resume' },
 ];
 
 /**

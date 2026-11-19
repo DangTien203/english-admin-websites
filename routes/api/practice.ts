@@ -4,8 +4,6 @@ import pool from '../../config/db';
 import { ApiRequest } from '../../middlewares/apiAuth';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { apiSuccess, apiError } from '../../utils/apiResponse';
-import { PRACTICE_ADVANCE_COUNTS, getIntervals, practiceAdvanceCtes } from '../../utils/leitnerManager';
-import { recordActivity } from '../../utils/streakCalculator';
 import { parsePagination } from '../../utils/pagination';
 import { validateBody } from '../../middlewares/validateBody';
 import { buildPracticeQuestions } from '../../services/practiceQuestionService';
@@ -20,9 +18,15 @@ import {
 import {
   gradeLoadedPracticeCard,
   loadPracticeCardForGrading,
-  requiresEnglishMeaning,
   PracticeAnswerGradeResult,
 } from '../../services/answerGradingService';
+import {
+  SESSION_CARD_SELECT,
+  closePracticeSession,
+  getActivePracticeSession,
+  getPracticeSession,
+  toSessionCard,
+} from '../../services/practiceSessionService';
 
 const router = Router();
 
@@ -54,36 +58,40 @@ const DECK_ACCESS = `(d.user_id = $2 OR (d.deck_type IN ('premade','system_gener
 //    2. Manual:  body has `card_ids`            → exact ids (must all belong to deck)
 //  If both provided, `card_ids` wins and `limit` is ignored.
 // ─────────────────────────────────────────────────────────────────────────────
-const sessionStartSchema = z.object({
-  deck_id: z.string().uuid({ message: 'deck_id phải là UUID hợp lệ' }),
-  mode: z.enum(VALID_MODES, {
-    message: `mode phải là một trong: ${VALID_MODES.join(', ')}`,
-  }),
-  limit: z.number().int().min(1).max(100).optional(),
-  card_ids: z
-    .array(z.string().uuid())
-    .min(1, { message: 'card_ids phải có ít nhất 1 phần tử' })
-    .max(200, { message: 'card_ids tối đa 200 phần tử' })
-    .optional(),
-});
+//
+//  Optional `options` (what the client chose; stored with the session, echoed back, returned again when the session is resumed):
+//    cloze_level  1 | 2 | 3             only for mode = cloze_craft
+//    direction    'english'|'vietnamese' only for mode = flashcard
+//  The ordered cards are stored too (practice_session_cards): the order is random, and a resumed session must show the same one.
+const sessionOptionsSchema = z
+  .object({
+    cloze_level: z.union([z.literal(1), z.literal(2), z.literal(3)]).optional(),
+    direction: z.enum(['english', 'vietnamese']).optional(),
+  })
+  .strict();
 
-// What a session card needs: the card, its entry, the user's progress on the card and the Leitner box of the word.
-const SESSION_CARD_SELECT = `
-  SELECT
-    c.id            AS card_id,
-    c.entry_id,
-    c.note_html,
-    de.headword,
-    de.ipa_us,
-    de.audio_us_url,
-    ${VI_COALESCE} AS meaning_vi,
-    ucp.times_seen,
-    ucp.times_correct,
-    lc.box_number   AS leitner_box_number
-  FROM cards c
-  JOIN dictionary_entries de ON de.id = c.entry_id
-  LEFT JOIN user_card_progress ucp ON ucp.card_id = c.id AND ucp.user_id = $2
-  LEFT JOIN leitner_cards lc ON lc.entry_id = c.entry_id AND lc.user_id = $2`;
+const sessionStartSchema = z
+  .object({
+    deck_id: z.string().uuid({ message: 'deck_id phải là UUID hợp lệ' }),
+    mode: z.enum(VALID_MODES, {
+      message: `mode phải là một trong: ${VALID_MODES.join(', ')}`,
+    }),
+    limit: z.number().int().min(1).max(100).optional(),
+    card_ids: z
+      .array(z.string().uuid())
+      .min(1, { message: 'card_ids phải có ít nhất 1 phần tử' })
+      .max(200, { message: 'card_ids tối đa 200 phần tử' })
+      .optional(),
+    options: sessionOptionsSchema.optional(),
+  })
+  .superRefine((body, ctx) => {
+    if (body.options?.cloze_level !== undefined && body.mode !== 'cloze_craft') {
+      ctx.addIssue({ code: 'custom', path: ['options', 'cloze_level'], message: 'cloze_level chỉ dùng cho mode cloze_craft' });
+    }
+    if (body.options?.direction !== undefined && body.mode !== 'flashcard') {
+      ctx.addIssue({ code: 'custom', path: ['options', 'direction'], message: 'direction chỉ dùng cho mode flashcard' });
+    }
+  });
 
 router.post(
   '/session/start',
@@ -101,6 +109,7 @@ router.post(
       );
     }
     const { deck_id, mode, limit, card_ids } = parsed.data;
+    const options = parsed.data.options ?? {};
 
     // ── Card selection ────────────────────────────────────────────────────────
     // Manual selection wins over random when both provided. Dedupe silently (per spec — duplicates are not an error).
@@ -147,33 +156,28 @@ router.post(
       cards = shuffleArray(cards);
     }
 
-    // Create DB session
+    // Create the session AND store the ordered queue (position 0 = first card shown) in ONE statement. last_activity_at and status
+    // take their defaults (now, 'open').
     const { rows: sessionRows } = await pool.query(
-      `INSERT INTO practice_sessions (user_id, deck_id, mode, total_count)
-       VALUES ($1, $2, $3, $4)
-       RETURNING id`,
-      [userId, deck_id, mode, cards.length]
+      `WITH s AS (
+         INSERT INTO practice_sessions (user_id, deck_id, mode, total_count, options)
+         VALUES ($1, $2, $3, $4, $5::jsonb)
+         RETURNING id
+       ), q AS (
+         INSERT INTO practice_session_cards (session_id, position, card_id)
+         SELECT s.id, t.pos - 1, t.card_id
+           FROM s, unnest($6::uuid[]) WITH ORDINALITY AS t(card_id, pos)
+       )
+       SELECT id FROM s`,
+      [userId, deck_id, mode, cards.length, JSON.stringify(options), cards.map((c) => c.card_id)]
     );
     const session_id: string = sessionRows[0].id;
 
     return apiSuccess(res, {
       session_id,
       mode,
-      cards: cards.map((c) => ({
-        card_id: c.card_id,
-        entry_id: c.entry_id,
-        note_html: c.note_html,
-        headword: c.headword,
-        ipa_us: c.ipa_us || null,
-        audio_us_url: c.audio_us_url || null,
-        meaning_vi: c.meaning_vi || null,
-        times_seen: c.times_seen ?? 0,
-        times_correct: c.times_correct ?? 0,
-        leitner_box_number: c.leitner_box_number ?? null,
-        is_new_word: c.leitner_box_number == null,
-        // Box 4/5 cards must be answered in BOTH Vietnamese and English (`user_answer_en`).
-        requires_english_meaning: requiresEnglishMeaning(c.leitner_box_number),
-      })),
+      options,
+      cards: cards.map(toSessionCard),
       total_count: cards.length,
     });
   })
@@ -309,7 +313,7 @@ router.post(
     // client-graded answer only checks. The stored answer is only used when the session turns out to be the user's and still open.
     const [{ rows: sessionRows }, { rows: storedRows }, cardToGrade, cardExists] = await Promise.all([
       pool.query(
-        `SELECT id, user_id, total_count, answered_count, correct_count, wrong_count, completed_at
+        `SELECT id, user_id, status, total_count, answered_count, correct_count, wrong_count, completed_at
          FROM practice_sessions WHERE id = $1`,
         [session_id]
       ),
@@ -325,7 +329,7 @@ router.post(
     if (sessionRows.length === 0 || sessionRows[0].user_id !== userId) {
       return apiError(res, 404, 'SESSION_NOT_FOUND', 'Session không tồn tại');
     }
-    if (sessionRows[0].completed_at !== null) {
+    if (sessionRows[0].status !== 'open' || sessionRows[0].completed_at !== null) {
       return apiError(res, 400, 'SESSION_ALREADY_COMPLETED', 'Session đã hoàn thành');
     }
     // Answered already (a retry, or a resumed session): the stored result, nothing is graded or counted again.
@@ -377,9 +381,10 @@ router.post(
          RETURNING id
        ), upd AS (
          UPDATE practice_sessions
-            SET answered_count = answered_count + 1,
-                correct_count  = correct_count  + $13::int,
-                wrong_count    = wrong_count    + (1 - $13::int)
+            SET answered_count   = answered_count + 1,
+                correct_count    = correct_count  + $13::int,
+                wrong_count      = wrong_count    + (1 - $13::int),
+                last_activity_at = NOW()
           WHERE id = $1 AND user_id = $12 AND EXISTS (SELECT 1 FROM ans)
       RETURNING answered_count, correct_count, wrong_count, total_count
        ), prog AS (
@@ -447,114 +452,81 @@ router.post(
 // ─────────────────────────────────────────────────────────────────────────────
 //  POST /api/v1/practice/session/complete
 //  body: { session_id }
+//
+//  Marks the session completed (status 'completed') and applies its correct answers to Leitner, in ONE statement with the claim
+//  (closePracticeSession). XP: 10 per correct answer + 20 completion bonus, the bonus only when something was answered.
 // ─────────────────────────────────────────────────────────────────────────────
 router.post(
   '/session/complete',
   asyncHandler(async (req: ApiRequest, res: Response) => {
-    const userId = req.user!.id;
     const { session_id } = req.body as { session_id: string };
 
     if (!session_id) {
       return apiError(res, 400, 'VALIDATION_ERROR', 'session_id là bắt buộc');
     }
 
-    // The session, the distinct correctly-answered cards of it (both keyed by the session id) and the box intervals are read
-    // together. (The cards of a session that turns out not to be the user's are simply not used.)
-    const [{ rows: sessionRows }, { rows: correctRows }, intervals] = await Promise.all([
-      pool.query(
-        `SELECT id, user_id, deck_id, mode, answered_count, correct_count, wrong_count, total_count,
-                started_at, completed_at
-         FROM practice_sessions WHERE id = $1`,
-        [session_id]
-      ),
-      pool.query(
-        `SELECT DISTINCT pa.card_id, c.entry_id
-         FROM practice_answers pa
-         JOIN cards c ON c.id = pa.card_id
-         WHERE pa.session_id = $1 AND pa.correct = true`,
-        [session_id]
-      ),
-      getIntervals(),
-    ]);
-    if (sessionRows.length === 0 || sessionRows[0].user_id !== userId) {
+    const out = await closePracticeSession({ sessionId: session_id, userId: req.user!.id, kind: 'complete' });
+    if (out.outcome === 'not_found') return apiError(res, 404, 'SESSION_NOT_FOUND', 'Session không tồn tại');
+    if (out.outcome === 'already_closed') return apiError(res, 400, 'SESSION_ALREADY_COMPLETED', 'Session đã hoàn thành');
+    return apiSuccess(res, out.body);
+  })
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  POST /api/v1/practice/session/abandon
+//  body: { session_id }
+//
+//  "Start a new one": closes an open session WITHOUT the completion bonus. The same claim and the same Leitner application as
+//  /complete (closePracticeSession): the correct answers still count, once. status 'abandoned', abandoned_at = now(); no activity is
+//  logged and the streak is untouched. A session with no answers is simply closed (200, nothing applied). A session that is already
+//  closed (completed, abandoned, expired) is 400 SESSION_ALREADY_COMPLETED. Response: the shape of /complete, with xp_earned 0.
+// ─────────────────────────────────────────────────────────────────────────────
+const sessionIdBodySchema = z.object({
+  session_id: z.string().uuid({ message: 'session_id phải là UUID hợp lệ' }),
+});
+
+router.post(
+  '/session/abandon',
+  validateBody(sessionIdBodySchema),
+  asyncHandler(async (req: ApiRequest, res: Response) => {
+    const { session_id } = req.body as z.infer<typeof sessionIdBodySchema>;
+    const out = await closePracticeSession({ sessionId: session_id, userId: req.user!.id, kind: 'abandon' });
+    if (out.outcome === 'not_found') return apiError(res, 404, 'SESSION_NOT_FOUND', 'Session không tồn tại');
+    if (out.outcome === 'already_closed') return apiError(res, 400, 'SESSION_ALREADY_COMPLETED', 'Session đã hoàn thành');
+    return apiSuccess(res, out.body);
+  })
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  GET /api/v1/practice/session/active
+//  { session: null } or { session: <payload> }: the user's most recently active RESUMABLE session — open, touched within the last
+//  7 days, something answered, at least one card of its queue unanswered. (Declared before /session/:id.)
+//
+//  GET /api/v1/practice/session/:id
+//  The payload of one of the user's sessions, any status (completed ones too). Somebody else's session, one that does not exist and
+//  an id that is not a UUID are all 404 SESSION_NOT_FOUND.
+//
+//  Payload: { session_id, deck_id, deck_title, mode, options, status, total_count, answered_count, correct_count, wrong_count,
+//             started_at, last_activity_at, completed_at, cards (as in /session/start, in the stored order),
+//             answers: [{ card_id, correct, time_ms, user_answer }], next_card_id }
+// ─────────────────────────────────────────────────────────────────────────────
+router.get(
+  '/session/active',
+  asyncHandler(async (req: ApiRequest, res: Response) => {
+    return apiSuccess(res, { session: await getActivePracticeSession(req.user!.id) });
+  })
+);
+
+router.get(
+  '/session/:id',
+  asyncHandler(async (req: ApiRequest, res: Response) => {
+    const id = z.string().uuid().safeParse(req.params.id);
+    if (!id.success) {
       return apiError(res, 404, 'SESSION_NOT_FOUND', 'Session không tồn tại');
     }
-    if (sessionRows[0].completed_at !== null) {
-      return apiError(res, 400, 'SESSION_ALREADY_COMPLETED', 'Session đã hoàn thành');
-    }
-
-    const session = sessionRows[0];
-    const timeTotalMs = Date.now() - new Date(session.started_at).getTime();
-    const correctCount: number = session.correct_count;
-    const wrongCount: number = session.wrong_count;
-    // +20 completion bonus, only for a session in which something was answered: a session that is left and "completed" empty earns
-    // nothing and is not an activity (no streak, no activity log).
-    const answeredCount: number = session.answered_count ?? 0;
-    const xpEarned = answeredCount > 0 ? correctCount * 10 + 20 : 0;
-
-    const correctCardIds = [...new Set(correctRows.map((r: any) => r.card_id as string))];
-    const correctEntryIds = [...new Set(correctRows.map((r: any) => r.entry_id as string))];
-
-    // Marking the session complete and applying its correct answers to Leitner are ONE statement: the claim comes first and only
-    // the request that wins it moves the cards (new words → Leitner box 1, words already in a box → next box; `correct` already
-    // means "Vietnamese AND English right" for box 4/5 cards). Two completions at once, or a client that retries a slow one, used to
-    // read the session as open, both advance the cards, and push every word up two boxes. Atomic: a failure leaves the session open.
-    // Beside it (they do not depend on each other) the activity is logged and the streak updated; non-critical streak work must
-    // not fail the request.
-    const [{ rows: [done] }, streakUpdated] = await Promise.all([
-      pool.query(
-        `WITH claim AS (
-           UPDATE practice_sessions
-              SET completed_at = NOW(), time_total_ms = $2, xp_earned = $3
-            WHERE id = $1 AND user_id = $4 AND completed_at IS NULL
-        RETURNING id
-         ), ${practiceAdvanceCtes({
-           user: '$4::uuid',
-           entryIds: '$5::uuid[]',
-           intervals: '$6::float8[]',
-           mode: '$7::text',
-           gate: 'EXISTS (SELECT 1 FROM claim)',
-         })}
-         SELECT (SELECT COUNT(*) FROM claim)::int AS claimed, ${PRACTICE_ADVANCE_COUNTS}`,
-        [session_id, timeTotalMs, xpEarned, userId, correctEntryIds, intervals, session.mode]
-      ),
-      answeredCount > 0
-        ? recordActivity(userId, 'practice_session', {
-            mode: session.mode,
-            deck_id: session.deck_id,
-            session_id,
-            correct_count: correctCount,
-            xp_earned: xpEarned,
-          }).then(
-            () => true,
-            () => false
-          )
-        : Promise.resolve(false),
-    ]);
-    if (done.claimed === 0) {
-      // Another request completed this session between our read and our claim.
-      return apiError(res, 400, 'SESSION_ALREADY_COMPLETED', 'Session đã hoàn thành');
-    }
-    const leitnerResult = { added: done.added, skipped: correctEntryIds.length - done.added, advanced: done.advanced, mastered_now: done.mastered_now };
-
-    const accuracy = (correctCount + wrongCount) > 0
-      ? Math.round((correctCount / (correctCount + wrongCount)) * 100) / 100
-      : 0;
-
-    return apiSuccess(res, {
-      summary: {
-        correct_count: correctCount,
-        wrong_count: wrongCount,
-        accuracy,
-        time_total_ms: timeTotalMs,
-      },
-      xp_earned: xpEarned,
-      leitner_added: { added: leitnerResult.added, skipped: leitnerResult.skipped },
-      leitner_advanced: leitnerResult.advanced,
-      leitner_mastered_now: leitnerResult.mastered_now,
-      streak_updated: streakUpdated,
-      correct_card_ids: correctCardIds,
-    });
+    const session = await getPracticeSession(req.user!.id, id.data);
+    if (!session) return apiError(res, 404, 'SESSION_NOT_FOUND', 'Session không tồn tại');
+    return apiSuccess(res, session);
   })
 );
 

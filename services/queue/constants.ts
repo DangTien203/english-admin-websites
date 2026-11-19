@@ -7,6 +7,8 @@ export const ENRICH_QUEUE = 'dictionary.enrich_word';
 export const ENRICH_DLQ = 'dictionary.enrich_word.dlq';
 /** Cron-driven housekeeping queue: one job every 10 minutes runs reconcileStaleJobs() (services/queue/reconcileSchedule.ts). */
 export const RECONCILE_QUEUE = 'dictionary.enrich_word.reconcile';
+/** Cron-driven: one job every hour abandons the practice sessions nobody came back to (services/queue/practiceExpirySchedule.ts). */
+export const PRACTICE_EXPIRY_QUEUE = 'practice.expire_sessions';
 
 /** api_usage_counters key of the daily job cap (spec §11.7). */
 export const ENRICHMENT_USAGE_PROVIDER = 'enrichment';
